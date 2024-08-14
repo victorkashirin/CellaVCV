@@ -1,0 +1,10 @@
+/build
+/dist
+/*.so
+/*.dylib
+/*.dll
+.DS_Store
+/*.ipynb
+history
+/.vscode
+/design
