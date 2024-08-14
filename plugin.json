@@ -16,7 +16,7 @@
     {
       "slug": "Euler",
       "name": "Euler",
-      "description": "Differentiator / Slope Calculator",
+      "description": "Calculates slope of the incoming signal",
       "tags": [
         "Utility"
       ]
@@ -24,7 +24,7 @@
     {
       "slug": "Bezier",
       "name": "Bezier",
-      "description": "Bezier Random Value Generator",
+      "description": "Smooth random voltage generator using Bezier curves",
       "tags": [
         "Utility",
         "LFO",
