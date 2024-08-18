@@ -37,7 +37,9 @@ struct Euler : Module {
         double voltage = inputs[SIGNAL_INPUT].getVoltage();
         double pitch = params[FREQ_PARAM].getValue();
         double freq = std::pow(2.f, pitch);
-        int window = (int)clamp(2 / freq, 1, 1024);
+
+        // sampling window affects precision on low frequencies
+        int window = (int)clamp(2.f / freq, 1, 1024);
 
         if (step % window == 0) {
             double diff = voltage - previousVoltage;
