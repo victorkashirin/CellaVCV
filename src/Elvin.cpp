@@ -27,13 +27,29 @@ struct ElvinModule : Module {
         NUM_LIGHTS
     };
 
-    float envelope = 0.0f;
-    float accent = 0.0f;
+    float envelope = 0.f;
+    float accent = 0.f;
+    float accentScale = 0.f;
     float maxEnvelope = 1.0f;
     bool isAttacking = false;
     bool isDecaying = false;
+    float output = 0.f;
+    float pureOutput = 0.f;
+
+    float exponent = 2.f;
 
     dsp::SchmittTrigger trigger;
+
+    float binarySearch(float output, float shape, float exponent, float a, float b, float epsilon) {
+        float candidate = (a + b) / 2.f;
+        float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
+        if (std::abs(output - value) < epsilon) return candidate;
+        if (value < output) {
+            return binarySearch(output, shape, exponent, candidate, b, epsilon);
+        } else {
+            return binarySearch(output, shape, exponent, a, candidate, epsilon);
+        };
+    }
 
     ElvinModule() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -55,18 +71,31 @@ struct ElvinModule : Module {
         float shape = params[SHAPE_PARAM].getValue();
 
         // Check if the trigger input is high
-        if (trigger.process(inputs[TRIGGER_INPUT].getVoltage())) {
-            isAttacking = true;
-            isDecaying = false;
+        if (trigger.process(inputs[TRIGGER_INPUT].getVoltage()) && !isAttacking) {
+            float accentTrigger = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
 
-            if (inputs[ACCENT_INPUT].getVoltage() > 2.f && steps != 0.f) {
-                accent = clamp(accent + (10.f / std::abs(steps)), 0.f, 10.f);
+            if (accentTrigger > 0.f && steps != 0.f) {
+                accent = clamp(accent + (1.f / std::abs(steps)), 0.f, 1.f);
+                accentScale = accentTrigger / 10.f;
             } else {
                 accent = 0.f;
+                accentScale = 0.f;
             }
-        }
 
-        float output = 0.f;
+            // if (isDecaying) {
+            //     float trueLevel = 1.f;
+            //     if (steps >= 0.f) {
+            //         trueLevel = 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
+            //     } else {
+            //         trueLevel = 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
+            //     }
+            //     float realEnvelope = output / trueLevel;
+            //     envelope = binarySearch(realEnvelope, shape, exponent, 0.f, 1.f, 0.001f);
+            // }
+
+            isAttacking = true;
+            isDecaying = false;
+        }
 
         // Process the attack stage
         if (isAttacking) {
@@ -87,11 +116,15 @@ struct ElvinModule : Module {
             }
         }
 
-        output = (1 - shape) * envelope + shape * std::pow(envelope, 4);
+        float expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
+
+        output = (1 - shape) * envelope + shape * expEnvelope;
+        pureOutput = output;
+
         if (steps >= 0.f) {
-            output *= (10 * baseLevel + accent * accentLevel * (1 - baseLevel));
+            output *= 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
         } else {
-            output *= baseLevel * (10 - accent * accentLevel);
+            output *= 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
         }
 
         // Output the envelope
