@@ -22,6 +22,14 @@
       ]
     },
     {
+      "slug": "Elvin",
+      "name": "Elvin",
+      "description": "Generate envelopes with dynamic accent",
+      "tags": [
+        "Envelope Generator"
+      ]
+    },
+    {
       "slug": "Bezier",
       "name": "Bezier",
       "description": "Smooth random voltage generator using Bezier curves",
