@@ -27,6 +27,10 @@ struct ElvinModule : Module {
         NUM_LIGHTS
     };
 
+    static constexpr float MIN_TIME = 1e-3f;
+    static constexpr float MAX_TIME = 8.f;
+    static constexpr float LAMBDA_BASE = MAX_TIME / MIN_TIME;
+
     float envelope = 0.f;
     float accent = 0.f;
     float accentScale = 0.f;
@@ -52,13 +56,13 @@ struct ElvinModule : Module {
 
     ElvinModule() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
-        configParam(ATTACK_PARAM, 0.001f, 1.0f, 0.1f, "Attack Time", "s");
-        configParam(DECAY_PARAM, 0.001f, 1.0f, 0.1f, "Decay Time", "s");
+        configParam(ATTACK_PARAM, 0.f, 1.0f, 0.1f, "Attack Time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
+        configParam(DECAY_PARAM, 0.f, 1.0f, 0.1f, "Decay Time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
         configParam(SHAPE_PARAM, 0.0f, 1.0f, 0.0f, "Envelope Shape");
 
         configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Steps");
         paramQuantities[STEPS_PARAM]->snapEnabled = true;
-        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Attack Mix");
+        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Base Level");
         configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent Level");
     }
 
@@ -112,7 +116,8 @@ struct ElvinModule : Module {
 
         // Process the attack stage
         if (isAttacking) {
-            envelope += deltaTime / params[ATTACK_PARAM].getValue();
+            float attackLambda = powf(LAMBDA_BASE, -params[ATTACK_PARAM].getValue()) / MIN_TIME;
+            envelope += deltaTime * attackLambda;
             if (envelope >= 1.0) {
                 envelope = 1.0;
                 isAttacking = false;
@@ -122,7 +127,8 @@ struct ElvinModule : Module {
 
         // Process the decay stage
         if (isDecaying) {
-            envelope -= deltaTime / params[DECAY_PARAM].getValue();
+            float decayLambda = powf(LAMBDA_BASE, -params[DECAY_PARAM].getValue()) / MIN_TIME;
+            envelope -= deltaTime * decayLambda;
             if (envelope <= 0.0f) {
                 envelope = 0.0f;
                 isDecaying = false;
