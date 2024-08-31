@@ -34,7 +34,6 @@ struct ElvinModule : Module {
     bool isAttacking = false;
     bool isDecaying = false;
     float output = 0.f;
-    float pureOutput = 0.f;
 
     float exponent = 2.f;
 
@@ -74,27 +73,41 @@ struct ElvinModule : Module {
         if (trigger.process(inputs[TRIGGER_INPUT].getVoltage()) && !isAttacking) {
             float accentTrigger = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
 
+            float nextAccent;
+            float nextAccentScale;
+
             if (accentTrigger > 0.f && steps != 0.f) {
-                accent = clamp(accent + (1.f / std::abs(steps)), 0.f, 1.f);
-                accentScale = accentTrigger / 10.f;
+                nextAccent = clamp(accent + (1.f / std::abs(steps)), 0.f, 1.f);
+                nextAccentScale = accentTrigger / 10.f;
             } else {
-                accent = 0.f;
-                accentScale = 0.f;
+                nextAccent = 0.f;
+                nextAccentScale = 0.f;
             }
 
-            // if (isDecaying) {
-            //     float trueLevel = 1.f;
-            //     if (steps >= 0.f) {
-            //         trueLevel = 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
-            //     } else {
-            //         trueLevel = 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
-            //     }
-            //     float realEnvelope = output / trueLevel;
-            //     envelope = binarySearch(realEnvelope, shape, exponent, 0.f, 1.f, 0.001f);
-            // }
+            if (isDecaying) {
+                float nextPeakLevel;
+                if (steps >= 0.f) {
+                    nextPeakLevel = 10.f * (baseLevel + nextAccent * nextAccentScale * accentLevel * (1 - baseLevel));
+                } else {
+                    nextPeakLevel = 10.f * baseLevel * (1.f - nextAccent * nextAccentScale * accentLevel);
+                }
 
-            isAttacking = true;
-            isDecaying = false;
+                if (nextPeakLevel > output) {
+                    float realEnvelope = output / nextPeakLevel;
+                    envelope = binarySearch(realEnvelope, shape, exponent, 0.f, 1.f, 0.001f);
+                    isAttacking = true;
+                    isDecaying = false;
+                } else {
+                    // recover previous accent
+                    nextAccent = accent;
+                    nextAccentScale = accentScale;
+                }
+            } else {
+                isAttacking = true;
+                isDecaying = false;
+            }
+            accent = nextAccent;
+            accentScale = nextAccentScale;
         }
 
         // Process the attack stage
@@ -118,13 +131,12 @@ struct ElvinModule : Module {
 
         float expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
 
-        output = (1 - shape) * envelope + shape * expEnvelope;
-        pureOutput = output;
+        float envelopeMix = (1 - shape) * envelope + shape * expEnvelope;
 
         if (steps >= 0.f) {
-            output *= 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
+            output = envelopeMix * 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
         } else {
-            output *= 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
+            output = envelopeMix * 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
         }
 
         // Output the envelope
@@ -146,12 +158,10 @@ struct ElvinModuleWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.59), module, ElvinModule::DECAY_PARAM));
 
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.36), module, ElvinModule::STEPS_PARAM));
-        // addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 202.66), module, ElvinModule::STEPS_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 202.66), module, ElvinModule::LVL_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 202.66), module, ElvinModule::ALVL_PARAM));
 
         // Shape switch (Linear/Exponential)
-        // addParam(createParamCentered<CKSS>(Vec(22.5, 104.36), module, ElvinModule::SHAPE_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 104.36), module, ElvinModule::SHAPE_PARAM));
 
         // Trigger input
