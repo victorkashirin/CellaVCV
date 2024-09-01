@@ -9,6 +9,8 @@ struct ElvinModule : Module {
         LVL_PARAM,
         STEPS_PARAM,
         ALVL_PARAM,
+        ATTACK_CV_PARAM,
+        DECAY_CV_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -20,10 +22,11 @@ struct ElvinModule : Module {
     };
     enum OutputIds {
         ENVELOPE_OUTPUT,
-        COUNT_OUTPUT,
+        ACCENT_OUTPUT,
         NUM_OUTPUTS
     };
     enum LightIds {
+        ENVELOPE_LIGHT,
         NUM_LIGHTS
     };
 
@@ -45,7 +48,8 @@ struct ElvinModule : Module {
 
     float binarySearch(float output, float shape, float exponent, float a, float b, float epsilon) {
         float candidate = (a + b) / 2.f;
-        float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
+        // float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
+        float value = (1 - shape) * candidate + shape * std::pow(candidate, exponent);
         if (std::abs(output - value) < epsilon) return candidate;
         if (value < output) {
             return binarySearch(output, shape, exponent, candidate, b, epsilon);
@@ -60,10 +64,21 @@ struct ElvinModule : Module {
         configParam(DECAY_PARAM, 0.f, 1.0f, 0.1f, "Decay Time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
         configParam(SHAPE_PARAM, 0.0f, 1.0f, 0.0f, "Envelope Shape");
 
-        configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Steps");
+        configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Accent Steps");
         paramQuantities[STEPS_PARAM]->snapEnabled = true;
-        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Base Level");
-        configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent Level");
+        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Base Level", "%", 0, 100);
+        configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent Level", "%", 0, 100);
+
+        configParam(ATTACK_CV_PARAM, -1.f, 1.f, 0.f, "Attack CV", "%", 0, 100);
+        configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
+
+        configInput(ATTACK_INPUT, "Attack");
+        configInput(DECAY_INPUT, "Decay");
+        configInput(TRIGGER_INPUT, "Trigger");
+        configInput(ACCENT_INPUT, "Accent");
+
+        configOutput(ENVELOPE_OUTPUT, "Envelope");
+        configOutput(ACCENT_OUTPUT, "Accent Level");
     }
 
     void process(const ProcessArgs& args) override {
@@ -116,7 +131,11 @@ struct ElvinModule : Module {
 
         // Process the attack stage
         if (isAttacking) {
-            float attackLambda = powf(LAMBDA_BASE, -params[ATTACK_PARAM].getValue()) / MIN_TIME;
+            float attackParam = params[ATTACK_PARAM].getValue();
+            float attackCvParam = params[ATTACK_CV_PARAM].getValue();
+            float attack = attackParam + inputs[ATTACK_INPUT].getVoltage() / 10.f * attackCvParam;
+            attack = clamp(attack, 0.f, 1.f);
+            float attackLambda = powf(LAMBDA_BASE, -attack) / MIN_TIME;
             envelope += deltaTime * attackLambda;
             if (envelope >= 1.0) {
                 envelope = 1.0;
@@ -127,7 +146,11 @@ struct ElvinModule : Module {
 
         // Process the decay stage
         if (isDecaying) {
-            float decayLambda = powf(LAMBDA_BASE, -params[DECAY_PARAM].getValue()) / MIN_TIME;
+            float decayParam = params[DECAY_PARAM].getValue();
+            float decayCvParam = params[DECAY_CV_PARAM].getValue();
+            float decay = decayParam + inputs[DECAY_INPUT].getVoltage() / 10.f * decayCvParam;
+            decay = clamp(decay, 0.f, 1.f);
+            float decayLambda = powf(LAMBDA_BASE, -decay) / MIN_TIME;
             envelope -= deltaTime * decayLambda;
             if (envelope <= 0.0f) {
                 envelope = 0.0f;
@@ -135,7 +158,8 @@ struct ElvinModule : Module {
             }
         }
 
-        float expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
+        // float expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
+        float expEnvelope = std::pow(envelope, exponent);
 
         float envelopeMix = (1 - shape) * envelope + shape * expEnvelope;
 
@@ -147,6 +171,8 @@ struct ElvinModule : Module {
 
         // Output the envelope
         outputs[ENVELOPE_OUTPUT].setVoltage(output);
+        outputs[ACCENT_OUTPUT].setVoltage(10.f * accent * accentScale);
+        lights[ENVELOPE_LIGHT].setBrightnessSmooth(output / 10.f, 5.f);
     }
 };
 
@@ -159,24 +185,29 @@ struct ElvinModuleWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        // Attack and Decay knobs
+        addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(45.0, 35.0), module, ElvinModule::ENVELOPE_LIGHT));
+
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.59), module, ElvinModule::ATTACK_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.59), module, ElvinModule::DECAY_PARAM));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.36), module, ElvinModule::STEPS_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 202.66), module, ElvinModule::LVL_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 202.66), module, ElvinModule::ALVL_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 103.5), module, ElvinModule::SHAPE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 103.5), module, ElvinModule::STEPS_PARAM));
 
-        // Shape switch (Linear/Exponential)
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 104.36), module, ElvinModule::SHAPE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.38), module, ElvinModule::LVL_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.38), module, ElvinModule::ALVL_PARAM));
+
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.79), module, ElvinModule::ATTACK_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.79), module, ElvinModule::DECAY_CV_PARAM));
+
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 231.31), module, ElvinModule::ATTACK_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 231.31), module, ElvinModule::DECAY_INPUT));
 
         // Trigger input
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 159.15), module, ElvinModule::TRIGGER_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 159.15), module, ElvinModule::ACCENT_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, ElvinModule::ATTACK_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 280.0), module, ElvinModule::DECAY_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, ElvinModule::TRIGGER_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 280.0), module, ElvinModule::ACCENT_INPUT));
 
         // Envelope output
+        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, ElvinModule::ACCENT_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, ElvinModule::ENVELOPE_OUTPUT));
     }
 };
