@@ -16,17 +16,18 @@
     {
       "slug": "Euler",
       "name": "Euler",
-      "description": "Calculates slope of the incoming signal",
+      "description": "Calculates rate of change of the incoming signal",
       "tags": [
-        "Utility"
+        "Utility",
+        "Envelope follower"
       ]
     },
     {
       "slug": "Elvin",
       "name": "Elvin",
-      "description": "Generate envelopes with dynamic accent",
+      "description": "Generates envelopes with stepped increasing or decreasing accent",
       "tags": [
-        "Envelope Generator"
+        "Envelope generator"
       ]
     },
     {

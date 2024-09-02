@@ -30,21 +30,20 @@ struct ElvinModule : Module {
         NUM_LIGHTS
     };
 
-    static constexpr float MIN_TIME = 1e-4f;
-    static constexpr float MAX_TIME = 8.f;
+    static constexpr float MIN_TIME = 1e-3f;
+    static constexpr float MAX_TIME = 10.f;
     static constexpr float LAMBDA_BASE = MAX_TIME / MIN_TIME;
 
-    float envelope = 0.f;
+    float phase = 0.f;
     float accent = 0.f;
     float accentScale = 0.f;
-    float maxEnvelope = 1.0f;
     bool isAttacking = false;
     bool isDecaying = false;
-    float output = 0.f;
-
-    float exponent = 4.f;
+    float envelopeValue = 0.f;
 
     bool exponentialAttack = false;
+    bool retriggerStrategy = false;
+    int exponentType = 0;
 
     bool preserveAccent = false;
     float preserveAccentValue = -1.f;
@@ -56,14 +55,14 @@ struct ElvinModule : Module {
     dsp::SchmittTrigger trigger;
     dsp::ClockDivider lightDivider;
 
-    float binarySearch(float output, float shape, float exponent, float a, float b, float epsilon) {
+    float binarySearch(float targetValue, float shape, float exponent, float a, float b, float epsilon) {
         float candidate = (a + b) / 2.f;
-        float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
-        if (std::abs(output - value) < epsilon) return candidate;
-        if (value < output) {
-            return binarySearch(output, shape, exponent, candidate, b, epsilon);
+        float value = (1 - shape) * candidate + shape * std::powf(candidate, 1.0 / exponent);
+        if (std::abs(targetValue - value) < epsilon) return candidate;
+        if (value < targetValue) {
+            return binarySearch(targetValue, shape, exponent, candidate, b, epsilon);
         } else {
-            return binarySearch(output, shape, exponent, a, candidate, epsilon);
+            return binarySearch(targetValue, shape, exponent, a, candidate, epsilon);
         };
     }
 
@@ -98,6 +97,7 @@ struct ElvinModule : Module {
         float accentLevel = params[ALVL_PARAM].getValue();
         float steps = params[STEPS_PARAM].getValue();
         float shape = params[SHAPE_PARAM].getValue();
+        float exponent = exponentType + 2.f;
 
         // Check if the trigger input is high
         if (trigger.process(inputs[TRIGGER_INPUT].getVoltage()) && !isAttacking) {
@@ -116,38 +116,37 @@ struct ElvinModule : Module {
 
             if (isDecaying) {
                 // retrigger
-                float nextPeakLevel;
+                float nextPeakValue;
                 if (steps >= 0.f) {
-                    nextPeakLevel = 10.f * (baseLevel + nextAccent * nextAccentScale * accentLevel * (1 - baseLevel));
+                    nextPeakValue = 10.f * (baseLevel + nextAccent * nextAccentScale * accentLevel * (1 - baseLevel));
                 } else {
-                    nextPeakLevel = 10.f * baseLevel * (1.f - nextAccent * nextAccentScale * accentLevel);
+                    nextPeakValue = 10.f * baseLevel * (1.f - nextAccent * nextAccentScale * accentLevel);
                 }
 
-                if (nextPeakLevel > output) {
+                if (nextPeakValue > envelopeValue) {
                     preserveAccent = false;
                     preserveAccentValue = -1.f;
                     preserveAccentScaleValue = -1.f;
 
                     // normal condition
-                    float realEnvelope = output / nextPeakLevel;
+                    float intermediaryEnvelopeValue = envelopeValue / nextPeakValue;
                     float exp = (exponentialAttack) ? 1.f / exponent : exponent;
-                    envelope = binarySearch(realEnvelope, shape, exp, 0.f, 1.f, 0.001f);
+                    phase = binarySearch(intermediaryEnvelopeValue, shape, exp, 0.f, 1.f, 0.001f);
                     isAttacking = true;
                     isDecaying = false;
                 } else {
-                    // recover previous accent
-
-                    // preserveAccent = true;
-                    // if (preserveAccentValue == -1.f) {
-                    //     preserveAccentValue = accent;
-                    //     preserveAccentScaleValue = accentScale;
-                    // }
-
-                    envelope = 1.f;
-                    isAttacking = false;
-                    isDecaying = true;
-
-                    crossfadeValue = output;
+                    if (retriggerStrategy == false) {
+                        phase = 1.f;
+                        isAttacking = false;
+                        isDecaying = true;
+                        crossfadeValue = envelopeValue;
+                    } else {
+                        preserveAccent = true;
+                        if (preserveAccentValue == -1.f) {
+                            preserveAccentValue = accent;
+                            preserveAccentScaleValue = accentScale;
+                        }
+                    }
                 }
             } else {
                 isAttacking = true;
@@ -157,89 +156,99 @@ struct ElvinModule : Module {
             accentScale = nextAccentScale;
         }
 
-        // Process the attack stage
-        if (isAttacking) {
-            float attackParam = params[ATTACK_PARAM].getValue();
-            float attackCvParam = params[ATTACK_CV_PARAM].getValue();
-            float attack = attackParam + inputs[ATTACK_INPUT].getVoltage() / 10.f * attackCvParam;
-            attack = clamp(attack, 0.f, 1.f);
-            float attackLambda = powf(LAMBDA_BASE, -attack) / MIN_TIME;
-            envelope += deltaTime * attackLambda;
-            if (envelope >= 1.0) {
-                envelope = 1.0;
-                isAttacking = false;
-                isDecaying = true;
-            }
-        }
-
-        float decayForCrossfade = 0.f;
-
         // Process the decay stage
+        float decayForCrossfade = 0.f;
         if (isDecaying) {
             float decayParam = params[DECAY_PARAM].getValue();
             float decayCvParam = params[DECAY_CV_PARAM].getValue();
             float decay = decayParam + inputs[DECAY_INPUT].getVoltage() / 10.f * decayCvParam;
             decay = clamp(decay, 0.f, 1.f);
             decayForCrossfade = decay;
-            float decayLambda = powf(LAMBDA_BASE, -decay) / MIN_TIME;
-            envelope -= deltaTime * decayLambda;
-            if (envelope <= 0.0f) {
-                envelope = 0.0f;
+            float decayLambda = std::powf(LAMBDA_BASE, -decay) / MIN_TIME;
+            phase -= deltaTime * decayLambda;
+            if (phase <= 0.0f) {
+                phase = 0.0f;
                 isDecaying = false;
             }
         }
 
-        // Merging envelopes
+        // Process the attack stage
+        if (isAttacking) {
+            float attackParam = params[ATTACK_PARAM].getValue();
+            float attackCvParam = params[ATTACK_CV_PARAM].getValue();
+            float attack = attackParam + inputs[ATTACK_INPUT].getVoltage() / 10.f * attackCvParam;
+            attack = clamp(attack, 0.f, 1.f);
+            float attackLambda = std::powf(LAMBDA_BASE, -attack) / MIN_TIME;
+            phase += deltaTime * attackLambda;
+            if (phase >= 1.0) {
+                phase = 1.0;
+                isAttacking = false;
+                isDecaying = true;
+            }
+        }
+
+        //----------- Merging envelopes ---------------
 
         float expEnvelope;
         if (exponentialAttack) {
-            expEnvelope = std::pow(envelope, exponent);
+            expEnvelope = std::powf(phase, exponent);
         } else {
-            expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
+            expEnvelope = (isAttacking) ? std::powf(phase, 1.f / exponent) : std::powf(phase, exponent);
         }
 
-        float envelopeMix = (1 - shape) * envelope + shape * expEnvelope;
+        float envelopeMix = (1 - shape) * phase + shape * expEnvelope;
 
         // -------------
+
+        // strategy II
 
         float usedAccent = (preserveAccent == true) ? preserveAccentValue : accent;
         float usedAccentScale = (preserveAccent == true) ? preserveAccentScaleValue : accentScale;
 
         if (steps >= 0.f) {
-            output = envelopeMix * 10.f * (baseLevel + usedAccent * usedAccentScale * accentLevel * (1 - baseLevel));
+            envelopeValue = envelopeMix * 10.f * (baseLevel + usedAccent * usedAccentScale * accentLevel * (1 - baseLevel));
         } else {
-            output = envelopeMix * 10.f * baseLevel * (1.f - usedAccent * usedAccentScale * accentLevel);
+            envelopeValue = envelopeMix * 10.f * baseLevel * (1.f - usedAccent * usedAccentScale * accentLevel);
         }
 
+        // Strategy I
         if (crossfadeValue != -1.f) {
-            float crossfadeLambda = powf(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
+            float crossfadeLambda = std::powf(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
             crossfadePhase += deltaTime * crossfadeLambda;
-            if (crossfadePhase >= 1.f) {
+            if (crossfadePhase > 1.f) {
                 crossfadeValue = -1.f;
                 crossfadePhase = 0.f;
             } else {
-                output = crossfade(crossfadeValue, output, crossfadePhase);
+                envelopeValue = crossfade(crossfadeValue, envelopeValue, crossfadePhase);
             }
         }
 
-        outputs[ENVELOPE_OUTPUT].setVoltage(output);
+        // ----------------------------------------
+
+        outputs[ENVELOPE_OUTPUT].setVoltage(envelopeValue);
         outputs[ACCENT_OUTPUT].setVoltage(10.f * usedAccent * usedAccentScale);
 
         if (lightDivider.process()) {
             float lightTime = args.sampleTime * lightDivider.getDivision();
-            lights[ENVELOPE_LIGHT].setBrightnessSmooth(powf(output / 10.f, 2.f), lightTime);
+            lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::powf(envelopeValue / 10.f, 2.f), lightTime);
         }
     }
 
     json_t *dataToJson() override {
         json_t *rootJ = json_object();
         json_object_set_new(rootJ, "exponentialAttack", json_boolean(exponentialAttack));
+        json_object_set_new(rootJ, "retriggerStrategy", json_boolean(retriggerStrategy));
+        json_object_set_new(rootJ, "exponentType", json_boolean(exponentType));
         return rootJ;
     }
 
     void dataFromJson(json_t *rootJ) override {
         json_t *expAttackJ = json_object_get(rootJ, "exponentialAttack");
         if (expAttackJ) exponentialAttack = json_boolean_value(expAttackJ);
+        json_t *retriggerStrategyJ = json_object_get(rootJ, "retriggerStrategy");
+        if (retriggerStrategyJ) retriggerStrategy = json_boolean_value(retriggerStrategyJ);
+        json_t *exponentJ = json_object_get(rootJ, "exponentType");
+        if (exponentJ) exponentType = json_integer_value(exponentJ);
     }
 };
 
@@ -286,6 +295,13 @@ struct ElvinModuleWidget : ModuleWidget {
                                                  {"Logarithmic",
                                                   "Exponential"},
                                                  &module->exponentialAttack));
+        menu->addChild(createIndexPtrSubmenuItem("Retrigger Strategy",
+                                                 {"I",
+                                                  "II"},
+                                                 &module->retriggerStrategy));
+        menu->addChild(createIndexPtrSubmenuItem("Exponent Function",
+                                                 {"Quadratic", "Cubic", "Quartic"},
+                                                 &module->exponentType));
     }
 };
 
