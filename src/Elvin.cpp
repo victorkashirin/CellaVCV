@@ -30,7 +30,7 @@ struct ElvinModule : Module {
         NUM_LIGHTS
     };
 
-    static constexpr float MIN_TIME = 1e-3f;
+    static constexpr float MIN_TIME = 1e-4f;
     static constexpr float MAX_TIME = 8.f;
     static constexpr float LAMBDA_BASE = MAX_TIME / MIN_TIME;
 
@@ -42,14 +42,20 @@ struct ElvinModule : Module {
     bool isDecaying = false;
     float output = 0.f;
 
-    float exponent = 2.f;
+    float exponent = 4.f;
+
+    bool exponentialAttack = false;
+
+    bool preserveAccent = false;
+    float preserveAccentValue = -1.f;
+    float preserveAccentScaleValue = -1.f;
 
     dsp::SchmittTrigger trigger;
+    dsp::ClockDivider lightDivider;
 
     float binarySearch(float output, float shape, float exponent, float a, float b, float epsilon) {
         float candidate = (a + b) / 2.f;
-        // float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
-        float value = (1 - shape) * candidate + shape * std::pow(candidate, exponent);
+        float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
         if (std::abs(output - value) < epsilon) return candidate;
         if (value < output) {
             return binarySearch(output, shape, exponent, candidate, b, epsilon);
@@ -79,9 +85,11 @@ struct ElvinModule : Module {
 
         configOutput(ENVELOPE_OUTPUT, "Envelope");
         configOutput(ACCENT_OUTPUT, "Accent Level");
+
+        lightDivider.setDivision(4);
     }
 
-    void process(const ProcessArgs& args) override {
+    void process(const ProcessArgs &args) override {
         float deltaTime = args.sampleTime;
         float baseLevel = params[LVL_PARAM].getValue();
         float accentLevel = params[ALVL_PARAM].getValue();
@@ -104,6 +112,7 @@ struct ElvinModule : Module {
             }
 
             if (isDecaying) {
+                // retrigger
                 float nextPeakLevel;
                 if (steps >= 0.f) {
                     nextPeakLevel = 10.f * (baseLevel + nextAccent * nextAccentScale * accentLevel * (1 - baseLevel));
@@ -112,14 +121,28 @@ struct ElvinModule : Module {
                 }
 
                 if (nextPeakLevel > output) {
+                    preserveAccent = false;
+                    preserveAccentValue = -1.f;
+                    preserveAccentScaleValue = -1.f;
+
+                    // normal condition
                     float realEnvelope = output / nextPeakLevel;
-                    envelope = binarySearch(realEnvelope, shape, exponent, 0.f, 1.f, 0.001f);
+                    float exp = (exponentialAttack) ? 1.f / exponent : exponent;
+                    envelope = binarySearch(realEnvelope, shape, exp, 0.f, 1.f, 0.001f);
                     isAttacking = true;
                     isDecaying = false;
                 } else {
                     // recover previous accent
-                    nextAccent = accent;
-                    nextAccentScale = accentScale;
+
+                    // preserveAccent = true;
+                    // if (preserveAccentValue == -1.f) {
+                    //     preserveAccentValue = accent;
+                    //     preserveAccentScaleValue = accentScale;
+                    // }
+
+                    envelope = 1.f;
+                    isAttacking = false;
+                    isDecaying = true;
                 }
             } else {
                 isAttacking = true;
@@ -158,27 +181,52 @@ struct ElvinModule : Module {
             }
         }
 
-        // float expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
-        float expEnvelope = std::pow(envelope, exponent);
+        // Merging envelopes
+
+        float expEnvelope;
+        if (exponentialAttack) {
+            expEnvelope = std::pow(envelope, exponent);
+        } else {
+            expEnvelope = (isAttacking) ? std::pow(envelope, 1.f / exponent) : std::pow(envelope, exponent);
+        }
 
         float envelopeMix = (1 - shape) * envelope + shape * expEnvelope;
 
+        // -------------
+
+        float usedAccent = (preserveAccent == true) ? preserveAccentValue : accent;
+        float usedAccentScale = (preserveAccent == true) ? preserveAccentScaleValue : accentScale;
+
         if (steps >= 0.f) {
-            output = envelopeMix * 10.f * (baseLevel + accent * accentScale * accentLevel * (1 - baseLevel));
+            output = envelopeMix * 10.f * (baseLevel + usedAccent * usedAccentScale * accentLevel * (1 - baseLevel));
         } else {
-            output = envelopeMix * 10.f * baseLevel * (1.f - accent * accentScale * accentLevel);
+            output = envelopeMix * 10.f * baseLevel * (1.f - usedAccent * usedAccentScale * accentLevel);
         }
 
-        // Output the envelope
         outputs[ENVELOPE_OUTPUT].setVoltage(output);
-        outputs[ACCENT_OUTPUT].setVoltage(10.f * accent * accentScale);
-        lights[ENVELOPE_LIGHT].setBrightnessSmooth(output / 10.f, 5.f);
+        outputs[ACCENT_OUTPUT].setVoltage(10.f * usedAccent * usedAccentScale);
+
+        if (lightDivider.process()) {
+            float lightTime = args.sampleTime * lightDivider.getDivision();
+            lights[ENVELOPE_LIGHT].setBrightnessSmooth(powf(output / 10.f, 2.f), lightTime);
+        }
+    }
+
+    json_t *dataToJson() override {
+        json_t *rootJ = json_object();
+        json_object_set_new(rootJ, "exponentialAttack", json_boolean(exponentialAttack));
+        return rootJ;
+    }
+
+    void dataFromJson(json_t *rootJ) override {
+        json_t *expAttackJ = json_object_get(rootJ, "exponentialAttack");
+        if (expAttackJ) exponentialAttack = json_boolean_value(expAttackJ);
     }
 };
 
 // Module widget
 struct ElvinModuleWidget : ModuleWidget {
-    ElvinModuleWidget(ElvinModule* module) {
+    ElvinModuleWidget(ElvinModule *module) {
         setModule(module);
 
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Elvin.svg")));
@@ -210,7 +258,17 @@ struct ElvinModuleWidget : ModuleWidget {
         addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, ElvinModule::ACCENT_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, ElvinModule::ENVELOPE_OUTPUT));
     }
+
+    void appendContextMenu(Menu *menu) override {
+        ElvinModule *module = dynamic_cast<ElvinModule *>(this->module);
+        assert(module);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexPtrSubmenuItem("Attack Curve",
+                                                 {"Logarithmic",
+                                                  "Exponential"},
+                                                 &module->exponentialAttack));
+    }
 };
 
 // Plugin declaration
-Model* modelElvin = createModel<ElvinModule, ElvinModuleWidget>("Elvin");
+Model *modelElvin = createModel<ElvinModule, ElvinModuleWidget>("Elvin");
