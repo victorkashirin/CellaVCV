@@ -50,6 +50,9 @@ struct ElvinModule : Module {
     float preserveAccentValue = -1.f;
     float preserveAccentScaleValue = -1.f;
 
+    float crossfadeValue = -1.f;
+    float crossfadePhase = 0.f;
+
     dsp::SchmittTrigger trigger;
     dsp::ClockDivider lightDivider;
 
@@ -143,6 +146,8 @@ struct ElvinModule : Module {
                     envelope = 1.f;
                     isAttacking = false;
                     isDecaying = true;
+
+                    crossfadeValue = output;
                 }
             } else {
                 isAttacking = true;
@@ -167,12 +172,15 @@ struct ElvinModule : Module {
             }
         }
 
+        float decayForCrossfade = 0.f;
+
         // Process the decay stage
         if (isDecaying) {
             float decayParam = params[DECAY_PARAM].getValue();
             float decayCvParam = params[DECAY_CV_PARAM].getValue();
             float decay = decayParam + inputs[DECAY_INPUT].getVoltage() / 10.f * decayCvParam;
             decay = clamp(decay, 0.f, 1.f);
+            decayForCrossfade = decay;
             float decayLambda = powf(LAMBDA_BASE, -decay) / MIN_TIME;
             envelope -= deltaTime * decayLambda;
             if (envelope <= 0.0f) {
@@ -201,6 +209,17 @@ struct ElvinModule : Module {
             output = envelopeMix * 10.f * (baseLevel + usedAccent * usedAccentScale * accentLevel * (1 - baseLevel));
         } else {
             output = envelopeMix * 10.f * baseLevel * (1.f - usedAccent * usedAccentScale * accentLevel);
+        }
+
+        if (crossfadeValue != -1.f) {
+            float crossfadeLambda = powf(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
+            crossfadePhase += deltaTime * crossfadeLambda;
+            if (crossfadePhase >= 1.f) {
+                crossfadeValue = -1.f;
+                crossfadePhase = 0.f;
+            } else {
+                output = crossfade(crossfadeValue, output, crossfadePhase);
+            }
         }
 
         outputs[ENVELOPE_OUTPUT].setVoltage(output);
