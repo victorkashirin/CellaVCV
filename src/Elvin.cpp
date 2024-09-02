@@ -11,6 +11,7 @@ struct ElvinModule : Module {
         ALVL_PARAM,
         ATTACK_CV_PARAM,
         DECAY_CV_PARAM,
+        INVERT_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -18,6 +19,7 @@ struct ElvinModule : Module {
         ACCENT_INPUT,
         ATTACK_INPUT,
         DECAY_INPUT,
+        INVERT_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -27,6 +29,7 @@ struct ElvinModule : Module {
     };
     enum LightIds {
         ENVELOPE_LIGHT,
+        INVERT_LIGHT,
         NUM_LIGHTS
     };
 
@@ -34,8 +37,11 @@ struct ElvinModule : Module {
     static constexpr float MAX_TIME = 10.f;
     static constexpr float LAMBDA_BASE = MAX_TIME / MIN_TIME;
 
+    bool invert = false;
     float phase = 0.f;
-    float accent = 0.f;
+
+    float accentCounter = 0.f;
+    float accent = 1.f;
     float accentScale = 0.f;
     bool isAttacking = false;
     bool isDecaying = false;
@@ -54,6 +60,8 @@ struct ElvinModule : Module {
 
     dsp::SchmittTrigger trigger;
     dsp::ClockDivider lightDivider;
+    dsp::BooleanTrigger invertBoolean;
+    dsp::SchmittTrigger invertSchmitt;
 
     float binarySearch(float targetValue, float shape, float exponent, float a, float b, float epsilon) {
         float candidate = (a + b) / 2.f;
@@ -79,11 +87,13 @@ struct ElvinModule : Module {
 
         configParam(ATTACK_CV_PARAM, -1.f, 1.f, 0.f, "Attack CV", "%", 0, 100);
         configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
+        configButton(INVERT_PARAM, "ASC/DESC Accent");
 
         configInput(ATTACK_INPUT, "Attack");
         configInput(DECAY_INPUT, "Decay");
         configInput(TRIGGER_INPUT, "Trigger");
         configInput(ACCENT_INPUT, "Accent");
+        configInput(INVERT_INPUT, "ASC/DESC Accent");
 
         configOutput(ENVELOPE_OUTPUT, "Envelope");
         configOutput(ACCENT_OUTPUT, "Accent Level");
@@ -92,6 +102,13 @@ struct ElvinModule : Module {
     }
 
     void process(const ProcessArgs &args) override {
+        if (invertBoolean.process(params[INVERT_PARAM].getValue()))
+            invert ^= true;
+
+        // Invert input
+        if (invertSchmitt.process(inputs[INVERT_INPUT].getVoltage(), 0.1f, 1.f))
+            invert ^= true;
+
         float deltaTime = args.sampleTime;
         float baseLevel = params[LVL_PARAM].getValue();
         float accentLevel = params[ALVL_PARAM].getValue();
@@ -104,12 +121,20 @@ struct ElvinModule : Module {
             float accentTrigger = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
 
             float nextAccent;
+            float nextAccentCounter;
             float nextAccentScale;
 
             if (accentTrigger > 0.f && steps != 0.f) {
-                nextAccent = clamp(accent + (1.f / std::abs(steps)), 0.f, 1.f);
+                nextAccentCounter = clamp(accentCounter + 1, 1.f, std::abs(steps));
+                if (!invert) {
+                    nextAccent = clamp(nextAccentCounter / std::abs(steps), 0.f, 1.f);
+                } else {
+                    nextAccent = clamp((std::abs(steps) + 1 - nextAccentCounter) / std::abs(steps), 0.f, 1.f);
+                }
+
                 nextAccentScale = accentTrigger / 10.f;
             } else {
+                nextAccentCounter = 0.f;
                 nextAccent = 0.f;
                 nextAccentScale = 0.f;
             }
@@ -152,6 +177,7 @@ struct ElvinModule : Module {
                 isAttacking = true;
                 isDecaying = false;
             }
+            accentCounter = nextAccentCounter;
             accent = nextAccent;
             accentScale = nextAccentScale;
         }
@@ -200,10 +226,12 @@ struct ElvinModule : Module {
 
         // -------------
 
-        // strategy II
+        // Retrigger strategy II
 
         float usedAccent = (preserveAccent == true) ? preserveAccentValue : accent;
         float usedAccentScale = (preserveAccent == true) ? preserveAccentScaleValue : accentScale;
+
+        // Envelope update
 
         if (steps >= 0.f) {
             envelopeValue = envelopeMix * 10.f * (baseLevel + usedAccent * usedAccentScale * accentLevel * (1 - baseLevel));
@@ -211,7 +239,7 @@ struct ElvinModule : Module {
             envelopeValue = envelopeMix * 10.f * baseLevel * (1.f - usedAccent * usedAccentScale * accentLevel);
         }
 
-        // Strategy I
+        // Retrigger Strategy I
         if (crossfadeValue != -1.f) {
             float crossfadeLambda = std::powf(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
             crossfadePhase += deltaTime * crossfadeLambda;
@@ -231,6 +259,7 @@ struct ElvinModule : Module {
         if (lightDivider.process()) {
             float lightTime = args.sampleTime * lightDivider.getDivision();
             lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::powf(envelopeValue / 10.f, 2.f), lightTime);
+            lights[INVERT_LIGHT].setBrightness(invert * 0.5f);
         }
     }
 
@@ -239,6 +268,7 @@ struct ElvinModule : Module {
         json_object_set_new(rootJ, "exponentialAttack", json_boolean(exponentialAttack));
         json_object_set_new(rootJ, "retriggerStrategy", json_boolean(retriggerStrategy));
         json_object_set_new(rootJ, "exponentType", json_boolean(exponentType));
+        json_object_set_new(rootJ, "invert", json_boolean(invert));
         return rootJ;
     }
 
@@ -249,6 +279,8 @@ struct ElvinModule : Module {
         if (retriggerStrategyJ) retriggerStrategy = json_boolean_value(retriggerStrategyJ);
         json_t *exponentJ = json_object_get(rootJ, "exponentType");
         if (exponentJ) exponentType = json_integer_value(exponentJ);
+        json_t *invertJ = json_object_get(rootJ, "invert");
+        if (invertJ) invert = json_boolean_value(invertJ);
     }
 };
 
@@ -272,11 +304,13 @@ struct ElvinModuleWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.38), module, ElvinModule::LVL_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.38), module, ElvinModule::ALVL_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.79), module, ElvinModule::ATTACK_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.79), module, ElvinModule::DECAY_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(15, 203.79), module, ElvinModule::ATTACK_CV_PARAM));
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(45, 203.79), module, ElvinModule::INVERT_PARAM, ElvinModule::INVERT_LIGHT));
+        addParam(createParamCentered<Trimpot>(Vec(75, 203.79), module, ElvinModule::DECAY_CV_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 231.31), module, ElvinModule::ATTACK_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 231.31), module, ElvinModule::DECAY_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(15, 231.31), module, ElvinModule::ATTACK_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(45, 231.31), module, ElvinModule::INVERT_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(75, 231.31), module, ElvinModule::DECAY_INPUT));
 
         // Trigger input
         addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, ElvinModule::TRIGGER_INPUT));
