@@ -65,7 +65,7 @@ struct Elvin : Module {
 
     float binarySearch(float targetValue, float shape, float exponent, float a, float b, float epsilon) {
         float candidate = (a + b) / 2.f;
-        float value = (1 - shape) * candidate + shape * std::powf(candidate, 1.0 / exponent);
+        float value = (1 - shape) * candidate + shape * std::pow(candidate, 1.0 / exponent);
         if (std::abs(targetValue - value) < epsilon) return candidate;
         if (value < targetValue) {
             return binarySearch(targetValue, shape, exponent, candidate, b, epsilon);
@@ -190,7 +190,7 @@ struct Elvin : Module {
             float decay = decayParam + inputs[DECAY_INPUT].getVoltage() / 10.f * decayCvParam;
             decay = clamp(decay, 0.f, 1.f);
             decayForCrossfade = decay;
-            float decayLambda = std::powf(LAMBDA_BASE, -decay) / MIN_TIME;
+            float decayLambda = std::pow(LAMBDA_BASE, -decay) / MIN_TIME;
             phase -= deltaTime * decayLambda;
             if (phase <= 0.0f) {
                 phase = 0.0f;
@@ -204,7 +204,7 @@ struct Elvin : Module {
             float attackCvParam = params[ATTACK_CV_PARAM].getValue();
             float attack = attackParam + inputs[ATTACK_INPUT].getVoltage() / 10.f * attackCvParam;
             attack = clamp(attack, 0.f, 1.f);
-            float attackLambda = std::powf(LAMBDA_BASE, -attack) / MIN_TIME;
+            float attackLambda = std::pow(LAMBDA_BASE, -attack) / MIN_TIME;
             phase += deltaTime * attackLambda;
             if (phase >= 1.0) {
                 phase = 1.0;
@@ -217,9 +217,9 @@ struct Elvin : Module {
 
         float expEnvelope;
         if (exponentialAttack) {
-            expEnvelope = std::powf(phase, exponent);
+            expEnvelope = std::pow(phase, exponent);
         } else {
-            expEnvelope = (isAttacking) ? std::powf(phase, 1.f / exponent) : std::powf(phase, exponent);
+            expEnvelope = (isAttacking) ? std::pow(phase, 1.f / exponent) : std::pow(phase, exponent);
         }
 
         float envelopeMix = (1 - shape) * phase + shape * expEnvelope;
@@ -241,7 +241,7 @@ struct Elvin : Module {
 
         // Retrigger Strategy I
         if (crossfadeValue != -1.f) {
-            float crossfadeLambda = std::powf(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
+            float crossfadeLambda = std::pow(LAMBDA_BASE, -decayForCrossfade * 0.55f) / MIN_TIME;
             crossfadePhase += deltaTime * crossfadeLambda;
             if (crossfadePhase > 1.f) {
                 crossfadeValue = -1.f;
@@ -258,7 +258,7 @@ struct Elvin : Module {
 
         if (lightDivider.process()) {
             float lightTime = args.sampleTime * lightDivider.getDivision();
-            lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::powf(envelopeValue / 10.f, 2.f), lightTime);
+            lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::pow(envelopeValue / 10.f, 2.f), lightTime);
             lights[INVERT_LIGHT].setBrightness(invert * 0.3f);
         }
     }
