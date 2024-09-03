@@ -26,7 +26,8 @@
     {
       "slug": "Rich",
       "name": "Rich",
-      "description": "Expressive envelope generator with controllable accent dynamics",
+      "description": "Expressive AD envelope generator with controllable and breathing accent dynamics",
+      "keywords": "AD",
       "tags": [
         "Envelope generator"
       ]
