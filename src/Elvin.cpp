@@ -1,7 +1,7 @@
 #include "components.hpp"
 #include "plugin.hpp"
 
-struct ElvinModule : Module {
+struct Elvin : Module {
     enum ParamIds {
         ATTACK_PARAM,
         DECAY_PARAM,
@@ -74,29 +74,29 @@ struct ElvinModule : Module {
         };
     }
 
-    ElvinModule() {
+    Elvin() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
-        configParam(ATTACK_PARAM, 0.f, 1.0f, 0.1f, "Attack Time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
-        configParam(DECAY_PARAM, 0.f, 1.0f, 0.1f, "Decay Time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
-        configParam(SHAPE_PARAM, 0.0f, 1.0f, 0.0f, "Envelope Shape");
+        configParam(ATTACK_PARAM, 0.f, 1.0f, 0.1f, "Attack time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
+        configParam(DECAY_PARAM, 0.f, 1.0f, 0.1f, "Decay time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
+        configParam(SHAPE_PARAM, 0.0f, 1.0f, 0.0f, "Envelope shape");
 
         configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Accent Steps");
         paramQuantities[STEPS_PARAM]->snapEnabled = true;
-        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Base Level", "%", 0, 100);
-        configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent Level", "%", 0, 100);
+        configParam(LVL_PARAM, 0.0f, 1.0f, 0.5f, "Base level", "%", 0, 100);
+        configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent level", "%", 0, 100);
 
         configParam(ATTACK_CV_PARAM, -1.f, 1.f, 0.f, "Attack CV", "%", 0, 100);
         configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
-        configButton(INVERT_PARAM, "ASC/DESC Accent");
+        configButton(INVERT_PARAM, "Asc/Desc accent");
 
         configInput(ATTACK_INPUT, "Attack");
         configInput(DECAY_INPUT, "Decay");
         configInput(TRIGGER_INPUT, "Trigger");
         configInput(ACCENT_INPUT, "Accent");
-        configInput(INVERT_INPUT, "ASC/DESC Accent");
+        configInput(INVERT_INPUT, "Asc/Desc accent");
 
         configOutput(ENVELOPE_OUTPUT, "Envelope");
-        configOutput(ACCENT_OUTPUT, "Accent Level");
+        configOutput(ACCENT_OUTPUT, "Accent level");
 
         lightDivider.setDivision(4);
     }
@@ -259,7 +259,7 @@ struct ElvinModule : Module {
         if (lightDivider.process()) {
             float lightTime = args.sampleTime * lightDivider.getDivision();
             lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::powf(envelopeValue / 10.f, 2.f), lightTime);
-            lights[INVERT_LIGHT].setBrightness(invert * 0.5f);
+            lights[INVERT_LIGHT].setBrightness(invert * 0.3f);
         }
     }
 
@@ -285,44 +285,44 @@ struct ElvinModule : Module {
 };
 
 // Module widget
-struct ElvinModuleWidget : ModuleWidget {
-    ElvinModuleWidget(ElvinModule *module) {
+struct ElvinWidget : ModuleWidget {
+    ElvinWidget(Elvin *module) {
         setModule(module);
 
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Elvin.svg")));
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(45.0, 35.0), module, ElvinModule::ENVELOPE_LIGHT));
+        addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(45.0, 35.0), module, Elvin::ENVELOPE_LIGHT));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.59), module, ElvinModule::ATTACK_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.59), module, ElvinModule::DECAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.59), module, Elvin::ATTACK_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.59), module, Elvin::DECAY_PARAM));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 103.5), module, ElvinModule::SHAPE_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 103.5), module, ElvinModule::STEPS_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 103.5), module, Elvin::SHAPE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 103.5), module, Elvin::STEPS_PARAM));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.38), module, ElvinModule::LVL_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.38), module, ElvinModule::ALVL_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.38), module, Elvin::LVL_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.38), module, Elvin::ALVL_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(15, 203.79), module, ElvinModule::ATTACK_CV_PARAM));
-        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(45, 203.79), module, ElvinModule::INVERT_PARAM, ElvinModule::INVERT_LIGHT));
-        addParam(createParamCentered<Trimpot>(Vec(75, 203.79), module, ElvinModule::DECAY_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(15, 203.79), module, Elvin::ATTACK_CV_PARAM));
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(45, 203.79), module, Elvin::INVERT_PARAM, Elvin::INVERT_LIGHT));
+        addParam(createParamCentered<Trimpot>(Vec(75, 203.79), module, Elvin::DECAY_CV_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(15, 231.31), module, ElvinModule::ATTACK_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(45, 231.31), module, ElvinModule::INVERT_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(75, 231.31), module, ElvinModule::DECAY_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(15, 231.31), module, Elvin::ATTACK_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(45, 231.31), module, Elvin::INVERT_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(75, 231.31), module, Elvin::DECAY_INPUT));
 
         // Trigger input
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, ElvinModule::TRIGGER_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 280.0), module, ElvinModule::ACCENT_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, Elvin::TRIGGER_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 280.0), module, Elvin::ACCENT_INPUT));
 
         // Envelope output
-        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, ElvinModule::ACCENT_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, ElvinModule::ENVELOPE_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, Elvin::ACCENT_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, Elvin::ENVELOPE_OUTPUT));
     }
 
     void appendContextMenu(Menu *menu) override {
-        ElvinModule *module = dynamic_cast<ElvinModule *>(this->module);
+        Elvin *module = dynamic_cast<Elvin *>(this->module);
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexPtrSubmenuItem("Attack Curve",
@@ -340,4 +340,4 @@ struct ElvinModuleWidget : ModuleWidget {
 };
 
 // Plugin declaration
-Model *modelElvin = createModel<ElvinModule, ElvinModuleWidget>("Elvin");
+Model *modelElvin = createModel<Elvin, ElvinWidget>("Elvin");

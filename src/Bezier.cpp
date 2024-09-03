@@ -62,14 +62,14 @@ struct Bezier : Module {
         configParam(CURVE_PARAM, -1.f, 1.f, 0.0f, "Curve");
         configParam(FM_PARAM, -1.f, 1.f, 0.f, "Frequency modulation", "%", 0.f, 100.f);
         configParam(LEVEL_MOD_PARAM, -1.f, 1.f, 0.f, "Level modulation", "%", 0.f, 100.f);
-        configSwitch(LIMIT_SWITCH, -1.f, 1.f, 1.f, "Switch", {"Wrap", "Fold", "Clip"});
+        configSwitch(LIMIT_SWITCH, -1.f, 1.f, 1.f, "Limit", {"Wrap", "Fold", "Clip"});
 
-        configInput(SIGNAL_INPUT, "Input Source");
-        configInput(FM_INPUT, "Frequency Modulation");
-        configInput(LEVEL_MOD_INPUT, "Volume Modulation");
+        configInput(SIGNAL_INPUT, "Sampling");
+        configInput(FM_INPUT, "Frequency modulation");
+        configInput(LEVEL_MOD_INPUT, "Volume modulation");
 
         configOutput(CURVE_OUTPUT, "Curve");
-        configOutput(ICURVE_OUTPUT, "Inverted Curve");
+        configOutput(ICURVE_OUTPUT, "Inverted curve");
         configOutput(TRIG_OUTPUT, "Trigger");
         configOutput(GATE_OUTPUT, "Gate");
 

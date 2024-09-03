@@ -1,7 +1,7 @@
 {
   "slug": "Cella",
   "name": "Cella",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "license": "GPL-3.0-or-later",
   "brand": "Cella",
   "author": "Victor Kashirin",
@@ -17,6 +17,7 @@
       "slug": "Euler",
       "name": "Euler",
       "description": "Calculates rate of change of the incoming signal",
+      "keywords": "diff math rate",
       "tags": [
         "Utility",
         "Envelope follower"
@@ -25,7 +26,7 @@
     {
       "slug": "Elvin",
       "name": "Elvin",
-      "description": "Generates envelopes with stepped increasing or decreasing accent",
+      "description": "Expressive envelope generator with controllable accent dynamics",
       "tags": [
         "Envelope generator"
       ]
@@ -33,7 +34,8 @@
     {
       "slug": "Bezier",
       "name": "Bezier",
-      "description": "Smooth random voltage generator using Bezier curves",
+      "description": "Smooth random voltage generator that uses Bezier curves",
+      "keywords": "rnd curve smooth",
       "tags": [
         "Utility",
         "LFO",

@@ -53,6 +53,9 @@ struct Euler : Module {
         configParam(SMOOTH_PARAM, 0.f, 1.f, 0.f, "Smooth", " Seconds");
         configInput(SIGNAL_INPUT, "Sampling signal");
         configOutput(SLOPE_OUTPUT, "Normalised angle of the slope");
+        configOutput(SLOPE_ABS_OUTPUT, "Absolute angle of the slope");
+        configOutput(SLOPE_POS_OUTPUT, "Positive part of the angle");
+        configOutput(SLOPE_NEG_OUTPUT, "Negative part of the angle");
         lightDivider.setDivision(16);
         _sampleRate = (int)APP->engine->getSampleRate();
         steps = new float[_sampleRate];
