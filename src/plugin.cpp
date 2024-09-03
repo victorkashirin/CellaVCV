@@ -7,5 +7,5 @@ void init(Plugin *p) {
 
     p->addModel(modelEuler);
     p->addModel(modelBezier);
-    p->addModel(modelElvin);
+    p->addModel(modelRich);
 }
