@@ -12,4 +12,5 @@
 **Bezier** is a smooth random voltage generator based on Bezier curves. Heavily inspired by module ADDAC507, which ADDAC designed in collaboration with Rijnder Kamerbeek aka Monotrail. Module consists of one curve generator with adjustable slope - from rounded to spiky. New random value is sampled at set frequency, and module extrapolates to it from current value following curve of desired properties. Module can also sample external signal, thus working as a sort of slew limiter.
 
 ### Euler
-**Euler** calculates angle of a slope of incoming signal, normalised by 90 degrees and scaled to -10..10V. If you feed it a sine lfo, it will produce cosine output - hence, it's a differentiator of a sort. Frequency parameter is required to adjust sensitivity of differentiator.
+**Euler** calculates rate of change of any signal. It finds angle *theta* of a slope of incoming signal, normalises it by 90 degrees and scales to -10..10V. *Frequency* parameter is required to adjust calculation sensitivity, while parameter *Smooth* removes irregularities from the input. There are four outputs: theta, absolute value of theta, positive component of theta and negative component of theta.
+Suggested use: connect controller such as fader to Euler. The faster you move the fader, the higher a peak out of Euler will be before it subsides.
