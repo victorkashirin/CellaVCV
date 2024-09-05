@@ -47,18 +47,28 @@ struct Rich : Module {
     bool isDecaying = false;
     float envelopeValue = 0.f;
 
+    // context menu variables
     bool exponentialAttack = false;
     bool retriggerStrategy = false;
     int exponentType = 0;
+    int triggerSyncDelay = 1;
 
+    // vars for retrigger strategy II
     bool preserveAccent = false;
     float preserveAccentValue = -1.f;
     float preserveAccentScaleValue = -1.f;
 
+    // retrigger strategy I
     float crossfadeValue = -1.f;
     float crossfadePhase = 0.f;
 
+    // capture delayed triggers
+    int64_t triggerFrame = -1;
+    int64_t accentFrame = -1;
+    float initialAccentValueOnTrigger = 0.f;
+
     dsp::SchmittTrigger trigger;
+    dsp::SchmittTrigger accentTrigger;
     dsp::ClockDivider lightDivider;
     dsp::BooleanTrigger invertBoolean;
     dsp::SchmittTrigger invertSchmitt;
@@ -102,6 +112,14 @@ struct Rich : Module {
     }
 
     void process(const ProcessArgs &args) override {
+        float deltaTime = args.sampleTime;
+        float baseLevel = params[LVL_PARAM].getValue();
+        float accentLevel = params[ALVL_PARAM].getValue();
+        float steps = params[STEPS_PARAM].getValue();
+        float shape = params[SHAPE_PARAM].getValue();
+        float exponent = exponentType + 2.f;
+        int samplesDelay = triggerSyncDelay * 5;
+
         if (invertBoolean.process(params[INVERT_PARAM].getValue()))
             invert ^= true;
 
@@ -109,22 +127,39 @@ struct Rich : Module {
         if (invertSchmitt.process(inputs[INVERT_INPUT].getVoltage(), 0.1f, 1.f))
             invert ^= true;
 
-        float deltaTime = args.sampleTime;
-        float baseLevel = params[LVL_PARAM].getValue();
-        float accentLevel = params[ALVL_PARAM].getValue();
-        float steps = params[STEPS_PARAM].getValue();
-        float shape = params[SHAPE_PARAM].getValue();
-        float exponent = exponentType + 2.f;
+        if (trigger.process(inputs[TRIGGER_INPUT].getVoltage())) {
+            triggerFrame = args.frame;
+        }
+        if (accentTrigger.process(inputs[ACCENT_INPUT].getVoltage())) {
+            accentFrame = args.frame;
+            initialAccentValueOnTrigger = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
+        }
+
+        bool triggered = false;
+        bool accented = false;
+
+        int64_t timeSinceTrigger = args.frame - triggerFrame;
+        int64_t timeBetreenTriggerAndAccent = abs(triggerFrame - accentFrame);
+        if (timeSinceTrigger == samplesDelay) {
+            triggered = true;
+            if (timeBetreenTriggerAndAccent <= samplesDelay) {
+                accented = true;
+            }
+        }
 
         // Check if the trigger input is high
-        if (trigger.process(inputs[TRIGGER_INPUT].getVoltage()) && !isAttacking) {
-            float accentTrigger = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
+        if (triggered && !isAttacking) {
+            float accentTriggerValue = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
 
-            float nextAccent;
-            float nextAccentCounter;
-            float nextAccentScale;
+            if (accentTriggerValue == 0.f && accented) {
+                accentTriggerValue = initialAccentValueOnTrigger;
+            }
 
-            if (accentTrigger > 0.f && steps != 0.f) {
+            float nextAccent = 0.f;
+            float nextAccentCounter = 0.f;
+            float nextAccentScale = 0.f;
+
+            if (accentTriggerValue > 0.f && steps != 0.f) {
                 nextAccentCounter = clamp(accentCounter + 1, 1.f, std::abs(steps));
                 if (!invert) {
                     nextAccent = clamp(nextAccentCounter / std::abs(steps), 0.f, 1.f);
@@ -132,11 +167,7 @@ struct Rich : Module {
                     nextAccent = clamp((std::abs(steps) + 1 - nextAccentCounter) / std::abs(steps), 0.f, 1.f);
                 }
 
-                nextAccentScale = accentTrigger / 10.f;
-            } else {
-                nextAccentCounter = 0.f;
-                nextAccent = 0.f;
-                nextAccentScale = 0.f;
+                nextAccentScale = accentTriggerValue / 10.f;
             }
 
             if (isDecaying) {
@@ -148,24 +179,29 @@ struct Rich : Module {
                     nextPeakValue = 10.f * baseLevel * (1.f - nextAccent * nextAccentScale * accentLevel);
                 }
 
+                // Next peak value is higher than the current envelope value, retrigger is possible
                 if (nextPeakValue > envelopeValue) {
                     preserveAccent = false;
                     preserveAccentValue = -1.f;
                     preserveAccentScaleValue = -1.f;
 
-                    // normal condition
+                    // Find phase value for the next envelope based on the current envelope value
                     float intermediaryEnvelopeValue = envelopeValue / nextPeakValue;
                     float exp = (exponentialAttack) ? 1.f / exponent : exponent;
                     phase = binarySearch(intermediaryEnvelopeValue, shape, exp, 0.f, 1.f, 0.001f);
                     isAttacking = true;
                     isDecaying = false;
                 } else {
+                    // Strategy I: jump to decay phase of next envelope but
+                    // crossfade last value of previous envelope value and new envelope value
+                    // to avoid clicks
                     if (retriggerStrategy == false) {
                         phase = 1.f;
                         isAttacking = false;
                         isDecaying = true;
                         crossfadeValue = envelopeValue;
                     } else {
+                        // Strategy II: preserve accent value and scale until next suitable peak
                         preserveAccent = true;
                         if (preserveAccentValue == -1.f) {
                             preserveAccentValue = accent;
@@ -267,7 +303,8 @@ struct Rich : Module {
         json_t *rootJ = json_object();
         json_object_set_new(rootJ, "exponentialAttack", json_boolean(exponentialAttack));
         json_object_set_new(rootJ, "retriggerStrategy", json_boolean(retriggerStrategy));
-        json_object_set_new(rootJ, "exponentType", json_boolean(exponentType));
+        json_object_set_new(rootJ, "exponentType", json_integer(exponentType));
+        json_object_set_new(rootJ, "triggerSyncDelay", json_integer(triggerSyncDelay));
         json_object_set_new(rootJ, "invert", json_boolean(invert));
         return rootJ;
     }
@@ -279,6 +316,8 @@ struct Rich : Module {
         if (retriggerStrategyJ) retriggerStrategy = json_boolean_value(retriggerStrategyJ);
         json_t *exponentJ = json_object_get(rootJ, "exponentType");
         if (exponentJ) exponentType = json_integer_value(exponentJ);
+        json_t *triggerSyncDelayJ = json_object_get(rootJ, "triggerSyncDelay");
+        if (triggerSyncDelayJ) triggerSyncDelay = json_integer_value(triggerSyncDelayJ);
         json_t *invertJ = json_object_get(rootJ, "invert");
         if (invertJ) invert = json_boolean_value(invertJ);
     }
@@ -336,6 +375,11 @@ struct RichWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Exponent Function",
                                                  {"Quadratic", "Cubic", "Quartic"},
                                                  &module->exponentType));
+        menu->addChild(createIndexPtrSubmenuItem("Trigger Sync Delay",
+                                                 {"Off",
+                                                  "5 samples",
+                                                  "10 samples"},
+                                                 &module->triggerSyncDelay));
     }
 };
 
