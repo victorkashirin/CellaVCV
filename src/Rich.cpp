@@ -52,6 +52,7 @@ struct Rich : Module {
     bool retriggerStrategy = false;
     int exponentType = 0;
     int triggerSyncDelay = 1;
+    bool retriggerEnabled = true;
 
     // vars for retrigger strategy II
     bool preserveAccent = false;
@@ -90,20 +91,20 @@ struct Rich : Module {
         configParam(DECAY_PARAM, 0.f, 1.0f, std::log2(400.f) / std::log2(LAMBDA_BASE), "Decay time", " ms", LAMBDA_BASE, MIN_TIME * 1000);
         configParam(SHAPE_PARAM, 0.0f, 1.0f, 1.0f, "Envelope shape");
 
-        configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Accent Steps");
+        configParam(STEPS_PARAM, -8.f, 8.f, 3.f, "Accent steps");
         paramQuantities[STEPS_PARAM]->snapEnabled = true;
         configParam(LVL_PARAM, 0.0f, 1.0f, 0.75f, "Base level", "%", 0, 100);
         configParam(ALVL_PARAM, 0.f, 1.0f, 1.0f, "Accent level", "%", 0, 100);
 
         configParam(ATTACK_CV_PARAM, -1.f, 1.f, 0.f, "Attack CV", "%", 0, 100);
         configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
-        configButton(INVERT_PARAM, "Asc/Desc accent");
+        configButton(INVERT_PARAM, "Ascending/descending accent");
 
         configInput(ATTACK_INPUT, "Attack");
         configInput(DECAY_INPUT, "Decay");
         configInput(TRIGGER_INPUT, "Trigger");
         configInput(ACCENT_INPUT, "Accent");
-        configInput(INVERT_INPUT, "Asc/Desc accent");
+        configInput(INVERT_INPUT, "Ascending/descending accent");
 
         configOutput(ENVELOPE_OUTPUT, "Envelope");
         configOutput(ACCENT_OUTPUT, "Accent level");
@@ -148,7 +149,7 @@ struct Rich : Module {
         }
 
         // Check if the trigger input is high
-        if (triggered && !isAttacking) {
+        if (triggered && !isAttacking && (!isDecaying || retriggerEnabled)) {
             float accentTriggerValue = clamp(inputs[ACCENT_INPUT].getVoltage(), 0.f, 10.f);
 
             if (accentTriggerValue == 0.f && accented) {
@@ -295,7 +296,7 @@ struct Rich : Module {
         if (lightDivider.process()) {
             float lightTime = args.sampleTime * lightDivider.getDivision();
             lights[ENVELOPE_LIGHT].setBrightnessSmooth(std::pow(envelopeValue / 10.f, 2.f), lightTime);
-            lights[INVERT_LIGHT].setBrightness(invert * 0.4f);
+            lights[INVERT_LIGHT].setBrightness(invert * 0.5f);
         }
     }
 
@@ -303,6 +304,7 @@ struct Rich : Module {
         json_t *rootJ = json_object();
         json_object_set_new(rootJ, "exponentialAttack", json_boolean(exponentialAttack));
         json_object_set_new(rootJ, "retriggerStrategy", json_boolean(retriggerStrategy));
+        json_object_set_new(rootJ, "retriggerEnabled", json_boolean(retriggerEnabled));
         json_object_set_new(rootJ, "exponentType", json_integer(exponentType));
         json_object_set_new(rootJ, "triggerSyncDelay", json_integer(triggerSyncDelay));
         json_object_set_new(rootJ, "invert", json_boolean(invert));
@@ -314,6 +316,8 @@ struct Rich : Module {
         if (expAttackJ) exponentialAttack = json_boolean_value(expAttackJ);
         json_t *retriggerStrategyJ = json_object_get(rootJ, "retriggerStrategy");
         if (retriggerStrategyJ) retriggerStrategy = json_boolean_value(retriggerStrategyJ);
+        json_t *retriggerEnabledJ = json_object_get(rootJ, "retriggerEnabled");
+        if (retriggerEnabledJ) retriggerEnabled = json_boolean_value(retriggerEnabledJ);
         json_t *exponentJ = json_object_get(rootJ, "exponentType");
         if (exponentJ) exponentType = json_integer_value(exponentJ);
         json_t *triggerSyncDelayJ = json_object_get(rootJ, "triggerSyncDelay");
@@ -368,13 +372,17 @@ struct RichWidget : ModuleWidget {
                                                  {"Logarithmic",
                                                   "Exponential"},
                                                  &module->exponentialAttack));
+        menu->addChild(createIndexPtrSubmenuItem("Exponent Function",
+                                                 {"Quadratic", "Cubic", "Quartic"},
+                                                 &module->exponentType));
+        menu->addChild(createIndexPtrSubmenuItem("Retrigger",
+                                                 {"Off",
+                                                  "On"},
+                                                 &module->retriggerEnabled));
         menu->addChild(createIndexPtrSubmenuItem("Retrigger Strategy",
                                                  {"I",
                                                   "II"},
                                                  &module->retriggerStrategy));
-        menu->addChild(createIndexPtrSubmenuItem("Exponent Function",
-                                                 {"Quadratic", "Cubic", "Quartic"},
-                                                 &module->exponentType));
         menu->addChild(createIndexPtrSubmenuItem("Trigger Sync Delay",
                                                  {"Off",
                                                   "5 samples",
