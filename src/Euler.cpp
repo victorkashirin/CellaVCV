@@ -115,7 +115,7 @@ struct Euler : Module {
 struct EulerWidget : ModuleWidget {
     EulerWidget(Euler *module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Euler.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Euler.svg"), asset::plugin(pluginInstance, "res/Euler-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
@@ -125,12 +125,12 @@ struct EulerWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(37.5, 104.36), module, Euler::FREQ_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(37.5, 154.33), module, Euler::SMOOTH_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(37.5, 231.9), module, Euler::SIGNAL_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(37.5, 231.9), module, Euler::SIGNAL_INPUT));
 
-        addOutput(createOutputCentered<PJ301MPort>(Vec(21, 280.01), module, Euler::SLOPE_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(54, 280.01), module, Euler::SLOPE_ABS_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(21, 330.01), module, Euler::SLOPE_POS_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(54, 330.01), module, Euler::SLOPE_NEG_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(21, 280.01), module, Euler::SLOPE_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(54, 280.01), module, Euler::SLOPE_ABS_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(21, 330.01), module, Euler::SLOPE_POS_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(54, 330.01), module, Euler::SLOPE_NEG_OUTPUT));
     }
 };
 

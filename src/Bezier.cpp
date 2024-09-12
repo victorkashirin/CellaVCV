@@ -254,7 +254,7 @@ struct Bezier : Module {
 struct BezierWidget : ModuleWidget {
     BezierWidget(Bezier *module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Bezier.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Bezier.svg"), asset::plugin(pluginInstance, "res/Bezier-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
@@ -266,20 +266,20 @@ struct BezierWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 104.35), module, Bezier::CURVE_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.35), module, Bezier::OFFSET_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 159.15), module, Bezier::SIGNAL_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 159.15), module, Bezier::SIGNAL_INPUT));
         addParam(createParamCentered<CKSSThree>(Vec(54.74, 162.66), module, Bezier::LIMIT_SWITCH));
 
         addParam(createParamCentered<Trimpot>(Vec(22.5, 203.79), module, Bezier::FM_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(67.5, 203.79), module, Bezier::LEVEL_MOD_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 231.31), module, Bezier::FM_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 231.31), module, Bezier::LEVEL_MOD_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 231.31), module, Bezier::FM_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 231.31), module, Bezier::LEVEL_MOD_INPUT));
 
-        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 280.1), module, Bezier::CURVE_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 280.1), module, Bezier::ICURVE_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(22.5, 280.1), module, Bezier::CURVE_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 280.1), module, Bezier::ICURVE_OUTPUT));
 
-        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, Bezier::TRIG_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, Bezier::GATE_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Bezier::TRIG_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), module, Bezier::GATE_OUTPUT));
 
         addChild(createLightCentered<TinyLight<YellowLight>>(Vec(79.96, 318.0), module, Bezier::GATE_LIGHT));
     }

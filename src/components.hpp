@@ -18,8 +18,8 @@ struct MediumFresnelLight : TSvgLight<TBase> {
     }
 };
 
-struct ScrewGrey : app::SvgScrew {
+struct ScrewGrey : app::ThemedSvgScrew {
     ScrewGrey() {
-        setSvg(Svg::load(asset::plugin(pluginInstance, "res/components/ScrewGrey.svg")));
+        setSvg(Svg::load(asset::plugin(pluginInstance, "res/components/ScrewGrey.svg")), Svg::load(asset::plugin(pluginInstance, "res/components/ScrewDark.svg")));
     }
 };

@@ -332,7 +332,8 @@ struct RichWidget : ModuleWidget {
     RichWidget(Rich *module) {
         setModule(module);
 
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Rich.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Rich.svg"), asset::plugin(pluginInstance, "res/Rich-dark.svg")));
+
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
@@ -351,17 +352,17 @@ struct RichWidget : ModuleWidget {
         addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(45, 203.79), module, Rich::INVERT_PARAM, Rich::INVERT_LIGHT));
         addParam(createParamCentered<Trimpot>(Vec(75, 203.79), module, Rich::DECAY_CV_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(15, 231.31), module, Rich::ATTACK_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(45, 231.31), module, Rich::INVERT_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(75, 231.31), module, Rich::DECAY_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15, 231.31), module, Rich::ATTACK_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45, 231.31), module, Rich::INVERT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(75, 231.31), module, Rich::DECAY_INPUT));
 
         // Trigger input
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.0), module, Rich::TRIGGER_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 280.0), module, Rich::ACCENT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.0), module, Rich::TRIGGER_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 280.0), module, Rich::ACCENT_INPUT));
 
         // Envelope output
-        addOutput(createOutputCentered<PJ301MPort>(Vec(22.5, 329.25), module, Rich::ACCENT_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), module, Rich::ENVELOPE_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Rich::ACCENT_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), module, Rich::ENVELOPE_OUTPUT));
     }
 
     void appendContextMenu(Menu *menu) override {
