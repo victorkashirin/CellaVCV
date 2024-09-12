@@ -1,9 +1,10 @@
 name: Build VCV Rack Plugin
-#on: workflow_dispatch
-on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: write
+on: [push, pull_request]
 
 env:
-  rack-sdk-version: 2.5.2
+  rack-sdk-version: latest
   rack-plugin-toolchain-dir: /home/build/rack-plugin-toolchain
 
 defaults:
@@ -11,7 +12,6 @@ defaults:
     shell: bash
 
 jobs:
-
   modify-plugin-version:
     name: Modify plugin version
     runs-on: ubuntu-latest
@@ -22,14 +22,13 @@ jobs:
         with:
           path: plugin.json
           key: ${{ github.sha }}-${{ github.run_id }}
-      - name: Run modify version
-        # only modify plugin version if no tag was created
-        if: "! startsWith(github.ref, 'refs/tags/v')"
-        run: |
+      - run: |
           gitrev=`git rev-parse --short HEAD`
           pluginversion=`jq -r '.version' plugin.json`
           echo "Set plugin version from $pluginversion to $pluginversion-$gitrev"
           cat <<< `jq --arg VERSION "$pluginversion-$gitrev" '.version=$VERSION' plugin.json` > plugin.json
+        # only modify plugin version if no tag was created
+        if: "! startsWith(github.ref, 'refs/tags/v')"
 
   build:
     name: ${{ matrix.platform }}
@@ -68,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64+arm64]
+        platform: [x64, arm64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,7 +80,7 @@ jobs:
       - name: Get Rack-SDK
         run: |
           pushd $HOME
-          curl -o Rack-SDK.zip https://vcvrack.com/downloads/Rack-SDK-${{ env.rack-sdk-version }}-mac-${{ matrix.platform }}.zip
+          wget -O Rack-SDK.zip https://vcvrack.com/downloads/Rack-SDK-${{ env.rack-sdk-version }}-mac-x64+arm64.zip
           unzip Rack-SDK.zip
       - name: Build plugin
         run: |
@@ -97,39 +96,39 @@ jobs:
           path: dist/*.vcvplugin
           name: mac-${{ matrix.platform }}
 
-  # publish:
-  #   name: Publish plugin
-  #   # only create a release if a tag was created that is called e.g. v1.2.3
-  #   # see also https://vcvrack.com/manual/Manifest#version
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   runs-on: ubuntu-latest
-  #   needs:  [build, build-mac]
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: FranzDiebold/github-env-vars-action@v2
-  #     - name: Check if plugin version matches tag
-  #       run: |
-  #         pluginversion=`jq -r '.version' plugin.json`
-  #         if [ "v$pluginversion" != "${{ env.CI_REF_NAME }}" ]; then
-  #           echo "Plugin version from plugin.json 'v$pluginversion' doesn't match with tag version '${{ env.CI_REF_NAME }}'"
-  #           exit 1
-  #         fi
-  #     - name: Create Release
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         tag_name: ${{ github.ref }}
-  #         name: Release ${{ env.CI_REF_NAME }}
-  #         body: |
-  #           ${{ env.CI_REPOSITORY_NAME }} VCV Rack Plugin ${{ env.CI_REF_NAME }}
-  #         draft: false
-  #         prerelease: false
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         path: _artifacts
-  #     - name: Upload release assets
-  #       uses: svenstaro/upload-release-action@v2
-  #       with:
-  #         repo_token: ${{ secrets.GITHUB_TOKEN }}
-  #         file: _artifacts/**/*.vcvplugin
-  #         tag: ${{ github.ref }}
-  #         file_glob: true
+  publish:
+    name: Publish plugin
+    # only create a release if a tag was created that is called e.g. v1.2.3
+    # see also https://vcvrack.com/manual/Manifest#version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build, build-mac]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: FranzDiebold/github-env-vars-action@v2
+      - name: Check if plugin version matches tag
+        run: |
+          pluginversion=`jq -r '.version' plugin.json`
+          if [ "v$pluginversion" != "${{ env.CI_REF_NAME }}" ]; then
+            echo "Plugin version from plugin.json 'v$pluginversion' doesn't match with tag version '${{ env.CI_REF_NAME }}'"
+            exit 1
+          fi
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ env.CI_REF_NAME }}
+          body: |
+            ${{ env.CI_REPOSITORY_NAME }} VCV Rack Plugin ${{ env.CI_REF_NAME }}
+          draft: false
+          prerelease: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+      - name: Upload release assets
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: _artifacts/**/*.vcvplugin
+          tag: ${{ github.ref }}
+          file_glob: true
