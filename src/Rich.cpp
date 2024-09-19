@@ -224,6 +224,8 @@ struct Rich : Module {
         if (isDecaying) {
             float decayParam = params[DECAY_PARAM].getValue();
             float decayCvParam = params[DECAY_CV_PARAM].getValue();
+            // square the cv value to make it more sensitive
+            decayCvParam = (decayCvParam > 0.f) ? decayCvParam * decayCvParam : -(decayCvParam * decayCvParam);
             float decay = decayParam + inputs[DECAY_INPUT].getVoltage() / 10.f * decayCvParam;
             decay = clamp(decay, 0.f, 1.f);
             decayForCrossfade = decay;
@@ -239,6 +241,8 @@ struct Rich : Module {
         if (isAttacking) {
             float attackParam = params[ATTACK_PARAM].getValue();
             float attackCvParam = params[ATTACK_CV_PARAM].getValue();
+            // square the cv value to make it more sensitive
+            attackCvParam = (attackCvParam > 0.f) ? attackCvParam * attackCvParam : -(attackCvParam * attackCvParam);
             float attack = attackParam + inputs[ATTACK_INPUT].getVoltage() / 10.f * attackCvParam;
             attack = clamp(attack, 0.f, 1.f);
             float attackLambda = std::pow(LAMBDA_BASE, -attack) / MIN_TIME;
