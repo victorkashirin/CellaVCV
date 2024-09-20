@@ -8,4 +8,5 @@ void init(Plugin *p) {
     p->addModel(modelEuler);
     p->addModel(modelBezier);
     p->addModel(modelRich);
+    p->addModel(modelTwinPings);
 }

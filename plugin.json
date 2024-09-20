@@ -14,6 +14,15 @@
   "changelogUrl": "",
   "modules": [
     {
+      "slug": "TwinPings",
+      "name": "Twin Pings",
+      "description": "Filter",
+      "keywords": "diff math rate",
+      "tags": [
+        "Filter"
+      ]
+    },
+    {
       "slug": "Euler",
       "name": "Euler",
       "description": "Calculates rate of change of the incoming signal",
