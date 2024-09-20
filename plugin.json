@@ -58,6 +58,15 @@
       ]
     },
     {
+      "slug": "Byte",
+      "name": "Byte",
+      "description": "Bytebeat generator",
+      "keywords": "byte",
+      "tags": [
+        "Oscillator"
+      ]
+    },
+    {
       "slug": "Bezier",
       "name": "Bezier",
       "description": "Smooth random voltage generator that uses Bezier curves",
