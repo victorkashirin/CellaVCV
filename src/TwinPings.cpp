@@ -1,3 +1,4 @@
+#include "components.hpp"
 #include "filter/ripples.hpp"
 #include "plugin.hpp"
 
@@ -57,7 +58,10 @@ struct TwinPings : Module {
         configParam(CURVE_B_CV_PARAM, -1.f, 1.f, 0.f, "Curve Modulation", "%", 0, 100);
         configParam(FM_CV_B_PARAM, -1.f, 1.f, 0.f, "CV B FM", "%", 0, 100);
 
-        configSwitch(TYPE_SWITCH, -1.f, 1.f, 1.f, "Filter type", {"24db", "18db", "12db"});
+        configParam(TRACK_A_PARAM, -1.f, 1.f, 0.f, "Track A", "%", 0, 100);
+        configParam(XFM_B_PARAM, -1.f, 1.f, 0.f, "B->A FM", "%", 0, 100);
+        configSwitch(TYPE_SWITCH, -1.f, 1.f, 1.f, "Filter type", {"12db", "18db", "24db"});
+        configParam(TRACK_B_PARAM, -1.f, 1.f, 0.f, "Track B", "%", 0, 100);
 
         configInput(RES_INPUT, "Resonance");
         configInput(FREQ_A_INPUT, "Frequency A");
@@ -86,7 +90,7 @@ struct TwinPings : Module {
     void process(const ProcessArgs& args) override {
         int channels = std::max(inputs[IN_INPUT].getChannels(), 1);
 
-        // Reuse the same frame object for multiple enginesA because the params aren't touched.
+        // Filter A Frame
         ripples::RipplesEngine::Frame frameA;
         frameA.res_knob = params[RES_PARAM].getValue();
         frameA.freq_knob = rescale(params[FREQ_A_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
@@ -94,18 +98,38 @@ struct TwinPings : Module {
         frameA.fm_global_knob = params[FM_GLOBAL_A_PARAM].getValue();
         frameA.track_knob = params[TRACK_A_PARAM].getValue();
         frameA.xfm_knob = params[XFM_B_PARAM].getValue();
+        frameA.mode = (int)params[TYPE_SWITCH].getValue() + 2.f;
 
-        float curve = params[CURVE_B_PARAM].getValue();
+        // Filter B Frame
+        ripples::RipplesEngine::Frame frameB;
+        frameB.res_knob = params[RES_PARAM].getValue();
+        frameB.freq_knob = rescale(params[FREQ_B_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
+        frameB.fm_knob = params[FM_CV_B_PARAM].getValue();
+        frameB.fm_global_knob = params[FM_GLOBAL_B_PARAM].getValue();
+        frameB.track_knob = params[TRACK_B_PARAM].getValue();
+        frameB.mode = (int)params[TYPE_SWITCH].getValue() + 2.f;
+        frameB.b_output = 0.f;
+
+        float curve = clamp(
+            params[CURVE_B_PARAM].getValue() + params[CURVE_B_CV_PARAM].getValue() * inputs[CURVE_B_INPUT].getVoltage() * 0.1f,
+            0.f, 1.f);
 
         for (int c = 0; c < channels; c++) {
+            frameB.res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
+            frameB.freq_cv = inputs[FREQ_B_INPUT].getPolyVoltage(c);
+            frameB.fm_cv = inputs[FM_CV_B_INPUT].getPolyVoltage(c);
+            frameB.input = inputs[IN_INPUT].getVoltage(c);
+
+            enginesB[c].process(frameB);
+
             frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c);
             frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
             frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
             frameA.input = inputs[IN_INPUT].getVoltage(c);
-
+            frameA.b_output = frameB.output;
             enginesA[c].process(frameA);
 
-            outputs[OUT_OUTPUT].setVoltage(frameA.lp2, c);
+            outputs[OUT_OUTPUT].setVoltage(frameA.output - curve * frameB.output, c);
         }
 
         outputs[OUT_OUTPUT].setChannels(channels);
@@ -117,8 +141,8 @@ struct TwinPingsWidget : ModuleWidget {
         setModule(module);
         setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPings.svg")));
 
-        addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, 0)));
-        addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        addChild(createWidget<ScrewGrey>(Vec(0, 0)));
+        addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         addParam(createParamCentered<RoundHugeBlackKnob>(Vec(45, 76.38), module, TwinPings::FREQ_A_PARAM));
         addParam(createParamCentered<RoundHugeBlackKnob>(Vec(135, 76.38), module, TwinPings::FREQ_B_PARAM));

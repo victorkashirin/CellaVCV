@@ -116,20 +116,17 @@ class RipplesEngine {
         float fm_global_knob;  // -1 to 1 linear
         float track_knob;      //  -1 to 1 linear
         float xfm_knob;        //  -1 to 1 linear
+        int mode;              //  0.f or 1.f or 2.f
 
         // Inputs
         float res_cv;
         float freq_cv;
         float fm_cv;
         float input;
-        float gain_cv;
-        bool gain_cv_present;
+        float b_output;
 
         // Outputs
-        float bp2;
-        float lp2;
-        float lp3;
-        float lp4;
+        float output;
     };
 
     RipplesEngine() {
@@ -159,7 +156,9 @@ class RipplesEngine {
         float v_oct = 0.f;
         v_oct += (frame.freq_knob - 1.f) * kFreqKnobVoltage;
         v_oct += frame.freq_cv;
-        v_oct += frame.fm_cv * frame.fm_knob;
+        v_oct += frame.fm_global_knob * (frame.fm_cv * frame.fm_knob +
+                                         frame.track_knob * frame.input +
+                                         frame.xfm_knob * frame.b_output);
         v_oct = std::min(v_oct, 0.f);
 
         // Calculate resonance control current
@@ -181,10 +180,7 @@ class RipplesEngine {
             outputs = aa_filter_.ProcessDown(outputs);
         }
 
-        frame.bp2 = outputs[0];
-        frame.lp2 = outputs[1];
-        frame.lp3 = outputs[2];
-        frame.lp4 = outputs[3];
+        frame.output = outputs[frame.mode];
     }
 
    protected:
