@@ -3,15 +3,26 @@
 
 struct TwinPings : Module {
     enum ParamIds {
+        FREQ_A_PARAM,
+        FREQ_B_PARAM,
         RES_PARAM,
-        FREQ_PARAM,
-        FM_PARAM,
+        RES_CV_PARAM,
+        TRACK_A_PARAM,
+        TRACK_B_PARAM,
+        FM_A_PARAM,
+        FM_B_PARAM,
+        FM_CV_A_PARAM,
+        FM_CV_B_PARAM,
+        XFM_B_PARAM,
+        CURVE_B_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
         RES_INPUT,
-        FREQ_INPUT,
-        FM_INPUT,
+        FREQ_A_INPUT,
+        FREQ_B_INPUT,
+        FM_CV_A_INPUT,
+        FM_CV_B_INPUT,
         IN_INPUT,
         GAIN_INPUT,
         NUM_INPUTS
@@ -27,17 +38,18 @@ struct TwinPings : Module {
         NUM_LIGHTS
     };
 
-    ripples::RipplesEngine engines[16];
+    ripples::RipplesEngine enginesA[16];
+    ripples::RipplesEngine enginesB[16];
 
     TwinPings() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance", "%", 0, 100);
-        configParam(FREQ_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency", " Hz", 2.f);
-        configParam(FM_PARAM, -1.f, 1.f, 0.f, "Frequency modulation", "%", 0, 100);
+        configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency", " Hz", 2.f);
+        configParam(FM_A_PARAM, -1.f, 1.f, 0.f, "Frequency modulation", "%", 0, 100);
 
         configInput(RES_INPUT, "Resonance");
-        configInput(FREQ_INPUT, "Frequency");
-        configInput(FM_INPUT, "FM");
+        configInput(FREQ_A_INPUT, "Frequency");
+        configInput(FM_CV_A_INPUT, "FM");
         configInput(IN_INPUT, "Audio");
         configInput(GAIN_INPUT, "Gain");
 
@@ -61,33 +73,34 @@ struct TwinPings : Module {
     void onSampleRateChange() override {
         // TODO In Rack v2, replace with args.sampleRate
         for (int c = 0; c < 16; c++) {
-            engines[c].setSampleRate(APP->engine->getSampleRate());
+            enginesA[c].setSampleRate(APP->engine->getSampleRate());
+            enginesB[c].setSampleRate(APP->engine->getSampleRate());
         }
     }
 
     void process(const ProcessArgs& args) override {
         int channels = std::max(inputs[IN_INPUT].getChannels(), 1);
 
-        // Reuse the same frame object for multiple engines because the params aren't touched.
-        ripples::RipplesEngine::Frame frame;
-        frame.res_knob = params[RES_PARAM].getValue();
-        frame.freq_knob = rescale(params[FREQ_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
-        frame.fm_knob = params[FM_PARAM].getValue();
-        frame.gain_cv_present = inputs[GAIN_INPUT].isConnected();
+        // Reuse the same frame object for multiple enginesA because the params aren't touched.
+        ripples::RipplesEngine::Frame frameA;
+        frameA.res_knob = params[RES_PARAM].getValue();
+        frameA.freq_knob = rescale(params[FREQ_A_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
+        frameA.fm_knob = params[FM_A_PARAM].getValue();
+        frameA.gain_cv_present = inputs[GAIN_INPUT].isConnected();
 
         for (int c = 0; c < channels; c++) {
-            frame.res_cv = inputs[RES_INPUT].getPolyVoltage(c);
-            frame.freq_cv = inputs[FREQ_INPUT].getPolyVoltage(c);
-            frame.fm_cv = inputs[FM_INPUT].getPolyVoltage(c);
-            frame.input = inputs[IN_INPUT].getVoltage(c);
-            frame.gain_cv = inputs[GAIN_INPUT].getPolyVoltage(c);
+            frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c);
+            frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
+            frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
+            frameA.input = inputs[IN_INPUT].getVoltage(c);
+            frameA.gain_cv = inputs[GAIN_INPUT].getPolyVoltage(c);
 
-            engines[c].process(frame);
+            enginesA[c].process(frameA);
 
-            outputs[BP2_OUTPUT].setVoltage(frame.bp2, c);
-            outputs[LP2_OUTPUT].setVoltage(frame.lp2, c);
-            outputs[LP3_OUTPUT].setVoltage(frame.lp3, c);
-            outputs[LP4_OUTPUT].setVoltage(frame.lp4, c);
+            outputs[BP2_OUTPUT].setVoltage(frameA.bp2, c);
+            outputs[LP2_OUTPUT].setVoltage(frameA.lp2, c);
+            outputs[LP3_OUTPUT].setVoltage(frameA.lp3, c);
+            outputs[LP4_OUTPUT].setVoltage(frameA.lp4, c);
         }
 
         outputs[BP2_OUTPUT].setChannels(channels);
@@ -106,12 +119,12 @@ struct TwinPingsWidget : ModuleWidget {
         addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         addParam(createParamCentered<Rogan2PSRed>(mm2px(Vec(8.872, 20.877)), module, TwinPings::RES_PARAM));
-        addParam(createParamCentered<Rogan3PSWhite>(mm2px(Vec(20.307, 42.468)), module, TwinPings::FREQ_PARAM));
-        addParam(createParamCentered<Rogan2PSGreen>(mm2px(Vec(31.732 + 0.1, 64.059)), module, TwinPings::FM_PARAM));
+        addParam(createParamCentered<Rogan3PSWhite>(mm2px(Vec(20.307, 42.468)), module, TwinPings::FREQ_A_PARAM));
+        addParam(createParamCentered<Rogan2PSGreen>(mm2px(Vec(31.732 + 0.1, 64.059)), module, TwinPings::FM_A_PARAM));
 
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 86.909)), module, TwinPings::RES_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(20.297, 86.909)), module, TwinPings::FREQ_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(32.367, 86.909)), module, TwinPings::FM_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(20.297, 86.909)), module, TwinPings::FREQ_A_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(32.367, 86.909)), module, TwinPings::FM_CV_A_INPUT));
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 98.979)), module, TwinPings::IN_INPUT));
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 111.05)), module, TwinPings::GAIN_INPUT));
 
