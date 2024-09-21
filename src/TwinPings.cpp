@@ -9,12 +9,15 @@ struct TwinPings : Module {
         RES_CV_PARAM,
         TRACK_A_PARAM,
         TRACK_B_PARAM,
-        FM_A_PARAM,
-        FM_B_PARAM,
+        FM_GLOBAL_A_PARAM,
+        FM_GLOBAL_B_PARAM,
         FM_CV_A_PARAM,
         FM_CV_B_PARAM,
+
         XFM_B_PARAM,
+        TYPE_SWITCH,
         CURVE_B_PARAM,
+        CURVE_B_CV_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -24,14 +27,11 @@ struct TwinPings : Module {
         FM_CV_A_INPUT,
         FM_CV_B_INPUT,
         IN_INPUT,
-        GAIN_INPUT,
+        CURVE_B_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
-        BP2_OUTPUT,
-        LP2_OUTPUT,
-        LP4_OUTPUT,
-        LP3_OUTPUT,
+        OUT_OUTPUT,
         NUM_OUTPUTS
     };
     enum LightIds {
@@ -43,26 +43,31 @@ struct TwinPings : Module {
 
     TwinPings() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+
+        configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency A", " Hz", 2.f);
+        configParam(FREQ_B_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency B", " Hz", 2.f);
+
+        configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 0.f, "Frequency A modulation", "%", 0, 100);
         configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance", "%", 0, 100);
-        configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency", " Hz", 2.f);
-        configParam(FM_A_PARAM, -1.f, 1.f, 0.f, "Frequency modulation", "%", 0, 100);
+        configParam(CURVE_B_PARAM, 0.f, 1.f, 1.f, "Curve B", "%", 0, 100);
+        configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 0.f, "Frequency B modulation", "%", 0, 100);
+
+        configParam(FM_CV_A_PARAM, -1.f, 1.f, 0.f, "CV A FM", "%", 0, 100);
+        configParam(RES_CV_PARAM, -1.f, 1.f, 0.f, "Resonance CV modulation", "%", 0, 100);
+        configParam(CURVE_B_CV_PARAM, -1.f, 1.f, 0.f, "Curve Modulation", "%", 0, 100);
+        configParam(FM_CV_B_PARAM, -1.f, 1.f, 0.f, "CV B FM", "%", 0, 100);
+
+        configSwitch(TYPE_SWITCH, -1.f, 1.f, 1.f, "Filter type", {"24db", "18db", "12db"});
 
         configInput(RES_INPUT, "Resonance");
-        configInput(FREQ_A_INPUT, "Frequency");
-        configInput(FM_CV_A_INPUT, "FM");
+        configInput(FREQ_A_INPUT, "Frequency A");
+        configInput(FREQ_B_INPUT, "Frequency B");
+        configInput(FM_CV_A_INPUT, "FM A");
+        configInput(FM_CV_B_INPUT, "FM B");
         configInput(IN_INPUT, "Audio");
-        configInput(GAIN_INPUT, "Gain");
 
-        configOutput(BP2_OUTPUT, "Band-pass 2-pole (12 dB/oct)");
-        configOutput(LP2_OUTPUT, "Low-pass 2-pole (12 dB/oct)");
-        configOutput(LP4_OUTPUT, "Low-pass 4-pole (24 dB/oct)");
-        configOutput(LP3_OUTPUT, "Low-pass 3-pole (12 dB/oct)");
-
-        configBypass(IN_INPUT, BP2_OUTPUT);
-        configBypass(IN_INPUT, LP2_OUTPUT);
-        configBypass(IN_INPUT, LP4_OUTPUT);
-        configBypass(IN_INPUT, LP3_OUTPUT);
-
+        configOutput(OUT_OUTPUT, "Low-pass 2-pole (12 dB/oct)");
+        configBypass(IN_INPUT, OUT_OUTPUT);
         onSampleRateChange();
     }
 
@@ -85,53 +90,63 @@ struct TwinPings : Module {
         ripples::RipplesEngine::Frame frameA;
         frameA.res_knob = params[RES_PARAM].getValue();
         frameA.freq_knob = rescale(params[FREQ_A_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
-        frameA.fm_knob = params[FM_A_PARAM].getValue();
-        frameA.gain_cv_present = inputs[GAIN_INPUT].isConnected();
+        frameA.fm_knob = params[FM_CV_A_PARAM].getValue();
+        frameA.fm_global_knob = params[FM_GLOBAL_A_PARAM].getValue();
+        frameA.track_knob = params[TRACK_A_PARAM].getValue();
+        frameA.xfm_knob = params[XFM_B_PARAM].getValue();
+
+        float curve = params[CURVE_B_PARAM].getValue();
 
         for (int c = 0; c < channels; c++) {
             frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c);
             frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
             frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
             frameA.input = inputs[IN_INPUT].getVoltage(c);
-            frameA.gain_cv = inputs[GAIN_INPUT].getPolyVoltage(c);
 
             enginesA[c].process(frameA);
 
-            outputs[BP2_OUTPUT].setVoltage(frameA.bp2, c);
-            outputs[LP2_OUTPUT].setVoltage(frameA.lp2, c);
-            outputs[LP3_OUTPUT].setVoltage(frameA.lp3, c);
-            outputs[LP4_OUTPUT].setVoltage(frameA.lp4, c);
+            outputs[OUT_OUTPUT].setVoltage(frameA.lp2, c);
         }
 
-        outputs[BP2_OUTPUT].setChannels(channels);
-        outputs[LP2_OUTPUT].setChannels(channels);
-        outputs[LP3_OUTPUT].setChannels(channels);
-        outputs[LP4_OUTPUT].setChannels(channels);
+        outputs[OUT_OUTPUT].setChannels(channels);
     }
 };
 
 struct TwinPingsWidget : ModuleWidget {
     TwinPingsWidget(TwinPings* module) {
         setModule(module);
-        setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPings2.svg")));
+        setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPings.svg")));
 
         addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, 0)));
         addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        addParam(createParamCentered<Rogan2PSRed>(mm2px(Vec(8.872, 20.877)), module, TwinPings::RES_PARAM));
-        addParam(createParamCentered<Rogan3PSWhite>(mm2px(Vec(20.307, 42.468)), module, TwinPings::FREQ_A_PARAM));
-        addParam(createParamCentered<Rogan2PSGreen>(mm2px(Vec(31.732 + 0.1, 64.059)), module, TwinPings::FM_A_PARAM));
+        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(45, 76.38), module, TwinPings::FREQ_A_PARAM));
+        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(135, 76.38), module, TwinPings::FREQ_B_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 86.909)), module, TwinPings::RES_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(20.297, 86.909)), module, TwinPings::FREQ_A_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(32.367, 86.909)), module, TwinPings::FM_CV_A_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 98.979)), module, TwinPings::IN_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(8.227, 111.05)), module, TwinPings::GAIN_INPUT));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 151.81), module, TwinPings::FM_GLOBAL_A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 151.75), module, TwinPings::RES_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 151.75), module, TwinPings::CURVE_B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 151.81), module, TwinPings::FM_GLOBAL_B_PARAM));
 
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(20.297, 98.979)), module, TwinPings::BP2_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(32.367, 98.979)), module, TwinPings::LP2_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(20.297, 111.05)), module, TwinPings::LP4_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(32.367, 111.05)), module, TwinPings::LP3_OUTPUT));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 201.38), module, TwinPings::TRACK_A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 201.38), module, TwinPings::XFM_B_PARAM));
+        addParam(createParamCentered<CKSSThree>(Vec(103.02, 201.38), module, TwinPings::TYPE_SWITCH));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 201.38), module, TwinPings::TRACK_B_PARAM));
+
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 257.04), module, TwinPings::FM_CV_A_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 257.04), module, TwinPings::RES_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(112.5, 257.04), module, TwinPings::CURVE_B_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(157.5, 257.04), module, TwinPings::FM_CV_B_PARAM));
+
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 282.41), module, TwinPings::FM_CV_A_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 282.41), module, TwinPings::RES_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(112.5, 282.41), module, TwinPings::CURVE_B_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(157.5, 282.41), module, TwinPings::FM_CV_B_INPUT));
+
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 328.29), module, TwinPings::IN_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 328.29), module, TwinPings::FREQ_A_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(112.5, 328.29), module, TwinPings::FREQ_B_INPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(157.5, 328.29), module, TwinPings::OUT_OUTPUT));
     }
 };
 
