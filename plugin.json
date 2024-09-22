@@ -14,8 +14,8 @@
   "changelogUrl": "",
   "modules": [
     {
-      "slug": "TwinPings",
-      "name": "Twin Pings",
+      "slug": "TwinPeaks",
+      "name": "Twin Peaks",
       "description": "Filter",
       "keywords": "diff math rate",
       "tags": [

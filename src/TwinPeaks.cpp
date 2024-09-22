@@ -2,7 +2,7 @@
 #include "filter/ripples.hpp"
 #include "plugin.hpp"
 
-struct TwinPings : Module {
+struct TwinPeaks : Module {
     enum ParamIds {
         FREQ_A_PARAM,
         FREQ_B_PARAM,
@@ -42,16 +42,16 @@ struct TwinPings : Module {
     ripples::RipplesEngine enginesA[16];
     ripples::RipplesEngine enginesB[16];
 
-    TwinPings() {
+    TwinPeaks() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
-        configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency A", " Hz", 2.f);
+        configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMin), "Frequency A", " Hz", 2.f);
         configParam(FREQ_B_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency B", " Hz", 2.f);
 
-        configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 0.f, "Frequency A modulation", "%", 0, 100);
+        configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 1.f, "Frequency A modulation", "%", 0, 100);
         configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance", "%", 0, 100);
         configParam(CURVE_B_PARAM, 0.f, 1.f, 1.f, "Curve B", "%", 0, 100);
-        configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 0.f, "Frequency B modulation", "%", 0, 100);
+        configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 1.f, "Frequency B modulation", "%", 0, 100);
 
         configParam(FM_CV_A_PARAM, -1.f, 1.f, 0.f, "CV A FM", "%", 0, 100);
         configParam(RES_CV_PARAM, -1.f, 1.f, 0.f, "Resonance CV modulation", "%", 0, 100);
@@ -60,7 +60,7 @@ struct TwinPings : Module {
 
         configParam(TRACK_A_PARAM, -1.f, 1.f, 0.f, "Track A", "%", 0, 100);
         configParam(XFM_B_PARAM, -1.f, 1.f, 0.f, "B->A FM", "%", 0, 100);
-        configSwitch(TYPE_SWITCH, -1.f, 1.f, 1.f, "Filter type", {"12db", "18db", "24db"});
+        configSwitch(TYPE_SWITCH, -1.f, 1.f, 0.f, "Filter type", {"12db", "18db", "24db"});
         configParam(TRACK_B_PARAM, -1.f, 1.f, 0.f, "Track B", "%", 0, 100);
 
         configInput(RES_INPUT, "Resonance");
@@ -117,12 +117,12 @@ struct TwinPings : Module {
         for (int c = 0; c < channels; c++) {
             frameB.res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
             frameB.freq_cv = inputs[FREQ_B_INPUT].getPolyVoltage(c);
-            frameB.fm_cv = inputs[FM_CV_B_INPUT].getPolyVoltage(c);
+            frameB.fm_cv = (inputs[FM_CV_B_INPUT].isConnected()) ? inputs[FM_CV_B_INPUT].getPolyVoltage(c) : inputs[FM_CV_A_INPUT].getPolyVoltage(c);
             frameB.input = inputs[IN_INPUT].getVoltage(c);
 
             enginesB[c].process(frameB);
 
-            frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c);
+            frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
             frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
             frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
             frameA.input = inputs[IN_INPUT].getVoltage(c);
@@ -136,42 +136,43 @@ struct TwinPings : Module {
     }
 };
 
-struct TwinPingsWidget : ModuleWidget {
-    TwinPingsWidget(TwinPings* module) {
+struct TwinPeaksWidget : ModuleWidget {
+    TwinPeaksWidget(TwinPeaks* module) {
         setModule(module);
-        setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPings.svg")));
+        // setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPeaks.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/TwinPeaks.svg"), asset::plugin(pluginInstance, "res/TwinPeaks-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(45, 76.38), module, TwinPings::FREQ_A_PARAM));
-        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(135, 76.38), module, TwinPings::FREQ_B_PARAM));
+        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(45, 78.88), module, TwinPeaks::FREQ_A_PARAM));
+        addParam(createParamCentered<RoundHugeBlackKnob>(Vec(135, 78.88), module, TwinPeaks::FREQ_B_PARAM));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 151.81), module, TwinPings::FM_GLOBAL_A_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 151.75), module, TwinPings::RES_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 151.75), module, TwinPings::CURVE_B_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 151.81), module, TwinPings::FM_GLOBAL_B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.38), module, TwinPeaks::FM_GLOBAL_A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.38), module, TwinPeaks::RES_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.38), module, TwinPeaks::CURVE_B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.38), module, TwinPeaks::FM_GLOBAL_B_PARAM));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 201.38), module, TwinPings::TRACK_A_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 201.38), module, TwinPings::XFM_B_PARAM));
-        addParam(createParamCentered<CKSSThree>(Vec(103.02, 201.38), module, TwinPings::TYPE_SWITCH));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 201.38), module, TwinPings::TRACK_B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 203.79), module, TwinPeaks::TRACK_A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, TwinPeaks::XFM_B_PARAM));
+        addParam(createParamCentered<CKSSThree>(Vec(103.02, 208.09), module, TwinPeaks::TYPE_SWITCH));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, TwinPeaks::TRACK_B_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(22.5, 257.04), module, TwinPings::FM_CV_A_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(67.5, 257.04), module, TwinPings::RES_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(112.5, 257.04), module, TwinPings::CURVE_B_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(157.5, 257.04), module, TwinPings::FM_CV_B_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 252.5), module, TwinPeaks::FM_CV_A_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 252.5), module, TwinPeaks::RES_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(112.5, 252.5), module, TwinPeaks::CURVE_B_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(157.5, 252.5), module, TwinPeaks::FM_CV_B_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 282.41), module, TwinPings::FM_CV_A_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 282.41), module, TwinPings::RES_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(112.5, 282.41), module, TwinPings::CURVE_B_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(157.5, 282.41), module, TwinPings::FM_CV_B_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.01), module, TwinPeaks::FM_CV_A_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 280.01), module, TwinPeaks::RES_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 280.01), module, TwinPeaks::CURVE_B_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 280.01), module, TwinPeaks::FM_CV_B_INPUT));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 328.29), module, TwinPings::IN_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 328.29), module, TwinPings::FREQ_A_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(112.5, 328.29), module, TwinPings::FREQ_B_INPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(157.5, 328.29), module, TwinPings::OUT_OUTPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, TwinPeaks::IN_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), module, TwinPeaks::FREQ_A_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 329.25), module, TwinPeaks::FREQ_B_INPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(157.5, 329.25), module, TwinPeaks::OUT_OUTPUT));
     }
 };
 
-Model* modelTwinPings = createModel<TwinPings, TwinPingsWidget>("TwinPings");
+Model* modelTwinPeaks = createModel<TwinPeaks, TwinPeaksWidget>("TwinPeaks");
