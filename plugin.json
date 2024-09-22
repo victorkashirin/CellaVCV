@@ -11,7 +11,7 @@
   "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.pdf",
   "sourceUrl": "https://github.com/victorkashirin/CellaVCV",
   "donateUrl": "",
-  "changelogUrl": "",
+  "changelogUrl": "https://github.com/victorkashirin/CellaVCV/blob/master/CHANGELOG.md",
   "modules": [
     {
       "slug": "TwinPeaks",
