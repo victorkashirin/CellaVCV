@@ -8,3 +8,4 @@ extern Plugin *pluginInstance;
 extern Model *modelBezier;
 extern Model *modelEuler;
 extern Model *modelRich;
+extern Model *modelTwinPeaks;
