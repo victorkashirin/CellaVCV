@@ -48,29 +48,30 @@ struct TwinPeaks : Module {
         configParam(FREQ_A_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMin), "Frequency A", " Hz", 2.f);
         configParam(FREQ_B_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency B", " Hz", 2.f);
 
-        configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 1.f, "Frequency A modulation", "%", 0, 100);
-        configParam(RES_PARAM, 0.f, 1.f, 0.f, "Resonance", "%", 0, 100);
-        configParam(CURVE_B_PARAM, 0.f, 1.f, 1.f, "Curve B", "%", 0, 100);
-        configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 1.f, "Frequency B modulation", "%", 0, 100);
+        configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 1.f, "Frequency A mod", "%", 0, 100);
+        configParam(RES_PARAM, 0.f, 1.f, 0.6f, "Resonance", "%", 0, 100);
+        configParam(CURVE_B_PARAM, 0.f, 1.f, 1.f, "Low Pass<>Twin Peak", "%", 0, 100);
+        configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 1.f, "Frequency B mod", "%", 0, 100);
 
-        configParam(FM_CV_A_PARAM, -1.f, 1.f, 0.f, "CV A FM", "%", 0, 100);
-        configParam(RES_CV_PARAM, -1.f, 1.f, 0.f, "Resonance CV modulation", "%", 0, 100);
-        configParam(CURVE_B_CV_PARAM, -1.f, 1.f, 0.f, "Curve Modulation", "%", 0, 100);
-        configParam(FM_CV_B_PARAM, -1.f, 1.f, 0.f, "CV B FM", "%", 0, 100);
+        configParam(FM_CV_A_PARAM, -1.f, 1.f, 0.f, "Frequency A mod CV", "%", 0, 100);
+        configParam(RES_CV_PARAM, -1.f, 1.f, 0.f, "Resonance mod CV", "%", 0, 100);
+        configParam(CURVE_B_CV_PARAM, -1.f, 1.f, 0.f, "LP<>TWP mod CV", "%", 0, 100);
+        configParam(FM_CV_B_PARAM, -1.f, 1.f, 0.f, "Frequency B mod CV", "%", 0, 100);
 
         configParam(TRACK_A_PARAM, -1.f, 1.f, 0.f, "Track A", "%", 0, 100);
         configParam(XFM_B_PARAM, -1.f, 1.f, 0.f, "B->A FM", "%", 0, 100);
-        configSwitch(TYPE_SWITCH, -1.f, 1.f, 0.f, "Filter type", {"12db", "18db", "24db"});
+        configSwitch(TYPE_SWITCH, -1.f, 1.f, 0.f, "Filter type", {"12dB", "18dB", "24dB"});
         configParam(TRACK_B_PARAM, -1.f, 1.f, 0.f, "Track B", "%", 0, 100);
 
         configInput(RES_INPUT, "Resonance");
+        configInput(CURVE_B_INPUT, "LP<>TWP");
         configInput(FREQ_A_INPUT, "Frequency A");
         configInput(FREQ_B_INPUT, "Frequency B");
         configInput(FM_CV_A_INPUT, "FM A");
         configInput(FM_CV_B_INPUT, "FM B");
         configInput(IN_INPUT, "Audio");
 
-        configOutput(OUT_OUTPUT, "Low-pass 2-pole (12 dB/oct)");
+        configOutput(OUT_OUTPUT, "Audio");
         configBypass(IN_INPUT, OUT_OUTPUT);
         onSampleRateChange();
     }
