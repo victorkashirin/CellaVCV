@@ -2,6 +2,7 @@
 
 ### 2.0.3 (2024-09-22)
 * Added support for dark panels
+
 New modules:
 * Twin Peaks - module inspired by TwinPeak Filter / Resonator by Rob Hordijk
 
@@ -13,7 +14,9 @@ New modules:
 * Rich - expressive AD envelope generator with stepped or modulated accent
 
 Module Updates:
-* Euler: (1) Added parameter Smooth for smoothing incoming signal (2) Three more outputs added: absolute rate, positive component and negative component
+* Euler:
+  * Added parameter Smooth for smoothing incoming signal
+  * Three more outputs added: absolute rate, positive component and negative component
 
 
 ### 2.0.1 (2024-08-15)
