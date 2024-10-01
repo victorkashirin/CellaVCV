@@ -13,6 +13,8 @@ While you can use this module for filtering sound sources, it is best suited for
 
 Under the hood, the module uses the DSP core from Audible Instruments' Liquid Filter but adds the option to use an 18dB 3-pole filter output, which was used by Rob Hordijk in his TwinPeak filter.
 
+[YOUTUBE: Cella - Twink Peaks DEMO](https://www.youtube.com/watch?v=5Igmv7xRjQA)
+
 ### Rich
 **Rich** is an expressive AD envelope generator with stepped or modulated accent. **Step** parameter specifies how many increments accent will have if it is triggered continuously. Positive number of steps will provide expected accent, while negative value will make an inverted accent that subtracts from baseline level. Most importantly, **Accent** input accepts not only triggers, but any CV signal between 0V and 10V, and further modulates accent level, allowing for any desired accent pattern. Stepped accent can be rising or falling, which is controlled by the button at the center of module or respective input below it.
 
