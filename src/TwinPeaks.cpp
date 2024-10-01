@@ -116,21 +116,23 @@ struct TwinPeaks : Module {
             0.f, 1.f);
 
         for (int c = 0; c < channels; c++) {
-            frameB.res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
+            float res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
+            float input = inputs[IN_INPUT].getVoltage(c);
+            frameB.res_cv = res_cv;
             frameB.freq_cv = inputs[FREQ_B_INPUT].getPolyVoltage(c);
             frameB.fm_cv = (inputs[FM_CV_B_INPUT].isConnected()) ? inputs[FM_CV_B_INPUT].getPolyVoltage(c) : inputs[FM_CV_A_INPUT].getPolyVoltage(c);
-            frameB.input = inputs[IN_INPUT].getVoltage(c);
+            frameB.input = input;
 
             enginesB[c].process(frameB);
 
-            frameA.res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
+            frameA.res_cv = res_cv;
             frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
             frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
-            frameA.input = inputs[IN_INPUT].getVoltage(c);
+            frameA.input = input;
             frameA.b_output = frameB.output;
             enginesA[c].process(frameA);
 
-            outputs[OUT_OUTPUT].setVoltage(frameA.output - curve * frameB.output, c);
+            outputs[OUT_OUTPUT].setVoltage(clamp(frameA.output - curve * frameB.output, -12.f, 12.f), c);
         }
 
         outputs[OUT_OUTPUT].setChannels(channels);
@@ -140,7 +142,6 @@ struct TwinPeaks : Module {
 struct TwinPeaksWidget : ModuleWidget {
     TwinPeaksWidget(TwinPeaks* module) {
         setModule(module);
-        // setPanel(Svg::load(asset::plugin(pluginInstance, "res/TwinPeaks.svg")));
         setPanel(createPanel(asset::plugin(pluginInstance, "res/TwinPeaks.svg"), asset::plugin(pluginInstance, "res/TwinPeaks-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
