@@ -73,7 +73,6 @@ struct TwinPeaks : Module {
 
         configOutput(OUT_OUTPUT, "Audio");
         configBypass(IN_INPUT, OUT_OUTPUT);
-        onSampleRateChange();
     }
 
     void onReset() override {
