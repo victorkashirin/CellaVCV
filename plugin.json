@@ -14,6 +14,15 @@
   "changelogUrl": "https://github.com/victorkashirin/CellaVCV/blob/master/CHANGELOG.md",
   "modules": [
     {
+      "slug": "Rezo",
+      "name": "Rezo",
+      "description": "Dual resonant filter inspired by the design of Rob Hordijk's TwinPeak filter. Made to be pinged.",
+      "keywords": "hordijk resonator ping",
+      "tags": [
+        "Filter"
+      ]
+    },
+    {
       "slug": "Resonator",
       "name": "Resonator",
       "description": "Dual resonant filter inspired by the design of Rob Hordijk's TwinPeak filter. Made to be pinged.",

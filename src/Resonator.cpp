@@ -81,6 +81,8 @@ struct Resonator : Module {
         }
     }
 
+    float previousFreq[4] = {0.f, 0.f, 0.f, 0.f};
+
     void process(const ProcessArgs& args) override {
         float input = inputs[IN_INPUT].getVoltage();
         float res = params[RES_PARAM].getValue() + inputs[RES_CV_INPUT].getVoltage();
@@ -99,6 +101,14 @@ struct Resonator : Module {
             float filteredFreq = freqSlewLimiters[i].process(args.sampleTime, freq);
             float decay = params[DECAY1_PARAM + i * 3].getValue();
             float amp = params[AMP1_PARAM + i * 3].getValue();
+
+            // Check if the frequency has changed
+            // if (freq != previousFreq[i]) {
+            //     // Clear the buffer if the frequency has changed
+            //     float val = delayBuffers[i][delayIndices[i]];
+            //     std::fill(delayBuffers[i].begin(), delayBuffers[i].end(), val);
+            //     previousFreq[i] = freq;
+            // }
 
             // Calculate delay length for the resonator
             float delayLength = sampleRate / filteredFreq;

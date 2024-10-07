@@ -10,3 +10,4 @@ extern Model *modelEuler;
 extern Model *modelRich;
 extern Model *modelTwinPeaks;
 extern Model *modelResonator;
+extern Model *modelRezo;
