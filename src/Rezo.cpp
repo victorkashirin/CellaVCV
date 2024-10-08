@@ -187,33 +187,31 @@ struct RezoModuleWidget : ModuleWidget {
         setModule(module);
         setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/Rezo.svg")));
 
-        float xOffset = 30;
-        float yOffset = 30;
-        float xSpacing = 90;
+        float xOffset = 22.5;
+        float yOffset = 53.5;
+        float xSpacing = 45;
         float ySpacing = 50;
 
         for (int i = 0; i < 4; i++) {
             addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset), module, RezoModule::PITCH1_PARAM + i * 2));
             addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, RezoModule::AMP1_PARAM + i * 2));
-            addInput(createInputCentered<ThemedPJ301MPort>(Vec(xOffset + i * xSpacing, yOffset + 2 * ySpacing), module, RezoModule::PITCH1_INPUT + i));
         }
 
-        // Pitch knob
-        // addParam(createParamCentered<RoundBlackKnob>(Vec(40, 40), module, RezoModule::PITCH_PARAM));
+        for (int i = 0; i < 4; i++) {
+            addInput(createInputCentered<ThemedPJ301MPort>(Vec(xOffset + i * xSpacing, 280), module, RezoModule::PITCH1_INPUT + i));
+        }
 
         // Decay knob
-        addParam(createParamCentered<RoundBlackKnob>(Vec(214.5, 281.3), module, RezoModule::DECAY_PARAM));
-
-        // Cutoff frequency knob
-        addParam(createParamCentered<RoundBlackKnob>(Vec(267.5, 281.3), module, RezoModule::TONE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, RezoModule::DECAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, RezoModule::TONE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.5), module, RezoModule::MIX_PARAM));
 
         // Input signal
-        addInput(createInputCentered<PJ301MPort>(Vec(52.5, 329.25), module, RezoModule::IN_INPUT));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(323.5, 281.3), module, RezoModule::MIX_PARAM));
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 329.25), module, RezoModule::IN_INPUT));
 
         // Output signal
-        addOutput(createOutputCentered<PJ301MPort>(Vec(323.5, 329.25), module, RezoModule::OUT_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(267.5, 329.25), module, RezoModule::WET_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(112.5, 329.25), module, RezoModule::WET_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(157.5, 329.25), module, RezoModule::OUT_OUTPUT));
     }
 };
 
