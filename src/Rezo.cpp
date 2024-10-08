@@ -27,10 +27,15 @@ struct RezoModule : Module {
     };
     enum InputIds {
         IN_INPUT,  // Incoming signal
+        PITCH1_INPUT,
+        PITCH2_INPUT,
+        PITCH3_INPUT,
+        PITCH4_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
         OUT_OUTPUT,  // Resonated signal output
+        WET_OUTPUT,
         NUM_OUTPUTS
     };
     enum LightIds {
@@ -60,23 +65,28 @@ struct RezoModule : Module {
     // Variables for delay time interpolation
     // float currentDelaySamples = 0.0f;   // Current delay time in samples
     // float targetDelaySamples = 0.0f;    // Target delay time in samples
-    float interpolationSpeed = 0.001f;  // Speed of interpolation
+    float interpolationSpeed = 0.1f;  // Speed of interpolation
 
     float sampleRate = 44100.f;
 
     RezoModule() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configParam(PITCH1_PARAM, -54.f, 54.f, 0.f, "Frequency 1", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP1_PARAM, 0.0, 2.0, 1.f, "Amplitude 1", " dB", -10, 20);
+        configParam(AMP1_PARAM, 0.0, 2.0, 0.5f, "Amplitude 1", " dB", -10, 20);
         configParam(PITCH2_PARAM, -54.f, 54.f, 0.f, "Frequency 2", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP2_PARAM, 0.0, 2.0, 1.f, "Amplitude 2", " dB", -10, 20);
+        configParam(AMP2_PARAM, 0.0, 2.0, 0.5f, "Amplitude 2", " dB", -10, 20);
         configParam(PITCH3_PARAM, -54.f, 54.f, 0.f, "Frequency 3", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP3_PARAM, 0.0, 2.0, 1.f, "Amplitude 3", " dB", -10, 20);
+        configParam(AMP3_PARAM, 0.0, 2.0, 0.5f, "Amplitude 3", " dB", -10, 20);
         configParam(PITCH4_PARAM, -54.f, 54.f, 0.f, "Frequency 4", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP4_PARAM, 0.0, 2.0, 1.f, "Amplitude 4", " dB", -10, 20);
+        configParam(AMP4_PARAM, 0.0, 2.0, 0.5f, "Amplitude 4", " dB", -10, 20);
         configParam(DECAY_PARAM, 0.7f, 0.9999f, 0.9f, "Decay");
         configParam(TONE_PARAM, 0.f, 1.f, 0.5f, "Tone", "%", 0, 200, -100);
         configParam(MIX_PARAM, 0.f, 1.f, 0.f, "Mix");
+
+        configInput(PITCH1_INPUT, "1V/octave pitch");
+        configInput(PITCH2_INPUT, "1V/octave pitch");
+        configInput(PITCH2_INPUT, "1V/octave pitch");
+        configInput(PITCH2_INPUT, "1V/octave pitch");
     }
 
     void onSampleRateChange() override {
@@ -120,12 +130,13 @@ struct RezoModule : Module {
         float feedback = params[DECAY_PARAM].getValue();
 
         float sumOutput = 0.f;
+        outputs[WET_OUTPUT].setChannels(4);  // Set the polyphony for the wet output
 
         // Get pitch control (convert semitones to frequency)
         for (int i = 0; i < 4; i++) {
             float amp = params[AMP1_PARAM + i * 2].getValue();
-            float pitch = params[PITCH1_PARAM + i * 2].getValue();
-            float targetFrequency = dsp::FREQ_C4 * std::pow(2.0f, pitch / 12.0f);  // Convert to frequency in Hz
+            float pitch = params[PITCH1_PARAM + i * 2].getValue() / 12.f + inputs[PITCH1_INPUT + i].getVoltage();
+            float targetFrequency = dsp::FREQ_C4 * std::pow(2.0f, pitch);  // Convert to frequency in Hz
 
             // Calculate target delay time based on the pitch (1 / frequency gives period in seconds)
             float targetDelayTime = 1.0f / targetFrequency;
@@ -151,8 +162,10 @@ struct RezoModule : Module {
             float output = input + delayOutput;
 
             // Write the result back into the delay buffer
-            writeDelayBuffer(i, clip(output));
+            // writeDelayBuffer(i, clip(output));
+            writeDelayBuffer(i, output);
             sumOutput += delayOutput * amp;
+            outputs[WET_OUTPUT].setVoltage(delayOutput, i);  // Polyphonic wet signal on channel i
 
             // Output the resonated signal
         }
@@ -175,6 +188,7 @@ struct RezoModuleWidget : ModuleWidget {
         for (int i = 0; i < 4; i++) {
             addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset), module, RezoModule::PITCH1_PARAM + i * 2));
             addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, RezoModule::AMP1_PARAM + i * 2));
+            addInput(createInputCentered<ThemedPJ301MPort>(Vec(xOffset + i * xSpacing, yOffset + 2 * ySpacing), module, RezoModule::PITCH1_INPUT + i));
         }
 
         // Pitch knob
@@ -192,6 +206,7 @@ struct RezoModuleWidget : ModuleWidget {
 
         // Output signal
         addOutput(createOutputCentered<PJ301MPort>(Vec(323.5, 329.25), module, RezoModule::OUT_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(Vec(267.5, 329.25), module, RezoModule::WET_OUTPUT));
     }
 };
 
