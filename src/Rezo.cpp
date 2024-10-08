@@ -55,16 +55,11 @@ struct RezoModule : Module {
 
     std::vector<std::vector<float>> delayBuffers;
     std::vector<int> delayIndices;
+    std::vector<float> prevDelayOutput;
     std::vector<float> currentDelaySamples;
     std::vector<float> targetDelaySamples;
 
     int bufferSize = 4 * 4096;
-    int writeIndex = 0;    // Index where new samples will be written
-    int delaySamples = 0;  // Current delay length in samples
-
-    // Variables for delay time interpolation
-    // float currentDelaySamples = 0.0f;   // Current delay time in samples
-    // float targetDelaySamples = 0.0f;    // Target delay time in samples
     float interpolationSpeed = 0.1f;  // Speed of interpolation
 
     float sampleRate = 44100.f;
@@ -96,6 +91,7 @@ struct RezoModule : Module {
         highPassFilter.resize(4);
         delayIndices.resize(4, 0);
         currentDelaySamples.resize(4, 0.f);
+        prevDelayOutput.resize(4, 0.f);
         targetDelaySamples.resize(4, 0.f);
         bufferSize = (int)(sampleRate * 0.1);
 
@@ -107,6 +103,17 @@ struct RezoModule : Module {
 
     // Function to read from the delay buffer
     float readDelayBuffer(int bufferIndex, float delayTimeSamples) {
+        float readIndex = delayIndices[bufferIndex] - delayTimeSamples;
+        if (readIndex < 0)
+            readIndex += bufferSize;
+        int index0 = (int)readIndex;
+        int index1 = (index0 + 1) % bufferSize;
+        float frac = readIndex - index0;
+        float delayedSample = (1.f - frac) * delayBuffers[bufferIndex][index0] + frac * delayBuffers[bufferIndex][index1];
+        return delayedSample;
+    }
+
+    float readDelayBufferOld(int bufferIndex, float delayTimeSamples) {
         // Compute the read index using the delay time (circular buffer)
         int readIndex = delayIndices[bufferIndex] - (int)delayTimeSamples;
         if (readIndex < 0) {
@@ -146,7 +153,10 @@ struct RezoModule : Module {
             currentDelaySamples[i] += (targetDelaySamples[i] - currentDelaySamples[i]) * interpolationSpeed;
 
             // Fetch the feedback signal from the delay buffer
-            float delayOutput = readDelayBuffer(i, currentDelaySamples[i]) * feedback;
+            float delayOutput = readDelayBuffer(i, currentDelaySamples[i]);
+            float filteredOutput = (delayOutput + prevDelayOutput[i]) * 0.5f;
+            prevDelayOutput[i] = delayOutput;
+            delayOutput = filteredOutput * feedback;
 
             float lowpassFreq = clamp(20000.f * colorFreq, 20.f, 20000.f);
             lowPassFilter[i].setCutoffFreq(lowpassFreq / args.sampleRate);
@@ -162,12 +172,9 @@ struct RezoModule : Module {
             float output = input + delayOutput;
 
             // Write the result back into the delay buffer
-            // writeDelayBuffer(i, clip(output));
             writeDelayBuffer(i, output);
             sumOutput += delayOutput * amp;
             outputs[WET_OUTPUT].setVoltage(delayOutput, i);  // Polyphonic wet signal on channel i
-
-            // Output the resonated signal
         }
         sumOutput = clamp(sumOutput, -10.f, 10.f);
         outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));  // Scale the output voltage
