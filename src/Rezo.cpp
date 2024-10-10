@@ -21,8 +21,13 @@ struct RezoModule : Module {
         PITCH4_PARAM,
         AMP4_PARAM,
         DECAY_PARAM,
-        MIX_PARAM,  // Cutoff frequency for the filter
         TONE_PARAM,
+        GAIN_PARAM,
+        MIX_PARAM,
+        DECAY_CV_PARAM,
+        TONE_CV_PARAM,
+        GAIN_CV_PARAM,
+        MIX_CV_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -31,6 +36,10 @@ struct RezoModule : Module {
         PITCH2_INPUT,
         PITCH3_INPUT,
         PITCH4_INPUT,
+        DECAY_INPUT,
+        TONE_INPUT,
+        GAIN_INPUT,
+        MIX_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -60,7 +69,7 @@ struct RezoModule : Module {
     std::vector<float> targetDelaySamples;
 
     int bufferSize = 4 * 4096;
-    float interpolationSpeed = 0.1f;  // Speed of interpolation
+    float interpolationSpeed = 0.01f;  // Speed of interpolation
 
     float sampleRate = 44100.f;
 
@@ -74,9 +83,15 @@ struct RezoModule : Module {
         configParam(AMP3_PARAM, 0.0, 2.0, 0.5f, "Amplitude 3", " dB", -10, 20);
         configParam(PITCH4_PARAM, -54.f, 54.f, 0.f, "Frequency 4", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
         configParam(AMP4_PARAM, 0.0, 2.0, 0.5f, "Amplitude 4", " dB", -10, 20);
-        configParam(DECAY_PARAM, 0.7f, 0.9999f, 0.9f, "Decay");
+        configParam(DECAY_PARAM, 0.0f, 1.f, 0.9f, "Decay");
         configParam(TONE_PARAM, 0.f, 1.f, 0.5f, "Tone", "%", 0, 200, -100);
+        configParam(GAIN_PARAM, 0.0, 2.0, 1.0f, "Gain", " dB", -10, 20);
         configParam(MIX_PARAM, 0.f, 1.f, 0.f, "Mix");
+
+        configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
+        configParam(TONE_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
+        configParam(GAIN_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
+        configParam(MIX_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
 
         configInput(PITCH1_INPUT, "1V/octave pitch");
         configInput(PITCH2_INPUT, "1V/octave pitch");
@@ -131,10 +146,23 @@ struct RezoModule : Module {
 
     void process(const ProcessArgs& args) override {
         float input = inputs[IN_INPUT].getVoltage();
-        float mix = params[MIX_PARAM].getValue();
-        float color = params[TONE_PARAM].getValue();
+
+        float mix = params[MIX_PARAM].getValue() + inputs[MIX_INPUT].getVoltage() / 10.f * params[MIX_CV_PARAM].getValue();
+        mix = clamp(mix, 0.f, 1.f);
+
+        float gain = params[GAIN_PARAM].getValue() + inputs[GAIN_INPUT].getVoltage() / 10.f * params[GAIN_CV_PARAM].getValue();
+        gain = clamp(gain, 0.f, 2.f);
+
+        float color = params[TONE_PARAM].getValue() + inputs[TONE_INPUT].getVoltage() / 10.f * params[TONE_CV_PARAM].getValue();
+        color = clamp(color, 0.f, 1.f);
         float colorFreq = std::pow(100.f, 2.f * color - 1.f);
-        float feedback = params[DECAY_PARAM].getValue();
+
+        float feedback = params[DECAY_PARAM].getValue() + inputs[DECAY_INPUT].getVoltage() / 10.f * params[DECAY_CV_PARAM].getValue();
+        feedback = clamp(feedback, 0.f, 1.f);
+        feedback = powf(feedback, 0.2f);
+        feedback = rescale(feedback, 0.f, 1.f, 0.7f, 0.995f);
+
+        float filt = 0.0f;  // 0.0 = lowpass, 1.0 = highpass
 
         float sumOutput = 0.f;
         outputs[WET_OUTPUT].setChannels(4);  // Set the polyphony for the wet output
@@ -154,7 +182,14 @@ struct RezoModule : Module {
 
             // Fetch the feedback signal from the delay buffer
             float delayOutput = readDelayBuffer(i, currentDelaySamples[i]);
-            float filteredOutput = (delayOutput + prevDelayOutput[i]) * 0.5f;
+
+            // clasic
+
+            float filteredOutput = (filt >= 0.5f) ? (delayOutput + prevDelayOutput[i]) * 0.5f : delayOutput;
+
+            // with hight
+            // float filteredOutput = delayOutput;
+
             prevDelayOutput[i] = delayOutput;
             delayOutput = filteredOutput * feedback;
 
@@ -176,7 +211,7 @@ struct RezoModule : Module {
             sumOutput += delayOutput * amp;
             outputs[WET_OUTPUT].setVoltage(delayOutput, i);  // Polyphonic wet signal on channel i
         }
-        sumOutput = clamp(sumOutput, -10.f, 10.f);
+        sumOutput = clamp(gain * sumOutput, -10.f, 10.f);
         outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));  // Scale the output voltage
     }
 };
@@ -202,12 +237,23 @@ struct RezoModuleWidget : ModuleWidget {
         }
 
         // Decay knob
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, RezoModule::DECAY_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, RezoModule::TONE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.5), module, RezoModule::DECAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, RezoModule::TONE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, RezoModule::GAIN_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.5), module, RezoModule::MIX_PARAM));
+
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.81), module, RezoModule::DECAY_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.81), module, RezoModule::TONE_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(112.5, 203.81), module, RezoModule::GAIN_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(157.5, 203.81), module, RezoModule::MIX_CV_PARAM));
 
         // Input signal
         addInput(createInputCentered<PJ301MPort>(Vec(22.5, 329.25), module, RezoModule::IN_INPUT));
+
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 230.28), module, RezoModule::DECAY_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 230.28), module, RezoModule::TONE_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(112.5, 230.28), module, RezoModule::GAIN_INPUT));
+        addInput(createInputCentered<PJ301MPort>(Vec(157.5, 230.28), module, RezoModule::MIX_INPUT));
 
         // Output signal
         addOutput(createOutputCentered<PJ301MPort>(Vec(112.5, 329.25), module, RezoModule::WET_OUTPUT));
