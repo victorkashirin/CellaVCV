@@ -9,6 +9,5 @@ void init(Plugin *p) {
     p->addModel(modelBezier);
     p->addModel(modelRich);
     p->addModel(modelTwinPeaks);
-    p->addModel(modelResonator);
     p->addModel(modelRezo);
 }

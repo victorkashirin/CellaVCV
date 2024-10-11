@@ -23,15 +23,6 @@
       ]
     },
     {
-      "slug": "Resonator",
-      "name": "Resonator",
-      "description": "Dual resonant filter inspired by the design of Rob Hordijk's TwinPeak filter. Made to be pinged.",
-      "keywords": "hordijk resonator ping",
-      "tags": [
-        "Filter"
-      ]
-    },
-    {
       "slug": "TwinPeaks",
       "name": "Twin Peaks",
       "description": "Dual resonant filter inspired by the design of Rob Hordijk's TwinPeak filter. Made to be pinged.",
