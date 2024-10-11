@@ -3,15 +3,7 @@
 #include "components.hpp"
 #include "plugin.hpp"
 
-template <typename T>
-static T clip(T x) {
-    // return std::tanh(x);
-    // Pade approximant of tanh
-    x = clamp(x, -3.f, 3.f);
-    return x * (27 + x * x) / (27 + 9 * x * x);
-}
-
-struct RezoModule : Module {
+struct Resonators : Module {
     enum ParamIds {
         PITCH1_PARAM,
         AMP1_PARAM,
@@ -52,13 +44,6 @@ struct RezoModule : Module {
         NUM_LIGHTS
     };
 
-    // Define the filter types
-    enum FilterTypes {
-        FILTER_LP,  // Low-pass filter
-        FILTER_HP,  // High-pass filter
-        NUM_FILTERS
-    };
-
     // Variables for filters
     std::vector<dsp::RCFilter> lowPassFilter;
     std::vector<dsp::RCFilter> highPassFilter;
@@ -74,7 +59,7 @@ struct RezoModule : Module {
 
     float sampleRate = 44100.f;
 
-    RezoModule() {
+    Resonators() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configParam(PITCH1_PARAM, -54.f, 54.f, 0.f, "Frequency I", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
         configParam(AMP1_PARAM, 0.0, 1.0, 0.5f, "Gain I", " dB", -10, 20);
@@ -99,13 +84,16 @@ struct RezoModule : Module {
         configInput(PITCH3_INPUT, "III 1V/octave pitch");
         configInput(PITCH4_INPUT, "IV 1V/octave pitch");
 
+        configInput(IN_INPUT, "Audio");
         configInput(DECAY_INPUT, "Decay");
         configInput(COLOR_INPUT, "Color");
         configInput(GAIN_INPUT, "Gain");
         configInput(MIX_INPUT, "Mix");
 
         configOutput(WET_OUTPUT, "Polyphonic wet signal");
-        configOutput(OUT_OUTPUT, "Signal");
+        configOutput(OUT_OUTPUT, "Audio");
+
+        configBypass(IN_INPUT, OUT_OUTPUT);
     }
 
     void onSampleRateChange() override {
@@ -168,11 +156,8 @@ struct RezoModule : Module {
 
         float feedback = params[DECAY_PARAM].getValue() + inputs[DECAY_INPUT].getVoltage() / 10.f * params[DECAY_CV_PARAM].getValue();
         feedback = clamp(feedback, 0.f, 1.f);
-        feedback = powf(feedback, 48000.f / args.sampleRate);
         feedback = powf(feedback, 0.2f);
         feedback = rescale(feedback, 0.f, 1.f, 0.7f, 0.995f);
-
-        float filt = 1.0f;  // 0.0 = lowpass, 1.0 = highpass
 
         float sumOutput = 0.f;
         outputs[WET_OUTPUT].setChannels(4);  // Set the polyphony for the wet output
@@ -193,46 +178,38 @@ struct RezoModule : Module {
 
             // Fetch the feedback signal from the delay buffer
             float delayOutput = readDelayBuffer(i, currentDelaySamples[i]);
-
-            // clasic
-
-            float filteredOutput = (filt >= 0.5f) ? (delayOutput + prevDelayOutput[i]) * 0.5f : delayOutput;
-
-            // with hight
-            // float filteredOutput = delayOutput;
+            float filteredOutput = 0.5 * (delayOutput + prevDelayOutput[i]);
 
             prevDelayOutput[i] = delayOutput;
             delayOutput = filteredOutput * feedback;
 
-            // float lowpassFreq = clamp(20000.f *  xcolorFreq, 20.f, 20000.f);
-            // lowPassFilter[i].setCutoffFreq(lowpassFreq / args.sampleRate);
-            // lowPassFilter[i].process(delayOutput);
-            // delayOutput = lowPassFilter[i].lowpass();
+            float lowpassFreq = clamp(20000.f * colorFreq, 20.f, 20000.f);
+            lowPassFilter[i].setCutoffFreq(lowpassFreq / args.sampleRate);
+            lowPassFilter[i].process(delayOutput);
+            delayOutput = lowPassFilter[i].lowpass();
 
-            // float highpassFreq = clamp(20.f * colorFreq, 20.f, 20000.f);
-            // highPassFilter[i].setCutoff(highpassFreq / args.sampleRate);
-            // highPassFilter[i].process(delayOutput);
-            // delayOutput = highPassFilter[i].highpass();
+            float highpassFreq = clamp(20.f * colorFreq, 20.f, 20000.f);
+            highPassFilter[i].setCutoff(highpassFreq / args.sampleRate);
+            highPassFilter[i].process(delayOutput);
+            delayOutput = highPassFilter[i].highpass();
 
-            // Continuously feed the input signal into the delay line along with filtered feedback
             float output = input + delayOutput;
 
             // Write the result back into the delay buffer
             writeDelayBuffer(i, output);
             sumOutput += delayOutput * amp;
-            outputs[WET_OUTPUT].setVoltage(delayOutput, i);  // Polyphonic wet signal on channel i
+            outputs[WET_OUTPUT].setVoltage(delayOutput * amp, i);  // Polyphonic wet signal on channel i
         }
-        sumOutput = clamp(gain * sumOutput, -10.f, 10.f);
+        sumOutput = gain * sumOutput;
         outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));  // Scale the output voltage
     }
 };
 
-// User interface (Widget)
-struct RezoModuleWidget : ModuleWidget {
-    RezoModuleWidget(RezoModule* module) {
+struct ResonatorsWidget : ModuleWidget {
+    ResonatorsWidget(Resonators* module) {
         setModule(module);
 
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Rezo.svg"), asset::plugin(pluginInstance, "res/Rezo-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Resonators.svg"), asset::plugin(pluginInstance, "res/Resonators-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
@@ -243,38 +220,38 @@ struct RezoModuleWidget : ModuleWidget {
         float ySpacing = 50;
 
         for (int i = 0; i < 4; i++) {
-            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset), module, RezoModule::PITCH1_PARAM + i * 2));
-            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, RezoModule::AMP1_PARAM + i * 2));
+            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset), module, Resonators::PITCH1_PARAM + i * 2));
+            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, Resonators::AMP1_PARAM + i * 2));
         }
 
         for (int i = 0; i < 4; i++) {
-            addInput(createInputCentered<ThemedPJ301MPort>(Vec(xOffset + i * xSpacing, 280), module, RezoModule::PITCH1_INPUT + i));
+            addInput(createInputCentered<ThemedPJ301MPort>(Vec(xOffset + i * xSpacing, 280), module, Resonators::PITCH1_INPUT + i));
         }
 
         // Decay knob
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.5), module, RezoModule::DECAY_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, RezoModule::COLOR_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, RezoModule::GAIN_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.5), module, RezoModule::MIX_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.5), module, Resonators::DECAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, Resonators::COLOR_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, Resonators::GAIN_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.5), module, Resonators::MIX_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.81), module, RezoModule::DECAY_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.81), module, RezoModule::COLOR_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(112.5, 203.81), module, RezoModule::GAIN_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(157.5, 203.81), module, RezoModule::MIX_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.81), module, Resonators::DECAY_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.81), module, Resonators::COLOR_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(112.5, 203.81), module, Resonators::GAIN_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(157.5, 203.81), module, Resonators::MIX_CV_PARAM));
 
         // Input signal
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, RezoModule::IN_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Resonators::IN_INPUT));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 230.28), module, RezoModule::DECAY_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 230.28), module, RezoModule::COLOR_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 230.28), module, RezoModule::GAIN_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 230.28), module, RezoModule::MIX_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 230.28), module, Resonators::DECAY_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 230.28), module, Resonators::COLOR_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 230.28), module, Resonators::GAIN_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 230.28), module, Resonators::MIX_INPUT));
 
         // Output signal
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(112.5, 329.25), module, RezoModule::WET_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(157.5, 329.25), module, RezoModule::OUT_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(112.5, 329.25), module, Resonators::WET_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(157.5, 329.25), module, Resonators::OUT_OUTPUT));
     }
 };
 
 // Define the model
-Model* modelRezo = createModel<RezoModule, RezoModuleWidget>("Rezo");
+Model* modelRezo = createModel<Resonators, ResonatorsWidget>("Resonators");
