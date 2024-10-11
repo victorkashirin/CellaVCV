@@ -14,6 +14,17 @@
   "changelogUrl": "https://github.com/victorkashirin/CellaVCV/blob/master/CHANGELOG.md",
   "modules": [
     {
+      "slug": "Resonators",
+      "name": "Resonators",
+      "description": "Quad resonator based on Karplus-Strong algorithm",
+      "keywords": "resonator karplus",
+      "tags": [
+        "Effect",
+        "Filter",
+        "Physical modeling"
+      ]
+    },
+    {
       "slug": "TwinPeaks",
       "name": "Twin Peaks",
       "description": "Dual resonant filter inspired by the design of Rob Hordijk's TwinPeak filter. Made to be pinged.",
