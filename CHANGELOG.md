@@ -5,6 +5,9 @@
 New modules:
 * Resonators - Four pitched resonators based on Karplus-Strong algorithm
 
+Other:
+* Move manual from pdf to github
+
 ### 2.0.4 (2024-10-03)
 
 Fixes:
