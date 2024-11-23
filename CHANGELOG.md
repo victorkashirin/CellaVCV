@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.0.5 (2024-11-24)
+
+New modules:
+* Resonators - Four pitched resonators based on Karplus-Strong algorithm
+
 ### 2.0.4 (2024-10-03)
 
 Fixes:
