@@ -1,6 +1,6 @@
 # Cella Modules Collection for VCV Rack
 
-[Full Manual](/docs/Cella_Manual.pdf)
+[Full Manual](/docs/Cella_Manual.md)
 
 ## Modules Overview
 
