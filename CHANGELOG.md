@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.0.4 (2024-10-03)
+
+Fixes:
+* Twin Peaks - fix issue occuring when number of threads > 1
+
 ### 2.0.3 (2024-09-22)
 * Added support for dark panels
 

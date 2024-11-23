@@ -49,7 +49,7 @@ struct TwinPeaks : Module {
         configParam(FREQ_B_PARAM, std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), std::log2(ripples::kFreqKnobMax), "Frequency B", " Hz", 2.f);
 
         configParam(FM_GLOBAL_A_PARAM, -1.f, 1.f, 1.f, "Frequency A mod", "%", 0, 100);
-        configParam(RES_PARAM, 0.f, 1.f, 0.6f, "Resonance", "%", 0, 100);
+        configParam(RES_PARAM, 0.f, 1.f, 0.73f, "Resonance", "%", 0, 100);
         configParam(CURVE_B_PARAM, 0.f, 1.f, 1.f, "Low Pass<>Twin Peak", "%", 0, 100);
         configParam(FM_GLOBAL_B_PARAM, -1.f, 1.f, 1.f, "Frequency B mod", "%", 0, 100);
 

@@ -54,7 +54,7 @@ struct Resonators : Module {
     std::vector<float> currentDelaySamples;
     std::vector<float> targetDelaySamples;
 
-    int bufferSize = 4 * 4096;
+    int bufferSize = 0;
     float interpolationSpeed = 0.01f;  // Speed of interpolation
 
     float sampleRate = 44100.f;
@@ -79,7 +79,7 @@ struct Resonators : Module {
         configParam(GAIN_CV_PARAM, -1.f, 1.f, 0.f, "Gain CV", "%", 0, 100);
         configParam(MIX_CV_PARAM, -1.f, 1.f, 0.f, "Mix CV", "%", 0, 100);
 
-        configInput(PITCH1_INPUT, "I 1V/octave pitch");
+        configInput(PITCH1_INPUT, "I 1V/octave pitch (Polyphonic)");
         configInput(PITCH2_INPUT, "II 1V/octave pitch");
         configInput(PITCH3_INPUT, "III 1V/octave pitch");
         configInput(PITCH4_INPUT, "IV 1V/octave pitch");
@@ -90,7 +90,7 @@ struct Resonators : Module {
         configInput(GAIN_INPUT, "Gain");
         configInput(MIX_INPUT, "Mix");
 
-        configOutput(WET_OUTPUT, "Polyphonic wet signal");
+        configOutput(WET_OUTPUT, "Wet signal (Polyphonic)");
         configOutput(OUT_OUTPUT, "Audio");
 
         configBypass(IN_INPUT, OUT_OUTPUT);
@@ -160,12 +160,23 @@ struct Resonators : Module {
         feedback = rescale(feedback, 0.f, 1.f, 0.7f, 0.995f);
 
         float sumOutput = 0.f;
+        int numChannels = inputs[PITCH1_INPUT].getChannels();
         outputs[WET_OUTPUT].setChannels(4);  // Set the polyphony for the wet output
 
         // Get pitch control (convert semitones to frequency)
         for (int i = 0; i < 4; i++) {
             float amp = params[AMP1_PARAM + i * 2].getValue();
-            float pitch = params[PITCH1_PARAM + i * 2].getValue() / 12.f + inputs[PITCH1_INPUT + i].getVoltage();
+            float pitch = params[PITCH1_PARAM + i * 2].getValue() / 12.f;
+            // Use polyphonic channels if PITCH1_INPUT is polyphonic
+
+            if (inputs[PITCH1_INPUT + i].isConnected()) {
+                pitch += inputs[PITCH1_INPUT + i].getVoltage();
+            } else if (inputs[PITCH1_INPUT].isConnected() && numChannels > 1) {
+                if (i < numChannels) {
+                    pitch += inputs[PITCH1_INPUT].getVoltage(i);
+                }
+            }
+
             pitch = clamp(pitch, -4.5f, 4.5f);
             float targetFrequency = dsp::FREQ_C4 * std::pow(2.0f, pitch);  // Convert to frequency in Hz
 
@@ -254,4 +265,4 @@ struct ResonatorsWidget : ModuleWidget {
 };
 
 // Define the model
-Model* modelRezo = createModel<Resonators, ResonatorsWidget>("Resonators");
+Model* modelResonators = createModel<Resonators, ResonatorsWidget>("Resonators");
