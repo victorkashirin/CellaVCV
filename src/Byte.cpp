@@ -1,8 +1,31 @@
+#include "ByteBeatParser.hpp"
+#include "components.hpp"
 #include "plugin.hpp"
 
 struct Byte : Module {
+    enum ParamIds {
+        CLOCK_PARAM,
+        NUM_PARAMS
+    };
+    enum InputIds {
+        T_INPUT,
+        NUM_INPUTS
+    };
+    enum OutputIds {
+        OUT_OUTPUT,
+        NUM_OUTPUTS
+    };
+    enum LightIds {
+        NUM_LIGHTS
+    };
+
     std::string text;
     bool dirty = false;
+    uint32_t t = 0;
+    float output = 0.f;
+    int clockDivision = 4;
+
+    dsp::ClockDivider clock;
 
     void onReset() override {
         text = "";
@@ -11,10 +34,50 @@ struct Byte : Module {
 
     void updateString(const std::string& newText) {
         DEBUG("Module received text: %s", newText.c_str());
+        text = newText.c_str();
     }
 
-    void
-    fromJson(json_t* rootJ) override {
+    Byte() {
+        config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
+        configInput(T_INPUT, "Time");
+
+        configParam(CLOCK_PARAM, 2.f, 8.f, 4.f, "Accent steps");
+        paramQuantities[CLOCK_PARAM]->snapEnabled = true;
+
+        configOutput(OUT_OUTPUT, "Audio");
+        clock.setDivision(clockDivision);
+    }
+
+    void process(const ProcessArgs& args) override {
+        if (clock.process()) {
+            t++;
+
+            if (clockDivision != (int)params[CLOCK_PARAM].getValue()) {
+                clockDivision = (int)params[CLOCK_PARAM].getValue();
+                clock.setDivision(clockDivision);
+            }
+
+            if (!text.empty()) {
+                try {
+                    BytebeatParser parser(text);
+                    uint8_t res = parser.parseAndEvaluate(t);
+                    float out = res / 255.f;
+                    output = out * 5.f - 2.5f;
+                } catch (const std::exception& e) {
+                    DEBUG("Exception caught: %s", e.what());
+                }
+
+                // uint8_t res = ((t >> 10) & 42) * t;
+                // float out = res / 255.f;
+                // output = out * 5.f - 2.5f;
+
+            } else {
+                output = 0.f;
+            }
+        }
+        outputs[OUT_OUTPUT].setVoltage(output);
+    }
+    void fromJson(json_t* rootJ) override {
         Module::fromJson(rootJ);
         // In <1.0, module used "text" property at root level.
         json_t* textJ = json_object_get(rootJ, "text");
@@ -49,8 +112,8 @@ struct ByteTextField : LedDisplayTextField {
     }
 
     void onChange(const ChangeEvent& e) override {
-        if (module)
-            module->text = getText();
+        // if (module)
+        // module->text = getText();
     }
 
     // Capture keyboard events for copy-paste and Enter key
@@ -96,18 +159,22 @@ struct ByteDisplay : LedDisplay {
 struct ByteWidget : ModuleWidget {
     ByteWidget(Byte* module) {
         setModule(module);
-        // setPanel(createPanel(asset::plugin(pluginInstance, "res/Byte.svg"), asset::plugin(pluginInstance, "res/Byte.svg")));
+
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Byte.svg")));
 
-        addChild(createWidget<ThemedScrew>(Vec(RACK_GRID_WIDTH, 0)));
-        addChild(createWidget<ThemedScrew>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, 0)));
-        addChild(createWidget<ThemedScrew>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
-        addChild(createWidget<ThemedScrew>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        addChild(createWidget<ScrewGrey>(Vec(0, 0)));
+        addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        ByteDisplay* notesDisplay = createWidget<ByteDisplay>(mm2px(Vec(0.0, 12.869)));
-        notesDisplay->box.size = mm2px(Vec(81.28, 105.059));
+        ByteDisplay* notesDisplay = createWidget<ByteDisplay>(Vec(0, 26));
+        notesDisplay->box.size = Vec(240, 200);
         notesDisplay->setModule(module);
         addChild(notesDisplay);
+
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(30, 329.25), module, Byte::OUT_OUTPUT));
+
+        addParam(createParamCentered<RoundBlackKnob>(Vec(30, 280), module, Byte::CLOCK_PARAM));
+
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(210, 329.25), module, Byte::OUT_OUTPUT));
     }
 };
 
