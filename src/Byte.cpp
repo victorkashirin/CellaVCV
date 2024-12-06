@@ -5,6 +5,7 @@
 struct Byte : Module {
     enum ParamIds {
         CLOCK_PARAM,
+        A_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -41,8 +42,10 @@ struct Byte : Module {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configInput(T_INPUT, "Time");
 
-        configParam(CLOCK_PARAM, 2.f, 8.f, 4.f, "Accent steps");
+        configParam(CLOCK_PARAM, 2.f, 2000.f, 4.f, "Clock division");
         paramQuantities[CLOCK_PARAM]->snapEnabled = true;
+        configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
+        paramQuantities[A_PARAM]->snapEnabled = true;
 
         configOutput(OUT_OUTPUT, "Audio");
         clock.setDivision(clockDivision);
@@ -60,7 +63,9 @@ struct Byte : Module {
             if (!text.empty()) {
                 try {
                     BytebeatParser parser(text);
-                    uint8_t res = parser.parseAndEvaluate(t);
+                    int a = (int)params[A_PARAM].getValue();
+                    int res = parser.parseAndEvaluate(t, a);
+                    res = res & 0xff;
                     float out = res / 255.f;
                     output = out * 5.f - 2.5f;
                 } catch (const std::exception& e) {
@@ -173,6 +178,7 @@ struct ByteWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(30, 329.25), module, Byte::OUT_OUTPUT));
 
         addParam(createParamCentered<RoundBlackKnob>(Vec(30, 280), module, Byte::CLOCK_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(75, 280), module, Byte::A_PARAM));
 
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(210, 329.25), module, Byte::OUT_OUTPUT));
     }
