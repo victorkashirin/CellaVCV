@@ -1,8 +1,8 @@
 #include <cctype>
 #include <cmath>
-#include <cstdint>  // Added for uint32_t
+#include <cstdint>  // For uint32_t
 #include <iostream>
-#include <sstream>  // Added for std::ostringstream
+#include <sstream>  // For std::ostringstream
 #include <stdexcept>
 #include <string>
 
@@ -13,10 +13,10 @@ class BytebeatParser {
     int parseAndEvaluate(uint32_t t, int a) {
         this->t = t;
         this->a = a;
-        int result = parseBitwiseOR();
+        int result = parseConditional();  // Start parsing with the conditional operator
         skipWhitespace();
         if (pos < expr.size()) {
-            // You can uncomment the following line for error handling
+            // Uncomment the following line for error handling
             // throw std::runtime_error("Unexpected character at position " + std::to_string(pos));
             return 0;
         }
@@ -31,7 +31,22 @@ class BytebeatParser {
 
     // Parse functions corresponding to C++ operator precedence
 
-    // Bitwise OR |
+    // 10. Conditional (?:)
+    int parseConditional() {
+        int condition = parseBitwiseOR();
+        skipWhitespace();
+        if (match('?')) {
+            int true_expr = parseConditional();  // Right-associative
+            if (!match(':')) {
+                throw std::runtime_error("Expected ':' after '?' at position " + std::to_string(pos));
+            }
+            int false_expr = parseConditional();
+            return condition ? true_expr : false_expr;
+        }
+        return condition;
+    }
+
+    // 9. Bitwise OR |
     int parseBitwiseOR() {
         int left = parseBitwiseXOR();
         while (true) {
@@ -46,7 +61,7 @@ class BytebeatParser {
         return left;
     }
 
-    // Bitwise XOR ^
+    // 8. Bitwise XOR ^
     int parseBitwiseXOR() {
         int left = parseBitwiseAND();
         while (true) {
@@ -61,13 +76,13 @@ class BytebeatParser {
         return left;
     }
 
-    // Bitwise AND &
+    // 7. Bitwise AND &
     int parseBitwiseAND() {
-        int left = parseShift();
+        int left = parseRelational();  // Updated to call parseRelational
         while (true) {
             skipWhitespace();
             if (match('&')) {
-                int right = parseShift();
+                int right = parseRelational();
                 left &= right;
             } else {
                 break;
@@ -76,7 +91,39 @@ class BytebeatParser {
         return left;
     }
 
-    // Shift << >>
+    // 6. Relational < > <= >=
+    int parseRelational() {
+        int left = parseShift();
+        while (true) {
+            skipWhitespace();
+            if (match('<')) {
+                if (match('<')) {  // Handle '<<' as shift, not relational
+                    pos -= 1;      // Roll back one character
+                    break;
+                }
+                int right = parseShift();
+                left = (left < right) ? 1 : 0;
+            } else if (match('>')) {
+                if (match('>')) {  // Handle '>>' as shift, not relational
+                    pos -= 1;      // Roll back one character
+                    break;
+                }
+                int right = parseShift();
+                left = (left > right) ? 1 : 0;
+            } else if (matchString("<=")) {
+                int right = parseShift();
+                left = (left <= right) ? 1 : 0;
+            } else if (matchString(">=")) {
+                int right = parseShift();
+                left = (left >= right) ? 1 : 0;
+            } else {
+                break;
+            }
+        }
+        return left;
+    }
+
+    // 5. Shift << >>
     int parseShift() {
         int left = parseAdditive();
         while (true) {
@@ -94,7 +141,7 @@ class BytebeatParser {
         return left;
     }
 
-    // Additive + -
+    // 4. Additive + -
     int parseAdditive() {
         int left = parseMultiplicative();
         while (true) {
@@ -112,7 +159,7 @@ class BytebeatParser {
         return left;
     }
 
-    // Multiplicative * / %
+    // 3. Multiplicative * / %
     int parseMultiplicative() {
         int left = parseUnary();
         while (true) {
@@ -141,7 +188,7 @@ class BytebeatParser {
         return left;
     }
 
-    // Unary - ~
+    // 2. Unary - ~
     int parseUnary() {
         skipWhitespace();
         if (match('-')) {
@@ -153,13 +200,12 @@ class BytebeatParser {
         }
     }
 
-    // Primary expressions: numbers, 't', parenthesis
+    // 1. Primary expressions: numbers, 't', parenthesis
     int parsePrimary() {
         skipWhitespace();
         if (match('(')) {
-            int value = parseBitwiseOR();
+            int value = parseConditional();  // Start with conditional inside parentheses
             if (!match(')')) {
-                // Using std::ostringstream for error message
                 std::ostringstream oss;
                 oss << "Expected closing parenthesis at position " << pos;
                 throw std::runtime_error(oss.str());
@@ -167,12 +213,9 @@ class BytebeatParser {
             return value;
         } else if (match('t')) {
             return static_cast<int>(t);
-        } else if (match('a')) {
-            return a;
         } else if (isdigit(peek())) {
             return parseNumber();
         } else {
-            // Using std::ostringstream for error message
             std::ostringstream oss;
             oss << "Unexpected character '" << peek() << "' at position " << pos;
             throw std::runtime_error(oss.str());

@@ -22,6 +22,8 @@ struct Byte : Module {
 
     std::string text;
     bool dirty = false;
+    bool badInput = false;
+    bool changed = false;
     uint32_t t = 0;
     float output = 0.f;
     int clockDivision = 4;
@@ -31,11 +33,15 @@ struct Byte : Module {
     void onReset() override {
         text = "";
         dirty = true;
+        t = 0;
     }
 
     void updateString(const std::string& newText) {
         DEBUG("Module received text: %s", newText.c_str());
         text = newText.c_str();
+        t = 0;
+        badInput = false;
+        changed = false;
     }
 
     Byte() {
@@ -60,7 +66,7 @@ struct Byte : Module {
                 clock.setDivision(clockDivision);
             }
 
-            if (!text.empty()) {
+            if (!text.empty() && !badInput) {
                 try {
                     BytebeatParser parser(text);
                     int a = (int)params[A_PARAM].getValue();
@@ -68,14 +74,11 @@ struct Byte : Module {
                     res = res & 0xff;
                     float out = res / 255.f;
                     output = out * 5.f - 2.5f;
+                    // output = out * 5.f;
                 } catch (const std::exception& e) {
+                    badInput = true;
                     DEBUG("Exception caught: %s", e.what());
                 }
-
-                // uint8_t res = ((t >> 10) & 42) * t;
-                // float out = res / 255.f;
-                // output = out * 5.f - 2.5f;
-
             } else {
                 output = 0.f;
             }
@@ -118,7 +121,7 @@ struct ByteTextField : LedDisplayTextField {
 
     void onChange(const ChangeEvent& e) override {
         // if (module)
-        // module->text = getText();
+        module->changed = true;
     }
 
     // Capture keyboard events for copy-paste and Enter key
@@ -185,3 +188,6 @@ struct ByteWidget : ModuleWidget {
 };
 
 Model* modelByte = createModel<Byte, ByteWidget>("Byte");
+
+// Recipes
+// (t % 163 > 100 ? t : t>>3 + t<<14)|(t>>4)  at clock 90
