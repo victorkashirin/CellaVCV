@@ -5,11 +5,24 @@
 struct Byte : Module {
     enum ParamIds {
         CLOCK_PARAM,
+        RUN_PARAM,
+        RESET_PARAM,
         A_PARAM,
+        B_PARAM,
+        C_PARAM,
+        A_CV_PARAM,
+        B_CV_PARAM,
+        C_CV_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
         T_INPUT,
+        A_INPUT,
+        B_INPUT,
+        C_INPUT,
+        RUN_INPUT,
+        RESET_INPUT,
+        CLOCK_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -17,6 +30,8 @@ struct Byte : Module {
         NUM_OUTPUTS
     };
     enum LightIds {
+        RUN_LIGHT,
+        RESET_LIGHT,
         NUM_LIGHTS
     };
 
@@ -30,15 +45,33 @@ struct Byte : Module {
 
     dsp::ClockDivider clock;
 
+    dsp::BooleanTrigger runButtonTrigger;
+    dsp::BooleanTrigger resetButtonTrigger;
+
+    dsp::SchmittTrigger runTrigger;
+    dsp::SchmittTrigger resetTrigger;
+
     void onReset() override {
         text = "";
         dirty = true;
         t = 0;
     }
 
+    std::string getStringWithoutSpacesAndNewlines(const std::string& str) {
+        std::string result;
+        result.reserve(str.size());  // Optional: Reserve space to improve performance
+
+        std::copy_if(str.begin(), str.end(), std::back_inserter(result), [](char c) {
+            return c != ' ' && c != '\n' && c != '\r';
+        });
+
+        return result;
+    }
+
     void updateString(const std::string& newText) {
-        DEBUG("Module received text: %s", newText.c_str());
-        text = newText.c_str();
+        std::string processed = getStringWithoutSpacesAndNewlines(newText);
+        text = processed.c_str();
+        DEBUG("Module received text: %s", processed.c_str());
         t = 0;
         badInput = false;
         changed = false;
@@ -51,13 +84,25 @@ struct Byte : Module {
         configParam(CLOCK_PARAM, 2.f, 2000.f, 4.f, "Clock division");
         paramQuantities[CLOCK_PARAM]->snapEnabled = true;
         configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
+        configParam(B_PARAM, 0.f, 128.f, 64.f, "Param <b>");
+        configParam(C_PARAM, 0.f, 128.f, 64.f, "Param <c>");
         paramQuantities[A_PARAM]->snapEnabled = true;
+        paramQuantities[B_PARAM]->snapEnabled = true;
+        paramQuantities[C_PARAM]->snapEnabled = true;
 
         configOutput(OUT_OUTPUT, "Audio");
         clock.setDivision(clockDivision);
     }
 
     void process(const ProcessArgs& args) override {
+        bool resetButtonTriggered = resetButtonTrigger.process(params[RESET_PARAM].getValue());
+        bool resetTriggered = resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 2.f);
+        bool reset = (resetButtonTriggered || resetTriggered);
+
+        if (reset) {
+            t = 0;
+        }
+
         if (clock.process()) {
             t++;
 
@@ -70,7 +115,9 @@ struct Byte : Module {
                 try {
                     BytebeatParser parser(text);
                     int a = (int)params[A_PARAM].getValue();
-                    int res = parser.parseAndEvaluate(t, a);
+                    int b = (int)params[B_PARAM].getValue();
+                    int c = (int)params[C_PARAM].getValue();
+                    int res = parser.parseAndEvaluate(t, a, b, c);
                     res = res & 0xff;
                     float out = res / 255.f;
                     output = out * 5.f - 2.5f;
@@ -84,6 +131,7 @@ struct Byte : Module {
             }
         }
         outputs[OUT_OUTPUT].setVoltage(output);
+        lights[RESET_LIGHT].setSmoothBrightness(reset, args.sampleTime);
     }
     void fromJson(json_t* rootJ) override {
         Module::fromJson(rootJ);
@@ -127,6 +175,11 @@ struct ByteTextField : LedDisplayTextField {
     // Capture keyboard events for copy-paste and Enter key
     void onSelectKey(const SelectKeyEvent& e) override {
         if (e.action == GLFW_PRESS && (e.key == GLFW_KEY_ENTER || e.key == GLFW_KEY_KP_ENTER)) {
+            // bool shift_key = ((e.mods & RACK_MOD_MASK) & GLFW_MOD_SHIFT);
+            // if (shift_key) {
+            //     onEnterPressed();
+            //     e.consume(this);
+            // }
             onEnterPressed();
             e.consume(this);
         }
@@ -146,9 +199,6 @@ struct ByteTextField : LedDisplayTextField {
             // You can trigger some event or handle the entered text
             // For example, print it to the Rack log
             DEBUG("Enter pressed! Submitted text: %s", enteredText.c_str());
-
-            // Optionally clear the text field after submission
-            // setText("");
         }
     }
 };
@@ -174,14 +224,29 @@ struct ByteWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         ByteDisplay* notesDisplay = createWidget<ByteDisplay>(Vec(0, 26));
-        notesDisplay->box.size = Vec(240, 200);
+        notesDisplay->box.size = Vec(240, 150);
         notesDisplay->setModule(module);
         addChild(notesDisplay);
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(30, 329.25), module, Byte::OUT_OUTPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(30, 329.25), module, Byte::CLOCK_INPUT));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(30, 280), module, Byte::CLOCK_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(75, 280), module, Byte::A_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(30, 280.01), module, Byte::RUN_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(75, 280.01), module, Byte::A_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(120, 280.01), module, Byte::B_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(165, 280.01), module, Byte::C_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(210, 280.01), module, Byte::RESET_INPUT));
+
+        addParam(createParamCentered<RoundBlackKnob>(Vec(30, 203.79), module, Byte::CLOCK_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(75, 203.79), module, Byte::A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(120, 203.79), module, Byte::B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(165, 203.79), module, Byte::C_PARAM));
+
+        addParam(createParamCentered<Trimpot>(Vec(75, 252.5), module, Byte::A_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(120, 252.5), module, Byte::B_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(165, 252.5), module, Byte::C_CV_PARAM));
+
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(30, 252.5), module, Byte::RUN_PARAM, Byte::RUN_LIGHT));
+        addParam(createLightParamCentered<VCVLightBezel<WhiteLight>>(Vec(210, 252.5), module, Byte::RESET_PARAM, Byte::RESET_LIGHT));
 
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(210, 329.25), module, Byte::OUT_OUTPUT));
     }
@@ -191,3 +256,5 @@ Model* modelByte = createModel<Byte, ByteWidget>("Byte");
 
 // Recipes
 // (t % 163 > 100 ? t : t>>3 + t<<14)|(t>>4)  at clock 90
+
+// t<<2|(t<<(2<<t)+2)>>(t>>3)|t>>2 at cloock 563

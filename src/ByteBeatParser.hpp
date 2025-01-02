@@ -10,9 +10,11 @@ class BytebeatParser {
    public:
     BytebeatParser(const std::string& expr) : expr(expr), pos(0) {}
 
-    int parseAndEvaluate(uint32_t t, int a) {
+    int parseAndEvaluate(uint32_t t, int a, int b, int c) {
         this->t = t;
         this->a = a;
+        this->b = b;
+        this->c = c;
         int result = parseConditional();  // Start parsing with the conditional operator
         skipWhitespace();
         if (pos < expr.size()) {
@@ -27,7 +29,7 @@ class BytebeatParser {
     std::string expr;
     size_t pos;
     uint32_t t;
-    int a;
+    int a, b, c;
 
     // Parse functions corresponding to C++ operator precedence
 
@@ -213,6 +215,12 @@ class BytebeatParser {
             return value;
         } else if (match('t')) {
             return static_cast<int>(t);
+        } else if (match('a')) {
+            return static_cast<int>(a);
+        } else if (match('b')) {
+            return static_cast<int>(b);
+        } else if (match('c')) {
+            return static_cast<int>(c);
         } else if (isdigit(peek())) {
             return parseNumber();
         } else {
@@ -269,7 +277,7 @@ class BytebeatParser {
 
 bool runTest(const std::string& expression, uint32_t t, int expected) {
     BytebeatParser parser(expression);
-    int result = parser.parseAndEvaluate(t, 0);
+    int result = parser.parseAndEvaluate(t, 0, 0, 0);
     return (result == expected);
 }
 
