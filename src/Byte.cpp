@@ -4,6 +4,7 @@
 
 struct Byte : Module {
     enum ParamIds {
+        FREQ_PARAM,
         CLOCK_PARAM,
         RUN_PARAM,
         RESET_PARAM,
@@ -44,6 +45,7 @@ struct Byte : Module {
     bool badInput = false;
     bool changed = false;
     uint32_t t = 0;
+    float phase = 0.f;
     float output = 0.f;
     int clockDivision = 4;
 
@@ -102,8 +104,9 @@ struct Byte : Module {
         configButton(RUN_PARAM, "Run");
         configButton(RESET_PARAM, "Reset");
 
-        configParam(CLOCK_PARAM, 2.f, 2000.f, 4.f, "Clock division");
-        paramQuantities[CLOCK_PARAM]->snapEnabled = true;
+        // configParam(CLOCK_PARAM, 2.f, 2000.f, 4.f, "Clock division");
+        configParam(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
+        // paramQuantities[CLOCK_PARAM]->snapEnabled = true;
         configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
         configParam(B_PARAM, 0.f, 128.f, 64.f, "Param <b>");
         configParam(C_PARAM, 0.f, 128.f, 64.f, "Param <c>");
@@ -116,7 +119,7 @@ struct Byte : Module {
         configParam(C_CV_PARAM, 0.f, 1.f, 0.f, "Param <c> CV");
 
         configOutput(OUT_OUTPUT, "Audio");
-        clock.setDivision(clockDivision);
+        // clock.setDivision(clockDivision);
     }
 
     void process(const ProcessArgs& args) override {
@@ -134,39 +137,43 @@ struct Byte : Module {
             t = 0;
         }
 
-        if (running && clock.process()) {
-            t++;
+        float pitch = params[FREQ_PARAM].getValue();
 
-            if (clockDivision != (int)params[CLOCK_PARAM].getValue()) {
-                clockDivision = (int)params[CLOCK_PARAM].getValue();
-                clock.setDivision(clockDivision);
-            }
+        if (running) {
+            // Calculate the phase
+            phase += args.sampleTime * std::pow(2.f, pitch);
+            if (phase >= 1.f) {
+                phase -= 1.f;
+                t++;
 
-            if (!text.empty() && !badInput) {
-                try {
-                    BytebeatParser parser(text);
-                    int a = (int)params[A_PARAM].getValue();
-                    int b = (int)params[B_PARAM].getValue();
-                    int c = (int)params[C_PARAM].getValue();
-                    int res = parser.parseAndEvaluate(t, a, b, c);
-                    res = res & 0xff;
-                    float out = res / 255.f;
+                if (!text.empty() && !badInput) {
+                    try {
+                        BytebeatParser parser(text);
+                        int a = (int)params[A_PARAM].getValue();
+                        int b = (int)params[B_PARAM].getValue();
+                        int c = (int)params[C_PARAM].getValue();
+                        int res = parser.parseAndEvaluate(t, a, b, c);
+                        res = res & 0xff;
+                        float out = res / 255.f;
 
-                    float minV = levels[outputLevelType][0];
-                    float maxV = levels[outputLevelType][1];
+                        float minV = levels[outputLevelType][0];
+                        float maxV = levels[outputLevelType][1];
 
-                    output = out * (maxV - minV) + minV;
+                        output = out * (maxV - minV) + minV;
 
-                    // output = out * 5.f - 2.5f;
-                    // badInput = false;
-                    // output = out * 5.f;
-                } catch (const std::exception& e) {
-                    badInput = true;
-                    DEBUG("Exception caught: %s", e.what());
+                        // output = out * 5.f - 2.5f;
+                        // badInput = false;
+                        // output = out * 5.f;
+                    } catch (const std::exception& e) {
+                        badInput = true;
+                        DEBUG("Exception caught: %s", e.what());
+                    }
+                } else {
+                    output = 0.f;
                 }
-            } else {
-                output = 0.f;
             }
+        } else {
+            output = 0.f;
         }
         outputs[OUT_OUTPUT].setVoltage(output);
         lights[RUN_LIGHT].setBrightness(running);
@@ -284,7 +291,7 @@ struct ByteWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 280.01), module, Byte::C_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(202.5, 280.01), module, Byte::RESET_INPUT));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 203.79), module, Byte::CLOCK_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 203.79), module, Byte::FREQ_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, Byte::A_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 203.79), module, Byte::B_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, Byte::C_PARAM));
