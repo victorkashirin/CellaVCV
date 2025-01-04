@@ -19,7 +19,7 @@ class BytebeatParser {
         skipWhitespace();
         if (pos < expr.size()) {
             // Uncomment the following line for error handling
-            // throw std::runtime_error("Unexpected character at position " + std::to_string(pos));
+            throw std::runtime_error("Unexpected character at position " + std::to_string(pos));
             return 0;
         }
         return result;
