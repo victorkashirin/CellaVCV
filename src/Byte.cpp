@@ -5,12 +5,12 @@
 struct Byte : Module {
     enum ParamIds {
         FREQ_PARAM,
-        CLOCK_PARAM,
         RUN_PARAM,
         RESET_PARAM,
         A_PARAM,
         B_PARAM,
         C_PARAM,
+        N_PARAM,
         A_CV_PARAM,
         B_CV_PARAM,
         C_CV_PARAM,
@@ -28,6 +28,7 @@ struct Byte : Module {
     };
     enum OutputIds {
         OUT_OUTPUT,
+        SHIFT_OUTPUT,
         NUM_OUTPUTS
     };
     enum LightIds {
@@ -47,7 +48,10 @@ struct Byte : Module {
     uint32_t t = 0;
     float phase = 0.f;
     float output = 0.f;
-    int clockDivision = 4;
+
+    dsp::SchmittTrigger clockTrigger;
+    float clockFreq = 1.f;
+    dsp::Timer clockTimer;
 
     int outputLevelType = 0;
     float levels[4][2] = {
@@ -55,8 +59,6 @@ struct Byte : Module {
         {-5.f, 5.f},
         {0.f, 5.f},
         {0.f, 10.f}};
-
-    dsp::ClockDivider clock;
 
     dsp::BooleanTrigger runButtonTrigger;
     dsp::BooleanTrigger resetButtonTrigger;
@@ -68,6 +70,9 @@ struct Byte : Module {
         text = "";
         dirty = true;
         t = 0;
+        phase = 0.f;
+        clockFreq = 1.f;
+        clockTimer.reset();
     }
 
     std::string getStringWithoutSpacesAndNewlines(const std::string& str) {
@@ -104,22 +109,46 @@ struct Byte : Module {
         configButton(RUN_PARAM, "Run");
         configButton(RESET_PARAM, "Reset");
 
-        // configParam(CLOCK_PARAM, 2.f, 2000.f, 4.f, "Clock division");
-        configParam(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
-        // paramQuantities[CLOCK_PARAM]->snapEnabled = true;
+        struct FrequencyQuantity : ParamQuantity {
+            float getDisplayValue() override {
+                Byte* module = reinterpret_cast<Byte*>(this->module);
+                if (module->clockFreq == 2.f) {
+                    unit = " Hz";
+                    displayMultiplier = 1.f;
+                } else {
+                    unit = "x";
+                    displayMultiplier = 1 / 2.f;
+                }
+                return ParamQuantity::getDisplayValue();
+            }
+        };
+
+        configParam<FrequencyQuantity>(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
+        // configParam(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
         configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
         configParam(B_PARAM, 0.f, 128.f, 64.f, "Param <b>");
         configParam(C_PARAM, 0.f, 128.f, 64.f, "Param <c>");
+        configParam(N_PARAM, 1.f, 10.f, 8.f, "Bytes");
         paramQuantities[A_PARAM]->snapEnabled = true;
         paramQuantities[B_PARAM]->snapEnabled = true;
         paramQuantities[C_PARAM]->snapEnabled = true;
+        paramQuantities[N_PARAM]->snapEnabled = true;
 
         configParam(A_CV_PARAM, 0.f, 1.f, 0.f, "Param <a> CV");
         configParam(B_CV_PARAM, 0.f, 1.f, 0.f, "Param <b> CV");
         configParam(C_CV_PARAM, 0.f, 1.f, 0.f, "Param <c> CV");
 
         configOutput(OUT_OUTPUT, "Audio");
-        // clock.setDivision(clockDivision);
+        configOutput(SHIFT_OUTPUT, "Audio (t-N)");
+    }
+
+    int getReading(int paramIndex, int inputIndex, int paramCVIndex) {
+        float maxValue = 128.f;
+        float reading = params[paramIndex].getValue();
+        if (inputs[inputIndex].isConnected()) {
+            reading += params[paramCVIndex].getValue() * maxValue * inputs[inputIndex].getVoltage() / 10.f;
+        }
+        return (int)clamp(reading, 0.f, maxValue);
     }
 
     void process(const ProcessArgs& args) override {
@@ -133,6 +162,22 @@ struct Byte : Module {
         bool resetTriggered = resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 2.f);
         bool reset = (resetButtonTriggered || resetTriggered);
 
+        // // Clock
+        if (inputs[CLOCK_INPUT].isConnected()) {
+            clockTimer.process(args.sampleTime);
+
+            if (clockTrigger.process(inputs[CLOCK_INPUT].getVoltage(), 0.1f, 2.f)) {
+                float clockFreq = 1.f / clockTimer.getTime();
+                clockTimer.reset();
+                if (0.001f <= clockFreq && clockFreq <= 1000.f) {
+                    this->clockFreq = clockFreq;
+                }
+            }
+        } else {
+            // Default frequency when clock is unpatched
+            clockFreq = 2.f;
+        }
+
         if (reset) {
             t = 0;
         }
@@ -141,7 +186,9 @@ struct Byte : Module {
 
         if (running) {
             // Calculate the phase
-            phase += args.sampleTime * std::pow(2.f, pitch);
+            float freq = clockFreq / 2.f * dsp::exp2_taylor5(pitch);
+            phase += args.sampleTime * freq;
+            // phase += args.sampleTime * std::pow(2.f, pitch);
             if (phase >= 1.f) {
                 phase -= 1.f;
                 t++;
@@ -149,9 +196,9 @@ struct Byte : Module {
                 if (!text.empty() && !badInput) {
                     try {
                         BytebeatParser parser(text);
-                        int a = (int)params[A_PARAM].getValue();
-                        int b = (int)params[B_PARAM].getValue();
-                        int c = (int)params[C_PARAM].getValue();
+                        int a = getReading(A_PARAM, A_INPUT, A_CV_PARAM);
+                        int b = getReading(B_PARAM, B_INPUT, B_CV_PARAM);
+                        int c = getReading(C_PARAM, C_INPUT, C_CV_PARAM);
                         int res = parser.parseAndEvaluate(t, a, b, c);
                         res = res & 0xff;
                         float out = res / 255.f;
@@ -207,8 +254,8 @@ struct ByteTextField : LedDisplayTextField {
 
     void step() override {
         LedDisplayTextField::step();
-        multiline = module->multiline;
         if (module && module->dirty) {
+            multiline = module->multiline;
             setText(module->text);
             module->dirty = false;
         }
@@ -260,7 +307,7 @@ struct ByteDisplay : LedDisplay {
         ByteTextField* textField = createWidget<ByteTextField>(Vec(0, 0));
         textField->fontPath = asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf");
         textField->box.size = box.size;
-        textField->multiline = module->multiline;
+        textField->multiline = true;
         textField->module = module;
         addChild(textField);
     }
@@ -295,6 +342,7 @@ struct ByteWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, Byte::A_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 203.79), module, Byte::B_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, Byte::C_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(202.5, 203.79), module, Byte::N_PARAM));
 
         addParam(createParamCentered<Trimpot>(Vec(67.5, 252.5), module, Byte::A_CV_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(112.5, 252.5), module, Byte::B_CV_PARAM));
@@ -304,6 +352,7 @@ struct ByteWidget : ModuleWidget {
         addParam(createLightParamCentered<VCVLightBezel<WhiteLight>>(Vec(202.5, 252.5), module, Byte::RESET_PARAM, Byte::RESET_LIGHT));
 
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(202.5, 329.25), module, Byte::OUT_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(157.5, 329.25), module, Byte::SHIFT_OUTPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
