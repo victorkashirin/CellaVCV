@@ -10,7 +10,7 @@ struct Byte : Module {
         A_PARAM,
         B_PARAM,
         C_PARAM,
-        N_PARAM,
+        BIT_PARAM,
         A_CV_PARAM,
         B_CV_PARAM,
         C_CV_PARAM,
@@ -28,7 +28,6 @@ struct Byte : Module {
     };
     enum OutputIds {
         OUT_OUTPUT,
-        SHIFT_OUTPUT,
         NUM_OUTPUTS
     };
     enum LightIds {
@@ -40,9 +39,8 @@ struct Byte : Module {
     };
 
     std::string text;
-    bool multiline = true;
+    bool multiline = false;
     bool running = true;
-    bool dirty = false;
     bool badInput = false;
     bool changed = false;
     uint32_t t = 0;
@@ -68,29 +66,25 @@ struct Byte : Module {
 
     void onReset() override {
         text = "";
-        dirty = true;
         t = 0;
         phase = 0.f;
-        clockFreq = 1.f;
+        clockFreq = 2.f;
         clockTimer.reset();
     }
 
     std::string getStringWithoutSpacesAndNewlines(const std::string& str) {
         std::string result;
         result.reserve(str.size());  // Optional: Reserve space to improve performance
-
         std::copy_if(str.begin(), str.end(), std::back_inserter(result), [](char c) {
             return c != ' ' && c != '\n' && c != '\r';
         });
-
         return result;
     }
 
     void updateString(const std::string& newText) {
         std::string processed = getStringWithoutSpacesAndNewlines(newText);
         text = processed.c_str();
-        DEBUG("Module received text: %s", processed.c_str());
-        // t = 0;
+        // DEBUG("Module received text: %s", processed.c_str());
         badInput = false;
         changed = false;
     }
@@ -124,22 +118,20 @@ struct Byte : Module {
         };
 
         configParam<FrequencyQuantity>(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
-        // configParam(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
         configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
         configParam(B_PARAM, 0.f, 128.f, 64.f, "Param <b>");
         configParam(C_PARAM, 0.f, 128.f, 64.f, "Param <c>");
-        configParam(N_PARAM, 1.f, 10.f, 8.f, "Bytes");
+        configParam(BIT_PARAM, 1.f, 10.f, 8.f, "Bits");
         paramQuantities[A_PARAM]->snapEnabled = true;
         paramQuantities[B_PARAM]->snapEnabled = true;
         paramQuantities[C_PARAM]->snapEnabled = true;
-        paramQuantities[N_PARAM]->snapEnabled = true;
+        paramQuantities[BIT_PARAM]->snapEnabled = true;
 
         configParam(A_CV_PARAM, 0.f, 1.f, 0.f, "Param <a> CV");
         configParam(B_CV_PARAM, 0.f, 1.f, 0.f, "Param <b> CV");
         configParam(C_CV_PARAM, 0.f, 1.f, 0.f, "Param <c> CV");
 
         configOutput(OUT_OUTPUT, "Audio");
-        configOutput(SHIFT_OUTPUT, "Audio (t-N)");
     }
 
     int getReading(int paramIndex, int inputIndex, int paramCVIndex) {
@@ -182,35 +174,31 @@ struct Byte : Module {
             t = 0;
         }
 
-        float pitch = params[FREQ_PARAM].getValue();
-
         if (running) {
-            // Calculate the phase
+            float pitch = params[FREQ_PARAM].getValue();
             float freq = clockFreq / 2.f * dsp::exp2_taylor5(pitch);
             phase += args.sampleTime * freq;
-            // phase += args.sampleTime * std::pow(2.f, pitch);
             if (phase >= 1.f) {
                 phase -= 1.f;
                 t++;
 
                 if (!text.empty() && !badInput) {
                     try {
+                        int n = (int)params[BIT_PARAM].getValue();
+                        int resolution = (1 << n) - 1;
                         BytebeatParser parser(text);
                         int a = getReading(A_PARAM, A_INPUT, A_CV_PARAM);
                         int b = getReading(B_PARAM, B_INPUT, B_CV_PARAM);
                         int c = getReading(C_PARAM, C_INPUT, C_CV_PARAM);
                         int res = parser.parseAndEvaluate(t, a, b, c);
-                        res = res & 0xff;
-                        float out = res / 255.f;
+
+                        res = res & resolution;
+                        float out = res / (float)resolution;
 
                         float minV = levels[outputLevelType][0];
                         float maxV = levels[outputLevelType][1];
 
                         output = out * (maxV - minV) + minV;
-
-                        // output = out * 5.f - 2.5f;
-                        // badInput = false;
-                        // output = out * 5.f;
                     } catch (const std::exception& e) {
                         badInput = true;
                         DEBUG("Exception caught: %s", e.what());
@@ -233,6 +221,7 @@ struct Byte : Module {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "text", json_stringn(text.c_str(), text.size()));
         json_object_set_new(rootJ, "outputLevelType", json_integer(outputLevelType));
+        json_object_set_new(rootJ, "multiline", json_boolean(multiline));
         return rootJ;
     }
 
@@ -245,21 +234,22 @@ struct Byte : Module {
         if (outputLevelTypeJ)
             outputLevelType = json_integer_value(outputLevelTypeJ);
 
-        dirty = true;
+        json_t* multilineJ = json_object_get(rootJ, "multiline");
+        if (multilineJ)
+            multiline = json_boolean_value(multilineJ);
     }
 };
 
 struct ByteTextField : LedDisplayTextField {
     Byte* module;
 
-    void step() override {
-        LedDisplayTextField::step();
-        if (module && module->dirty) {
-            multiline = module->multiline;
-            setText(module->text);
-            module->dirty = false;
-        }
-    }
+    // void step() override {
+    //     LedDisplayTextField::step();
+    //     if (module) {
+    //         multiline = module->multiline;
+    //         setText(module->text);
+    //     }
+    // }
 
     void onChange(const ChangeEvent& e) override {
         if (module) {
@@ -268,7 +258,7 @@ struct ByteTextField : LedDisplayTextField {
         }
     }
 
-    // Capture keyboard events for copy-paste and Enter key
+    // Capture keyboard events for Enter key
     void onSelectKey(const SelectKeyEvent& e) override {
         if (e.action == GLFW_PRESS && (e.key == GLFW_KEY_ENTER || e.key == GLFW_KEY_KP_ENTER)) {
             if (module && module->multiline) {
@@ -287,18 +277,13 @@ struct ByteTextField : LedDisplayTextField {
             TextField::onSelectKey(e);
     }
 
-    // Custom action to handle Enter keypress
     void onSubmit() {
-        // Define what happens when Enter is pressed, e.g. submit the text
         std::string enteredText = getText();
-        if (!enteredText.empty()) {
-            if (module)
-                module->updateString(enteredText);
 
-            // You can trigger some event or handle the entered text
-            // For example, print it to the Rack log
-            DEBUG("Enter pressed! Submitted text: %s", enteredText.c_str());
-        }
+        if (module)
+            module->updateString(enteredText);
+
+        // DEBUG("Enter pressed! Submitted text: %s", enteredText.c_str());
     }
 };
 
@@ -307,8 +292,12 @@ struct ByteDisplay : LedDisplay {
         ByteTextField* textField = createWidget<ByteTextField>(Vec(0, 0));
         textField->fontPath = asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf");
         textField->box.size = box.size;
-        textField->multiline = true;
-        textField->module = module;
+
+        if (module) {
+            textField->module = module;
+            textField->multiline = module->multiline;
+            textField->setText(module->text);
+        }
         addChild(textField);
     }
 };
@@ -322,12 +311,14 @@ struct ByteWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        ByteDisplay* notesDisplay = createWidget<ByteDisplay>(Vec(0, 26));
-        notesDisplay->box.size = Vec(225, 150);
-        notesDisplay->setModule(module);
-        addChild(notesDisplay);
+        ByteDisplay* byteDisplay = createWidget<ByteDisplay>(Vec(0, 26));
+        byteDisplay->box.size = Vec(225, 150);
+        byteDisplay->setModule(module);
+        addChild(byteDisplay);
 
-        addChild(createLightCentered<LargeFresnelLight<YellowLight>>(Vec(112.5, 329.25), module, Byte::EDIT_LIGHT));
+        if (module) module->changed = false;
+
+        addChild(createLightCentered<LargeFresnelLight<YellowLight>>(Vec(157.5, 329.25), module, Byte::EDIT_LIGHT));
         addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(67.5, 329.25), module, Byte::ERROR_LIGHT));
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Byte::CLOCK_INPUT));
@@ -342,7 +333,7 @@ struct ByteWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, Byte::A_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 203.79), module, Byte::B_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, Byte::C_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(202.5, 203.79), module, Byte::N_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(202.5, 203.79), module, Byte::BIT_PARAM));
 
         addParam(createParamCentered<Trimpot>(Vec(67.5, 252.5), module, Byte::A_CV_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(112.5, 252.5), module, Byte::B_CV_PARAM));
@@ -352,7 +343,6 @@ struct ByteWidget : ModuleWidget {
         addParam(createLightParamCentered<VCVLightBezel<WhiteLight>>(Vec(202.5, 252.5), module, Byte::RESET_PARAM, Byte::RESET_LIGHT));
 
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(202.5, 329.25), module, Byte::OUT_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(157.5, 329.25), module, Byte::SHIFT_OUTPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -374,3 +364,5 @@ Model* modelByte = createModel<Byte, ByteWidget>("Byte");
 // (t % 163 > 100 ? t : t>>3 + t<<14)|(t>>4)  at clock 90
 
 // t<<2|(t<<(2<<t)+2)>>(t>>3)|t>>2 at cloock 563
+
+// 2<<t+a|t<<1|t<<b|a<<b>>t at clock 85
