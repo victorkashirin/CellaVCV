@@ -17,7 +17,6 @@ struct Byte : Module {
         NUM_PARAMS
     };
     enum InputIds {
-        T_INPUT,
         A_INPUT,
         B_INPUT,
         C_INPUT,
@@ -91,7 +90,6 @@ struct Byte : Module {
 
     Byte() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
-        configInput(T_INPUT, "Time");
         configInput(A_INPUT, "Param <a> CV");
         configInput(B_INPUT, "Param <b> CV");
         configInput(C_INPUT, "Param <c> CV");
@@ -242,6 +240,13 @@ struct Byte : Module {
 
 struct ByteTextField : LedDisplayTextField {
     Byte* module;
+
+    void step() override {
+        LedDisplayTextField::step();
+        if (module) {
+            multiline = module->multiline;
+        }
+    }
 
     void onChange(const ChangeEvent& e) override {
         if (module) {
