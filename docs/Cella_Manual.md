@@ -185,3 +185,59 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 * **WET**: Outputs the wet (resonated) signal. This output is polyphonic, where outputs from four resonators occupy channels 1-4.
 * **OUT**: Outputs the final mixed signal, combining the dry input and wet resonated signals.
 
+# **Byte**
+
+<img src="images/Byte.png" alt="Cella - Byte" style="height: 380px;">
+
+**Byte** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
+
+#### **Bytebeat**
+
+Bytebeat expression is a simple C-compatible code that generates audio waveforms based on combination of various operators, integer values and the value of a time variable `t`.
+
+Supported operators:
+1. **Bitwise AND (`&`)**: Keeps bits that are set in both operands.
+2. **Bitwise OR (`|`)**: Combines bits from both operands.
+3. **Bitwise XOR (`^`)**: Toggles bits where only one operand has a bit set.
+4. **Bit Shifting (`>>`, `<<`)**: Shifts bits to the right or left.
+5. **Arithmetic (`+`, `-`, `*`, `/`)**: Basic math operations.
+6. **Ternary operator**: `(condition ? expr1 : expr2)`.
+
+For comprehensive introduction to bytebeats I recommend [Beginners Guide by The Tuesday Night Machines](https://nightmachines.tv/downloads/Bytebeats_Beginners_Guide_TTNM_v1-5.pdf).
+You can also find and test a lot of bytebeats online [here](https://dollchan.net/bytebeat/) and [here](https://bytebeat.demozoo.org/).
+
+#### **Key Features / Controls**
+* **Editor**: Bytebeat editor. If multiline option is off, expression is submitted with **Enter**, otherwise with **Shift+Enter**.
+* **Frequency**: Sets the base frequency of the bytebeat expression. Defaults to traditional 8000 Hz.
+* Parameters **a**, **b**, **c**: Adjustable parameters that you can use within bytebeat expression, from range [0, 128].
+* **Bits**: Sets the bit depth of the output signal.
+* **Run**: Button to start/stop the bytebeat generation.
+* **Reset**: Button to reset the bytebeat sequence.
+
+#### **Inputs**
+* **a CV**, **b CV**, **c CV**: CV input for parameters **a**, **b**, **c**.
+* **Run**: CV input to start/stop the bytebeat generation.
+* **Reset**: CV input to reset the bytebeat sequence, sets **t** to 0.
+* **Clock**: Clock input to synchronize the bytebeat generation.
+
+#### **Outputs**
+
+* **Audio**: Audio output of the bytebeat expression.
+
+#### **Lights**
+* **ERR** lights up if entered expression is incorrect.
+* **MOD** lights up if expression has been modified but not submitted.
+
+#### Context Menu Options
+- **Output Range**: Select the output voltage range from options -2.5V..2.5V, -5V..5V, 0..5V, 0..10V.
+- **Multiline**: Enable or disable multiline mode for the bytebeat expression input.
+
+#### **Example Bytebeat Expressions**
+Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
+* `t*(42&t>>10)`
+* `t+(t&t^t>>6)-t*(t>>9&(t%16?2:6)&t>>9)`
+* `(t|(t>>9|t>>7))*t&(t>>11|t>>9)`
+* `t*5&(t>>7)|t*3&(t*4>>10)`
+* `t*((t&4096?6:16)+(1&t>>14))>>(3&t>>8)|t>>(t&4096?3:4)`
+
+

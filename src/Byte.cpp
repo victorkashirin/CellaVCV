@@ -117,11 +117,11 @@ struct Byte : Module {
             }
         };
 
-        configParam<FrequencyQuantity>(FREQ_PARAM, 4.f, 14, 9.f, "Frequency", " Hz", 2, 1);
-        configParam(A_PARAM, 0.f, 128.f, 64.f, "Param <a>");
-        configParam(B_PARAM, 0.f, 128.f, 64.f, "Param <b>");
-        configParam(C_PARAM, 0.f, 128.f, 64.f, "Param <c>");
-        configParam(BIT_PARAM, 1.f, 10.f, 8.f, "Bits");
+        configParam<FrequencyQuantity>(FREQ_PARAM, 4.f, 14.428491035f, 12.965784f, "Frequency", " Hz", 2, 1);
+        configParam(A_PARAM, 0.f, 128.f, 1.f, "Param <a>");
+        configParam(B_PARAM, 0.f, 128.f, 1.f, "Param <b>");
+        configParam(C_PARAM, 0.f, 128.f, 1.f, "Param <c>");
+        configParam(BIT_PARAM, 1.f, 12.f, 8.f, "Bit Depth");
         paramQuantities[A_PARAM]->snapEnabled = true;
         paramQuantities[B_PARAM]->snapEnabled = true;
         paramQuantities[C_PARAM]->snapEnabled = true;
@@ -242,14 +242,6 @@ struct Byte : Module {
 
 struct ByteTextField : LedDisplayTextField {
     Byte* module;
-
-    // void step() override {
-    //     LedDisplayTextField::step();
-    //     if (module) {
-    //         multiline = module->multiline;
-    //         setText(module->text);
-    //     }
-    // }
 
     void onChange(const ChangeEvent& e) override {
         if (module) {

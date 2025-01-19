@@ -60,8 +60,9 @@
     {
       "slug": "Byte",
       "name": "Byte",
-      "description": "Bytebeat generator",
+      "description": "Bytebeat evaluator",
       "keywords": "byte",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#byte",
       "tags": [
         "Oscillator"
       ]
