@@ -6,16 +6,16 @@
 struct Resonators : Module {
     enum ParamIds {
         PITCH1_PARAM,
-        AMP1_PARAM,
+        GAIN1_PARAM,
         PITCH2_PARAM,
-        AMP2_PARAM,
+        GAIN2_PARAM,
         PITCH3_PARAM,
-        AMP3_PARAM,
+        GAIN3_PARAM,
         PITCH4_PARAM,
-        AMP4_PARAM,
+        GAIN4_PARAM,
         DECAY_PARAM,
         COLOR_PARAM,
-        GAIN_PARAM,
+        AMP_PARAM,
         MIX_PARAM,
         DECAY_CV_PARAM,
         COLOR_CV_PARAM,
@@ -62,16 +62,16 @@ struct Resonators : Module {
     Resonators() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configParam(PITCH1_PARAM, -54.f, 54.f, 0.f, "Frequency I", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP1_PARAM, 0.0, 1.0, 0.5f, "Gain I", " dB", -10, 20);
+        configParam(GAIN1_PARAM, 0.0, 1.0, 0.5f, "Gain I", " dB", -10, 20);
         configParam(PITCH2_PARAM, -54.f, 54.f, 0.f, "Frequency II", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP2_PARAM, 0.0, 1.0, 0.5f, "Gain II", " dB", -10, 20);
+        configParam(GAIN2_PARAM, 0.0, 1.0, 0.5f, "Gain II", " dB", -10, 20);
         configParam(PITCH3_PARAM, -54.f, 54.f, 0.f, "Frequency III", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP3_PARAM, 0.0, 1.0, 0.5f, "Gain III", " dB", -10, 20);
+        configParam(GAIN3_PARAM, 0.0, 1.0, 0.5f, "Gain III", " dB", -10, 20);
         configParam(PITCH4_PARAM, -54.f, 54.f, 0.f, "Frequency IV", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
-        configParam(AMP4_PARAM, 0.0, 1.0, 0.5f, "Gain IV", " dB", -10, 20);
+        configParam(GAIN4_PARAM, 0.0, 1.0, 0.5f, "Gain IV", " dB", -10, 20);
         configParam(DECAY_PARAM, 0.0f, 1.f, 0.9f, "Decay");
         configParam(COLOR_PARAM, 0.f, 1.f, 0.5f, "Color", "%", 0, 200, -100);
-        configParam(GAIN_PARAM, 0.0, 1.0, 0.5f, "Gain", " dB", -10, 20);
+        configParam(AMP_PARAM, 0.0, 1.0, 0.5f, "Amp", " dB", -10, 20);
         configParam(MIX_PARAM, 0.f, 1.f, 0.5f, "Mix");
 
         configParam(DECAY_CV_PARAM, -1.f, 1.f, 0.f, "Decay CV", "%", 0, 100);
@@ -85,9 +85,9 @@ struct Resonators : Module {
         configInput(PITCH4_INPUT, "IV 1V/octave pitch");
 
         configInput(IN_INPUT, "Audio");
-        configInput(DECAY_INPUT, "Decay");
-        configInput(COLOR_INPUT, "Color");
-        configInput(GAIN_INPUT, "Gain");
+        configInput(DECAY_INPUT, "Decay (Polyphonic)");
+        configInput(COLOR_INPUT, "Color (Polyphonic)");
+        configInput(GAIN_INPUT, "Gain (Polyphonic)");
         configInput(MIX_INPUT, "Mix");
 
         configOutput(WET_OUTPUT, "Wet signal (Polyphonic)");
@@ -125,16 +125,6 @@ struct Resonators : Module {
         return delayedSample;
     }
 
-    float readDelayBufferOld(int bufferIndex, float delayTimeSamples) {
-        // Compute the read index using the delay time (circular buffer)
-        int readIndex = delayIndices[bufferIndex] - (int)delayTimeSamples;
-        if (readIndex < 0) {
-            readIndex += bufferSize;  // Wrap around
-        }
-        return delayBuffers[bufferIndex][readIndex % bufferSize];
-    }
-
-    // Function to write to the delay buffer
     void writeDelayBuffer(int bufferIndex, float value) {
         int writeIndex = delayIndices[bufferIndex];
         delayBuffers[bufferIndex][writeIndex] = value;              // Write the new sample
@@ -144,75 +134,119 @@ struct Resonators : Module {
     void process(const ProcessArgs& args) override {
         float input = inputs[IN_INPUT].getVoltage();
 
-        float mix = params[MIX_PARAM].getValue() + inputs[MIX_INPUT].getVoltage() / 10.f * params[MIX_CV_PARAM].getValue();
+        // Single-channel mix handling remains the same
+        float mix = params[MIX_PARAM].getValue();
+        if (inputs[MIX_INPUT].isConnected()) {
+            mix += (inputs[MIX_INPUT].getVoltage() / 10.f) * params[MIX_CV_PARAM].getValue();
+        }
         mix = clamp(mix, 0.f, 1.f);
 
-        float gain = params[GAIN_PARAM].getValue() + inputs[GAIN_INPUT].getVoltage() / 10.f * params[GAIN_CV_PARAM].getValue();
-        gain = clamp(gain, 0.f, 1.f);
+        // Determine how many channels to handle for each of the poly CV inputs
+        int decayChannels = inputs[DECAY_INPUT].getChannels();
+        int colorChannels = inputs[COLOR_INPUT].getChannels();
+        int gainChannels = inputs[GAIN_INPUT].getChannels();
 
-        float color = params[COLOR_PARAM].getValue() + inputs[COLOR_INPUT].getVoltage() / 10.f * params[COLOR_CV_PARAM].getValue();
-        color = clamp(color, 0.f, 1.f);
-        float colorFreq = std::pow(100.f, 2.f * color - 1.f);
+        // Determine pitch input polyphony for PITCH1_INPUT (used as multi-resonator reference)
+        int pitch1Channels = inputs[PITCH1_INPUT].getChannels();
 
-        float feedback = params[DECAY_PARAM].getValue() + inputs[DECAY_INPUT].getVoltage() / 10.f * params[DECAY_CV_PARAM].getValue();
-        feedback = clamp(feedback, 0.f, 1.f);
-        feedback = powf(feedback, 0.2f);
-        feedback = rescale(feedback, 0.f, 1.f, 0.7f, 0.995f);
+        outputs[WET_OUTPUT].setChannels(4);
 
         float sumOutput = 0.f;
-        int numChannels = inputs[PITCH1_INPUT].getChannels();
-        outputs[WET_OUTPUT].setChannels(4);  // Set the polyphony for the wet output
 
-        // Get pitch control (convert semitones to frequency)
         for (int i = 0; i < 4; i++) {
-            float amp = params[AMP1_PARAM + i * 2].getValue();
-            float pitch = params[PITCH1_PARAM + i * 2].getValue() / 12.f;
-            // Use polyphonic channels if PITCH1_INPUT is polyphonic
+            // Handle per-resonator amplitude (knob) param
+            float amp = params[AMP_PARAM].getValue();
 
+            // Compute local pitch in semitones, then convert to frequency
+            float pitch = params[PITCH1_PARAM + i * 2].getValue() / 12.f;
             if (inputs[PITCH1_INPUT + i].isConnected()) {
                 pitch += inputs[PITCH1_INPUT + i].getVoltage();
-            } else if (inputs[PITCH1_INPUT].isConnected() && numChannels > 1) {
-                if (i < numChannels) {
+            } else if (inputs[PITCH1_INPUT].isConnected() && pitch1Channels > 1) {
+                if (i < pitch1Channels) {
                     pitch += inputs[PITCH1_INPUT].getVoltage(i);
                 }
             }
-
             pitch = clamp(pitch, -4.5f, 4.5f);
-            float targetFrequency = dsp::FREQ_C4 * std::pow(2.0f, pitch);  // Convert to frequency in Hz
+            float targetFrequency = dsp::FREQ_C4 * std::pow(2.0f, pitch);
 
-            // Calculate target delay time based on the pitch (1 / frequency gives period in seconds)
+            // Per-resonator local decay value (if i >= decayChannels, fallback to channel 0 or 0V)
+            float localDecay = params[DECAY_PARAM].getValue();
+            if (decayChannels > i) {
+                localDecay += (inputs[DECAY_INPUT].getVoltage(i) / 10.f) * params[DECAY_CV_PARAM].getValue();
+            } else if (decayChannels > 0) {
+                // If not enough channels for all 4, you could fallback to last channel or 0
+                localDecay += (inputs[DECAY_INPUT].getVoltage(decayChannels - 1) / 10.f) * params[DECAY_CV_PARAM].getValue();
+            }
+            localDecay = clamp(localDecay, 0.f, 1.f);
+            float localFeedback = powf(localDecay, 0.2f);
+            localFeedback = rescale(localFeedback, 0.f, 1.f, 0.7f, 0.995f);
+
+            // Per-resonator local color
+            float localColor = params[COLOR_PARAM].getValue();
+            if (colorChannels > i) {
+                localColor += (inputs[COLOR_INPUT].getVoltage(i) / 10.f) * params[COLOR_CV_PARAM].getValue();
+            } else if (colorChannels > 0) {
+                localColor += (inputs[COLOR_INPUT].getVoltage(colorChannels - 1) / 10.f) * params[COLOR_CV_PARAM].getValue();
+            }
+            localColor = clamp(localColor, 0.f, 1.f);
+            float colorFreq = std::pow(100.f, 2.f * localColor - 1.f);
+
+            // Per-resonator local gain
+            float localGain = params[GAIN1_PARAM + i * 2].getValue();
+            if (gainChannels > i) {
+                localGain += (inputs[GAIN_INPUT].getVoltage(i) / 10.f) * params[GAIN_CV_PARAM].getValue();
+            } else if (gainChannels > 0) {
+                localGain += (inputs[GAIN_INPUT].getVoltage(gainChannels - 1) / 10.f) * params[GAIN_CV_PARAM].getValue();
+            }
+            localGain = clamp(localGain, 0.0001f, 1.f);
+
+            // Calculate target delay time for each resonator
             float targetDelayTime = 1.0f / targetFrequency;
             targetDelaySamples[i] = targetDelayTime * sampleRate;
 
-            // Interpolate the delay length smoothly
+            // Smooth interpolation of new delay times
             currentDelaySamples[i] += (targetDelaySamples[i] - currentDelaySamples[i]) * interpolationSpeed;
 
-            // Fetch the feedback signal from the delay buffer
+            // Read from delay buffer
             float delayOutput = readDelayBuffer(i, currentDelaySamples[i]);
-            float filteredOutput = 0.5 * (delayOutput + prevDelayOutput[i]);
 
+            // Simple smoothing
+            float filteredOutput = 0.5f * (delayOutput + prevDelayOutput[i]);
             prevDelayOutput[i] = delayOutput;
-            delayOutput = filteredOutput * feedback;
 
+            // Apply feedback
+            delayOutput = filteredOutput * localFeedback;
+
+            // Lowpass filter
             float lowpassFreq = clamp(20000.f * colorFreq, 20.f, 20000.f);
             lowPassFilter[i].setCutoffFreq(lowpassFreq / args.sampleRate);
             lowPassFilter[i].process(delayOutput);
             delayOutput = lowPassFilter[i].lowpass();
 
+            // Highpass filter
             float highpassFreq = clamp(20.f * colorFreq, 20.f, 20000.f);
             highPassFilter[i].setCutoff(highpassFreq / args.sampleRate);
             highPassFilter[i].process(delayOutput);
             delayOutput = highPassFilter[i].highpass();
 
-            float output = input + delayOutput;
+            // Mix dry input with resonator's delayed output
+            float resonatorOut = input + delayOutput;
 
-            // Write the result back into the delay buffer
-            writeDelayBuffer(i, output);
-            sumOutput += delayOutput * amp;
-            outputs[WET_OUTPUT].setVoltage(delayOutput * amp, i);  // Polyphonic wet signal on channel i
+            // Write to delay buffer
+            writeDelayBuffer(i, resonatorOut);
+
+            // Apply per-resonator amplitude knob and local gain
+            float finalOut = delayOutput * localGain;
+
+            // Send per-resonator wet signal to poly output
+            outputs[WET_OUTPUT].setVoltage(finalOut, i);
+
+            // Accumulate for summed output
+            sumOutput += finalOut * amp;
         }
-        sumOutput = gain * sumOutput;
-        outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));  // Scale the output voltage
+
+        // After summing all resonators, apply global crossfade
+        outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));
     }
 };
 
@@ -232,7 +266,7 @@ struct ResonatorsWidget : ModuleWidget {
 
         for (int i = 0; i < 4; i++) {
             addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset), module, Resonators::PITCH1_PARAM + i * 2));
-            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, Resonators::AMP1_PARAM + i * 2));
+            addParam(createParamCentered<RoundBlackKnob>(Vec(xOffset + i * xSpacing, yOffset + ySpacing), module, Resonators::GAIN1_PARAM + i * 2));
         }
 
         for (int i = 0; i < 4; i++) {
@@ -242,7 +276,7 @@ struct ResonatorsWidget : ModuleWidget {
         // Decay knob
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 153.5), module, Resonators::DECAY_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 153.5), module, Resonators::COLOR_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, Resonators::GAIN_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 153.5), module, Resonators::AMP_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 153.5), module, Resonators::MIX_PARAM));
 
         addParam(createParamCentered<Trimpot>(Vec(22.5, 203.81), module, Resonators::DECAY_CV_PARAM));

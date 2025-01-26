@@ -1,6 +1,6 @@
 # Cella – User Manual
 
-# Version 2.0.5
+# Version 2.0.6
 
 # **LICENSE**
 
@@ -164,7 +164,7 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 <img src="images/Resonators.png" alt="Cella - Resonators" style="height: 380px;">
 
-**Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in popular DAW.
+**Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in the popular DAW.
 
 #### **Key Features / Controls**
 
@@ -172,7 +172,7 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 * **GAIN I-IV**: Controls the amplitude (gain) for each resonator, ranging from 0% to 100%.
 * **DECAY**: Adjusts the decay time of the resonators, affecting how long the sound sustains.
 * **COLOR**: Modifies the tonal color of the resonators by adjusting the cutoff frequency of the internal filters: CCW from noon - Low-Pass Filter, CW - High-pass filter.
-* **GAIN**: Sets the overall gain of the output signal.
+* **AMP**: Sets the overall amplitude of the output signal.
 * **MIX**: Blends the dry input signal with the wet resonated signal.
 
 #### **Inputs**
@@ -201,6 +201,7 @@ Supported operators:
 3. **Bitwise XOR (`^`)**: Toggles bits where only one operand has a bit set.
 4. **Bit Shifting (`>>`, `<<`)**: Shifts bits to the right or left.
 5. **Arithmetic (`+`, `-`, `*`, `/`)**: Basic math operations.
+6. **Logic (`>`, `>=`, `<=`, `<`, `==`, `!=`)**: Basic logic operators.
 6. **Ternary operator**: `(condition ? expr1 : expr2)`.
 
 For comprehensive introduction to bytebeats I recommend [Beginners Guide by The Tuesday Night Machines](https://nightmachines.tv/downloads/Bytebeats_Beginners_Guide_TTNM_v1-5.pdf).

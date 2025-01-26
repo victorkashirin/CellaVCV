@@ -15,10 +15,9 @@ class BytebeatParser {
         this->a = a;
         this->b = b;
         this->c = c;
-        int result = parseConditional();  // Start parsing with the conditional operator
+        int result = parseConditional();
         skipWhitespace();
         if (pos < expr.size()) {
-            // Uncomment the following line for error handling
             throw std::runtime_error("Unexpected character at position " + std::to_string(pos));
             return 0;
         }
@@ -31,14 +30,12 @@ class BytebeatParser {
     uint32_t t;
     int a, b, c;
 
-    // Parse functions corresponding to C++ operator precedence
-
     // 10. Conditional (?:)
     int parseConditional() {
         int condition = parseBitwiseOR();
         skipWhitespace();
         if (match('?')) {
-            int true_expr = parseConditional();  // Right-associative
+            int true_expr = parseConditional();
             if (!match(':')) {
                 throw std::runtime_error("Expected ':' after '?' at position " + std::to_string(pos));
             }
@@ -80,11 +77,11 @@ class BytebeatParser {
 
     // 7. Bitwise AND &
     int parseBitwiseAND() {
-        int left = parseRelational();  // Updated to call parseRelational
+        int left = parseEquality();  // upd
         while (true) {
             skipWhitespace();
             if (match('&')) {
-                int right = parseRelational();
+                int right = parseEquality();  // upd
                 left &= right;
             } else {
                 break;
@@ -93,31 +90,17 @@ class BytebeatParser {
         return left;
     }
 
-    // 6. Relational < > <= >=
-    int parseRelational() {
-        int left = parseShift();
+    // 6. Equality == !=
+    int parseEquality() {              // upd
+        int left = parseRelational();  // upd
         while (true) {
             skipWhitespace();
-            if (match('<')) {
-                if (match('<')) {  // Handle '<<' as shift, not relational
-                    pos -= 1;      // Roll back one character
-                    break;
-                }
-                int right = parseShift();
-                left = (left < right) ? 1 : 0;
-            } else if (match('>')) {
-                if (match('>')) {  // Handle '>>' as shift, not relational
-                    pos -= 1;      // Roll back one character
-                    break;
-                }
-                int right = parseShift();
-                left = (left > right) ? 1 : 0;
-            } else if (matchString("<=")) {
-                int right = parseShift();
-                left = (left <= right) ? 1 : 0;
-            } else if (matchString(">=")) {
-                int right = parseShift();
-                left = (left >= right) ? 1 : 0;
+            if (matchString("==")) {  // upd
+                int right = parseRelational();
+                left = (left == right) ? 1 : 0;
+            } else if (matchString("!=")) {  // upd
+                int right = parseRelational();
+                left = (left != right) ? 1 : 0;
             } else {
                 break;
             }
@@ -125,7 +108,53 @@ class BytebeatParser {
         return left;
     }
 
-    // 5. Shift << >>
+    // 5. Relational < > <= >=
+    int parseRelational() {
+        int left = parseShift();
+        while (true) {
+            skipWhitespace();
+            // Check multi-character operators first
+            if (matchString("<=")) {  // upd
+                int right = parseShift();
+                left = (left <= right) ? 1 : 0;
+            } else if (matchString(">=")) {  // upd
+                int right = parseShift();
+                left = (left >= right) ? 1 : 0;
+            }
+            // Next, check for possible shift operators (so we can break back to parseShift)
+            else if (matchString("<<")) {  // upd
+                // We found '<<' - belongs in parseShift, so revert position and break
+                pos -= 2;  // Put it back so parseShift() can handle it
+                break;
+            } else if (matchString(">>")) {  // upd
+                pos -= 2;                    // Put it back so parseShift() can handle it
+                break;
+            }
+            // Finally, handle single-character < or >
+            else if (match('<')) {
+                if (match('<')) {
+                    // We found '<<'; revert last consume, break to handle in parseShift
+                    pos -= 1;
+                    break;
+                }
+                int right = parseShift();
+                left = (left < right) ? 1 : 0;
+            } else if (match('>')) {
+                if (match('>')) {
+                    // We found '>>'; revert last consume, break to handle in parseShift
+                    pos -= 1;
+                    break;
+                }
+                int right = parseShift();
+                left = (left > right) ? 1 : 0;
+            } else {
+                break;
+            }
+        }
+        return left;
+    }
+
+    // 4. Shift << >>
     int parseShift() {
         int left = parseAdditive();
         while (true) {
@@ -143,7 +172,7 @@ class BytebeatParser {
         return left;
     }
 
-    // 4. Additive + -
+    // 3. Additive + -
     int parseAdditive() {
         int left = parseMultiplicative();
         while (true) {
@@ -161,7 +190,7 @@ class BytebeatParser {
         return left;
     }
 
-    // 3. Multiplicative * / %
+    // 2. Multiplicative * / %
     int parseMultiplicative() {
         int left = parseUnary();
         while (true) {
@@ -172,14 +201,14 @@ class BytebeatParser {
             } else if (match('/')) {
                 int right = parseUnary();
                 if (right == 0) {
-                    left = 0;  // Handle division by zero
+                    left = 0;
                 } else {
                     left /= right;
                 }
             } else if (match('%')) {
                 int right = parseUnary();
                 if (right == 0) {
-                    left = 0;  // Handle modulo by zero
+                    left = 0;
                 } else {
                     left %= right;
                 }
@@ -190,7 +219,7 @@ class BytebeatParser {
         return left;
     }
 
-    // 2. Unary - ~
+    // 1. Unary - ~
     int parseUnary() {
         skipWhitespace();
         if (match('-')) {
@@ -202,11 +231,11 @@ class BytebeatParser {
         }
     }
 
-    // 1. Primary expressions: numbers, 't', parenthesis
+    // Primary
     int parsePrimary() {
         skipWhitespace();
         if (match('(')) {
-            int value = parseConditional();  // Start with conditional inside parentheses
+            int value = parseConditional();
             if (!match(')')) {
                 std::ostringstream oss;
                 oss << "Expected closing parenthesis at position " << pos;
@@ -240,7 +269,6 @@ class BytebeatParser {
     }
 
     // Utility functions
-
     char peek() const {
         return pos < expr.size() ? expr[pos] : '\0';
     }
@@ -267,7 +295,7 @@ class BytebeatParser {
         size_t start = pos;
         for (char c : expected) {
             if (!match(c)) {
-                pos = start;  // Roll back if match fails
+                pos = start;
                 return false;
             }
         }
@@ -289,20 +317,6 @@ int main() {
     std::cout << "Test 1: "
               << (runTest("t % (t >> 10 & t)", t, test1) ? "PASS" : "FAIL")
               << std::endl;
-
-    // std::cout << "Enter bytebeat expression: ";
-    // std::getline(std::cin, expression);
-
-    // std::cout << "Enter time variable t: ";
-    // std::cin >> t;
-
-    // try {
-    //     BytebeatParser parser(expression);
-    //     int result = parser.parseAndEvaluate(t);
-    //     std::cout << "Result: " << result << std::endl;
-    // } catch (const std::exception& e) {
-    //     std::cerr << "Error: " << e.what() << std::endl;
-    // }
 
     return 0;
 }
