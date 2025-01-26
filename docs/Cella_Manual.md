@@ -164,6 +164,8 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 <img src="images/Resonators.png" alt="Cella - Resonators" style="height: 380px;">
 
+[**Resonators Demo (YouTube)**](https://www.youtube.com/watch?v=gn_RQxh0R7A)
+
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in the popular DAW.
 
 #### **Key Features / Controls**
@@ -234,11 +236,10 @@ You can also find and test a lot of bytebeats online [here](https://dollchan.net
 - **Multiline**: Enable or disable multiline mode for the bytebeat expression input.
 
 #### **Example Bytebeat Expressions**
-Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 * `t*(42&t>>10)`
 * `t+(t&t^t>>6)-t*(t>>9&(t%16?2:6)&t>>9)`
 * `(t|(t>>9|t>>7))*t&(t>>11|t>>9)`
 * `t*5&(t>>7)|t*3&(t*4>>10)`
 * `t*((t&4096?6:16)+(1&t>>14))>>(3&t>>8)|t>>(t&4096?3:4)`
-
+Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
