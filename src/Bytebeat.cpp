@@ -2,7 +2,7 @@
 #include "components.hpp"
 #include "plugin.hpp"
 
-struct Byte : Module {
+struct Bytebeat : Module {
     enum ParamIds {
         FREQ_PARAM,
         RUN_PARAM,
@@ -88,7 +88,7 @@ struct Byte : Module {
         changed = false;
     }
 
-    Byte() {
+    Bytebeat() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configInput(A_INPUT, "Param <a> CV");
         configInput(B_INPUT, "Param <b> CV");
@@ -103,7 +103,7 @@ struct Byte : Module {
 
         struct FrequencyQuantity : ParamQuantity {
             float getDisplayValue() override {
-                Byte* module = reinterpret_cast<Byte*>(this->module);
+                Bytebeat* module = reinterpret_cast<Bytebeat*>(this->module);
                 if (module->clockFreq == 2.f) {
                     unit = " Hz";
                     displayMultiplier = 1.f;
@@ -239,7 +239,7 @@ struct Byte : Module {
 };
 
 struct ByteTextField : LedDisplayTextField {
-    Byte* module;
+    Bytebeat* module;
 
     void step() override {
         LedDisplayTextField::step();
@@ -270,23 +270,107 @@ struct ByteTextField : LedDisplayTextField {
             }
         }
 
+        if (module && module->multiline && e.action == GLFW_PRESS && (e.key == GLFW_KEY_UP || e.key == GLFW_KEY_DOWN)) {
+            std::string text = getText();
+            if (text.empty()) {
+                e.consume(this);
+                return;
+            }
+
+            // Split text into lines
+            std::vector<std::string> lines;
+            size_t pos = 0;
+            while (pos < text.size()) {
+                size_t end = text.find('\n', pos);
+                if (end == std::string::npos) {
+                    lines.push_back(text.substr(pos));
+                    break;
+                } else {
+                    lines.push_back(text.substr(pos, end - pos));
+                    pos = end + 1;
+                }
+            }
+
+            if (lines.empty()) {
+                e.consume(this);
+                return;
+            }
+
+            // Calculate line start positions
+            std::vector<int> lineStarts;
+            lineStarts.push_back(0);
+            for (size_t i = 0; i < lines.size() - 1; ++i) {
+                lineStarts.push_back(lineStarts[i] + lines[i].length() + 1);
+            }
+
+            // Determine current line and column
+            int current_pos = this->cursor;
+            int current_line = 0;
+            for (size_t i = 0; i < lineStarts.size(); ++i) {
+                if (lineStarts[i] > current_pos) break;
+                current_line = i;
+            }
+
+            int current_col = current_pos - lineStarts[current_line];
+            if (current_col > (int)lines[current_line].length()) {
+                current_col = lines[current_line].length();
+            }
+
+            // Calculate new line
+            int new_line = current_line;
+            if (e.key == GLFW_KEY_UP) {
+                if (current_line > 0)
+                    new_line--;
+                else {
+                    e.consume(this);
+                    return;
+                }
+            } else if (e.key == GLFW_KEY_DOWN) {
+                if (current_line < (int)lines.size() - 1)
+                    new_line++;
+                else {
+                    e.consume(this);
+                    return;
+                }
+            }
+
+            // Calculate new position
+            int new_col = std::min(current_col, (int)lines[new_line].length());
+            int new_pos = lineStarts[new_line] + new_col;
+            new_pos = clamp(new_pos, 0, (int)text.length());
+            this->cursor = new_pos;
+
+            if ((e.mods & GLFW_MOD_SHIFT) == 0) {
+                this->selection = this->cursor;
+            }
+
+            e.consume(this);
+            return;
+        }
+
         if (!e.getTarget())
             TextField::onSelectKey(e);
     }
 
     void onSubmit() {
-        std::string enteredText = getText();
-
         if (module)
-            module->updateString(enteredText);
+            module->updateString(getText());
 
         // DEBUG("Enter pressed! Submitted text: %s", enteredText.c_str());
     }
 };
 
 struct ByteDisplay : LedDisplay {
-    void setModule(Byte* module) {
-        ByteTextField* textField = createWidget<ByteTextField>(Vec(0, 0));
+    ByteTextField* textField = nullptr;  // Add this line
+
+    void setModule(Bytebeat* module) {
+        if (textField) {
+            removeChild(textField);
+            delete textField;
+            textField = nullptr;
+        }
+
+        textField = createWidget<ByteTextField>(Vec(0, 0));
         textField->fontPath = asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf");
         textField->box.size = box.size;
 
@@ -297,10 +381,24 @@ struct ByteDisplay : LedDisplay {
         }
         addChild(textField);
     }
+
+    void updateModule(Bytebeat* module) {
+        if (textField) {
+            textField->module = module;
+            if (module) {
+                textField->multiline = module->multiline;
+                textField->setText(module->text);
+            } else {
+                textField->multiline = false;
+                textField->setText("");
+            }
+        }
+    }
 };
 
 struct ByteWidget : ModuleWidget {
-    ByteWidget(Byte* module) {
+    ByteDisplay* byteDisplay;  // Add this line
+    ByteWidget(Bytebeat* module) {
         setModule(module);
 
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Byte.svg"), asset::plugin(pluginInstance, "res/Byte-dark.svg")));
@@ -308,42 +406,42 @@ struct ByteWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        ByteDisplay* byteDisplay = createWidget<ByteDisplay>(Vec(0, 26));
+        byteDisplay = createWidget<ByteDisplay>(Vec(0, 26));
         byteDisplay->box.size = Vec(225, 150);
         byteDisplay->setModule(module);
         addChild(byteDisplay);
 
         if (module) module->changed = false;
 
-        addChild(createLightCentered<LargeFresnelLight<YellowLight>>(Vec(157.5, 329.25), module, Byte::EDIT_LIGHT));
-        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(67.5, 329.25), module, Byte::ERROR_LIGHT));
+        addChild(createLightCentered<LargeFresnelLight<YellowLight>>(Vec(157.5, 329.25), module, Bytebeat::EDIT_LIGHT));
+        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(67.5, 329.25), module, Bytebeat::ERROR_LIGHT));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Byte::CLOCK_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), module, Bytebeat::CLOCK_INPUT));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.01), module, Byte::RUN_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 280.01), module, Byte::A_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 280.01), module, Byte::B_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 280.01), module, Byte::C_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(202.5, 280.01), module, Byte::RESET_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.01), module, Bytebeat::RUN_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 280.01), module, Bytebeat::A_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5, 280.01), module, Bytebeat::B_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(157.5, 280.01), module, Bytebeat::C_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(202.5, 280.01), module, Bytebeat::RESET_INPUT));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 203.79), module, Byte::FREQ_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, Byte::A_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 203.79), module, Byte::B_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, Byte::C_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(202.5, 203.79), module, Byte::BIT_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 203.79), module, Bytebeat::FREQ_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 203.79), module, Bytebeat::A_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(112.5, 203.79), module, Bytebeat::B_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(157.5, 203.79), module, Bytebeat::C_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(202.5, 203.79), module, Bytebeat::BIT_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(67.5, 252.5), module, Byte::A_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(112.5, 252.5), module, Byte::B_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(157.5, 252.5), module, Byte::C_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 252.5), module, Bytebeat::A_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(112.5, 252.5), module, Bytebeat::B_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(157.5, 252.5), module, Bytebeat::C_CV_PARAM));
 
-        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(22.5, 252.5), module, Byte::RUN_PARAM, Byte::RUN_LIGHT));
-        addParam(createLightParamCentered<VCVLightBezel<WhiteLight>>(Vec(202.5, 252.5), module, Byte::RESET_PARAM, Byte::RESET_LIGHT));
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<WhiteLight>>>(Vec(22.5, 252.5), module, Bytebeat::RUN_PARAM, Bytebeat::RUN_LIGHT));
+        addParam(createLightParamCentered<VCVLightBezel<WhiteLight>>(Vec(202.5, 252.5), module, Bytebeat::RESET_PARAM, Bytebeat::RESET_LIGHT));
 
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(202.5, 329.25), module, Byte::OUT_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(202.5, 329.25), module, Bytebeat::OUT_OUTPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
-        Byte* module = dynamic_cast<Byte*>(this->module);
+        Bytebeat* module = dynamic_cast<Bytebeat*>(this->module);
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexPtrSubmenuItem("Output Range",
@@ -355,7 +453,7 @@ struct ByteWidget : ModuleWidget {
     }
 };
 
-Model* modelByte = createModel<Byte, ByteWidget>("Byte");
+Model* modelBytebeat = createModel<Bytebeat, ByteWidget>("Bytebeat");
 
 // Recipes
 // (t % 163 > 100 ? t : t>>3 + t<<14)|(t>>4)  at clock 90

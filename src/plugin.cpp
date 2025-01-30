@@ -10,5 +10,5 @@ void init(Plugin *p) {
     p->addModel(modelRich);
     p->addModel(modelTwinPeaks);
     p->addModel(modelResonators);
-    p->addModel(modelByte);
+    p->addModel(modelBytebeat);
 }

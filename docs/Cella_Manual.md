@@ -187,11 +187,11 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 * **WET**: Outputs the wet (resonated) signal. This output is polyphonic, where outputs from four resonators occupy channels 1-4.
 * **OUT**: Outputs the final mixed signal, combining the dry input and wet resonated signals.
 
-# **Byte**
+# **Bytebeat**
 
-<img src="images/Byte.png" alt="Cella - Byte" style="height: 380px;">
+<img src="images/Byte.png" alt="Cella - Bytebeat" style="height: 380px;">
 
-**Byte** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
+**Bytebeat** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
 
 #### **Bytebeat**
 

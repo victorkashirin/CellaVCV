@@ -58,11 +58,11 @@
       ]
     },
     {
-      "slug": "Byte",
-      "name": "Byte",
+      "slug": "Bytebeat",
+      "name": "Bytebeat",
       "description": "Bytebeat evaluator",
       "keywords": "byte",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#byte",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#bytebeat",
       "tags": [
         "Oscillator",
         "LFO"
