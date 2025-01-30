@@ -38,7 +38,7 @@ struct Bytebeat : Module {
     };
 
     std::string text;
-    bool multiline = false;
+    int multiline = 0;
     bool running = true;
     bool badInput = false;
     bool changed = false;
@@ -219,7 +219,7 @@ struct Bytebeat : Module {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "text", json_stringn(text.c_str(), text.size()));
         json_object_set_new(rootJ, "outputLevelType", json_integer(outputLevelType));
-        json_object_set_new(rootJ, "multiline", json_boolean(multiline));
+        json_object_set_new(rootJ, "multiline", json_integer(multiline));
         return rootJ;
     }
 
@@ -234,19 +234,12 @@ struct Bytebeat : Module {
 
         json_t* multilineJ = json_object_get(rootJ, "multiline");
         if (multilineJ)
-            multiline = json_boolean_value(multilineJ);
+            multiline = json_integer_value(multilineJ);
     }
 };
 
 struct ByteTextField : LedDisplayTextField {
     Bytebeat* module;
-
-    void step() override {
-        LedDisplayTextField::step();
-        if (module) {
-            multiline = module->multiline;
-        }
-    }
 
     void onChange(const ChangeEvent& e) override {
         if (module) {
@@ -258,19 +251,28 @@ struct ByteTextField : LedDisplayTextField {
     // Capture keyboard events for Enter key
     void onSelectKey(const SelectKeyEvent& e) override {
         if (e.action == GLFW_PRESS && (e.key == GLFW_KEY_ENTER || e.key == GLFW_KEY_KP_ENTER)) {
-            if (module && module->multiline) {
-                bool shift_key = ((e.mods & RACK_MOD_MASK) & GLFW_MOD_SHIFT);
+            bool shift_key = ((e.mods & RACK_MOD_MASK) & GLFW_MOD_SHIFT);
+            if (module && module->multiline == 1) {
                 if (shift_key) {
                     onSubmit();
                     e.consume(this);
                 }
             } else {
-                onSubmit();
-                e.consume(this);
+                if (!shift_key) {
+                    onSubmit();
+                    e.consume(this);
+                } else {
+                    SelectKeyEvent textEvent;
+                    textEvent.key = GLFW_KEY_ENTER;
+                    textEvent.action = GLFW_PRESS;
+                    textEvent.mods = 0;  // No modifiers
+                    this->onSelectKey(textEvent);
+                    e.consume(this);
+                }
             }
         }
 
-        if (module && module->multiline && e.action == GLFW_PRESS && (e.key == GLFW_KEY_UP || e.key == GLFW_KEY_DOWN)) {
+        if (module && e.action == GLFW_PRESS && (e.key == GLFW_KEY_UP || e.key == GLFW_KEY_DOWN)) {
             std::string text = getText();
             if (text.empty()) {
                 e.consume(this);
@@ -355,13 +357,11 @@ struct ByteTextField : LedDisplayTextField {
     void onSubmit() {
         if (module)
             module->updateString(getText());
-
-        // DEBUG("Enter pressed! Submitted text: %s", enteredText.c_str());
     }
 };
 
 struct ByteDisplay : LedDisplay {
-    ByteTextField* textField = nullptr;  // Add this line
+    ByteTextField* textField = nullptr;
 
     void setModule(Bytebeat* module) {
         if (textField) {
@@ -373,31 +373,17 @@ struct ByteDisplay : LedDisplay {
         textField = createWidget<ByteTextField>(Vec(0, 0));
         textField->fontPath = asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf");
         textField->box.size = box.size;
+        textField->multiline = true;
 
         if (module) {
             textField->module = module;
-            textField->multiline = module->multiline;
             textField->setText(module->text);
         }
         addChild(textField);
     }
-
-    void updateModule(Bytebeat* module) {
-        if (textField) {
-            textField->module = module;
-            if (module) {
-                textField->multiline = module->multiline;
-                textField->setText(module->text);
-            } else {
-                textField->multiline = false;
-                textField->setText("");
-            }
-        }
-    }
 };
 
 struct ByteWidget : ModuleWidget {
-    ByteDisplay* byteDisplay;  // Add this line
     ByteWidget(Bytebeat* module) {
         setModule(module);
 
@@ -406,7 +392,7 @@ struct ByteWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        byteDisplay = createWidget<ByteDisplay>(Vec(0, 26));
+        ByteDisplay* byteDisplay = createWidget<ByteDisplay>(Vec(0, 26));
         byteDisplay->box.size = Vec(225, 150);
         byteDisplay->setModule(module);
         addChild(byteDisplay);
@@ -448,8 +434,9 @@ struct ByteWidget : ModuleWidget {
                                                  {"-2.5V..2.5V", "-5V..5V", "0..5V", "0..10V"},
                                                  &module->outputLevelType));
 
-        menu->addChild(new MenuSeparator);
-        menu->addChild(createBoolPtrMenuItem("Multiline", "", &module->multiline));
+        menu->addChild(createIndexPtrSubmenuItem("Submit/New Line",
+                                                 {"Enter/Shift+Enter", "Shift+Enter/Enter"},
+                                                 &module->multiline));
     }
 };
 

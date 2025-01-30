@@ -193,7 +193,7 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 **Bytebeat** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
 
-#### **Bytebeat**
+#### **Bytebeat Expressions**
 
 Bytebeat expression is a simple C-compatible code that generates audio waveforms based on combination of various operators, integer values and the value of a time variable `t`.
 
