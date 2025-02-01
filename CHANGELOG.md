@@ -1,9 +1,9 @@
 # Cella modules changelog
 
-### 2.0.6 (2025-01-26)
+### 2.0.6 (2025-01-30)
 
 New modules:
-* Byte - bytebeat expression evaluator
+* Bytebeat - bytebeat expression evaluator
 
 Updates:
 * Resonators - CV inputs for Decay, Color and Gain are made polyphonic.

@@ -211,17 +211,17 @@ You can also find and test a lot of bytebeats online [here](https://dollchan.net
 
 #### **Key Features / Controls**
 * **Editor**: Bytebeat editor. If multiline option is off, expression is submitted with **Enter**, otherwise with **Shift+Enter**.
-* **Frequency**: Sets the base frequency of the bytebeat expression. Defaults to traditional 8000 Hz.
+* **FREQ**: Sets the base frequency of the bytebeat expression. Defaults to traditional 8000 Hz.
 * Parameters **a**, **b**, **c**: Adjustable parameters that you can use within bytebeat expression, from range [0, 128].
-* **Bits**: Sets the bit depth of the output signal.
-* **Run**: Button to start/stop the bytebeat generation.
-* **Reset**: Button to reset the bytebeat sequence.
+* **BITS**: Sets the bit depth of the output signal.
+* **RUN**: Button to start/stop the bytebeat generation.
+* **RESET**: Button to reset the bytebeat sequence.
 
 #### **Inputs**
 * **a CV**, **b CV**, **c CV**: CV input for parameters **a**, **b**, **c**.
-* **Run**: CV input to start/stop the bytebeat generation.
-* **Reset**: CV input to reset the bytebeat sequence, sets **t** to 0.
-* **Clock**: Clock input to synchronize the bytebeat generation.
+* **RUN**: CV input to start/stop the bytebeat generation.
+* **RESET**: CV input to reset the bytebeat sequence, sets **t** to 0.
+* **CLOCK**: Clock input to synchronize the bytebeat generation. When cable is connected, **FREQ** sets clock multiplier.
 
 #### **Outputs**
 
