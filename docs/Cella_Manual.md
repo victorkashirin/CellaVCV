@@ -189,7 +189,7 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 # **Bytebeat**
 
-<img src="images/Byte.png" alt="Cella - Bytebeat" style="height: 380px;">
+<img src="images/Bytebeat.png" alt="Cella - Bytebeat" style="height: 380px;">
 
 **Bytebeat** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
 
@@ -241,5 +241,6 @@ You can also find and test a lot of bytebeats online [here](https://dollchan.net
 * `(t|(t>>9|t>>7))*t&(t>>11|t>>9)`
 * `t*5&(t>>7)|t*3&(t*4>>10)`
 * `t*((t&4096?6:16)+(1&t>>14))>>(3&t>>8)|t>>(t&4096?3:4)`
+
 Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
