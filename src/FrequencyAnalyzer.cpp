@@ -7,6 +7,7 @@ struct VFDFreqAnalyzer : Module {
         PEAK_FALL_DELAY_PARAM,
         GAIN_PARAM,
         RESPONSIVENESS_PARAM,
+        LOG_BINS_PARAM,
         PARAMS_LEN
     };
     enum InputIds {
@@ -27,6 +28,8 @@ struct VFDFreqAnalyzer : Module {
     std::vector<float> bandLevels;
     std::vector<float> bandPeaks;
     float sampleRate = 44100.f;
+    bool logarithmicBins = false;
+    dsp::SchmittTrigger logBinTrigger;
 
     VFDFreqAnalyzer() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -35,6 +38,7 @@ struct VFDFreqAnalyzer : Module {
         configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
         configParam(GAIN_PARAM, 0.f, 2.f, 1.f, "Gain");
         configParam(RESPONSIVENESS_PARAM, 0.f, 3.f, 1.f, "Responsiveness", "", 0.5f, 256.f);
+        configParam(LOG_BINS_PARAM, 0.f, 1.f, 0.f, "Logarithmic Bins");
         configInput(AUDIO_INPUT, "Audio");
         sampleBuffer.resize(windowSize);
         fftBuffer.resize(windowSize);
@@ -44,6 +48,12 @@ struct VFDFreqAnalyzer : Module {
 
     void process(const ProcessArgs& args) override {
         sampleRate = args.sampleRate;
+
+        // Handle logarithmic bins toggle
+        if (logBinTrigger.process(params[LOG_BINS_PARAM].getValue() > 0.f)) {
+            logarithmicBins ^= true;
+        }
+
         size_t newBands = static_cast<size_t>(std::max(1, (int)params[NUM_BANDS_PARAM].getValue()));
         if (bandLevels.size() != newBands) {
             bandLevels.resize(newBands, 0.f);
@@ -76,7 +86,7 @@ struct VFDFreqAnalyzer : Module {
 
     void processFFT() {
         for (size_t i = 0; i < windowSize; i++) {
-            float window = 0.5f * (1.f - std::cos(2.f * M_PI * i / (windowSize - 1)));
+            float window = 0.5f * (1.f - std::cos(2.f * static_cast<float>(M_PI) * i / (windowSize - 1)));
             fftBuffer[i] = std::complex<float>(sampleBuffer[i] * window, 0.f);
         }
 
@@ -89,20 +99,51 @@ struct VFDFreqAnalyzer : Module {
         }
 
         size_t numBands = bandLevels.size();
-        size_t binsPerBand = std::max<size_t>(1, numBins / numBands);
         std::vector<float> newLevels(numBands, 0.f);
 
-        for (size_t b = 0; b < numBands; b++) {
-            size_t start = b * binsPerBand;
-            size_t end = (b == numBands - 1) ? numBins : (b + 1) * binsPerBand;
-            float sum = 0.f;
-            for (size_t i = start; i < end; i++) {
-                sum += magnitudes[i];
-            }
-            sum /= (end - start);
+        if (logarithmicBins) {
+            float nyquist = sampleRate / 2.0f;
+            float minFreq = sampleRate / windowSize;
+            float maxFreq = nyquist;
 
-            float dB = 10.f * std::log10(sum + 1e-12f);
-            newLevels[b] = clamp((dB + 60.f) / 60.f, 0.f, 1.f);
+            for (size_t b = 0; b < numBands; b++) {
+                float bandStartFreq = minFreq * std::pow(maxFreq / minFreq, static_cast<float>(b) / numBands);
+                float bandEndFreq = minFreq * std::pow(maxFreq / minFreq, static_cast<float>(b + 1) / numBands);
+
+                size_t startBin = static_cast<size_t>(bandStartFreq * windowSize / sampleRate);
+                size_t endBin = static_cast<size_t>(bandEndFreq * windowSize / sampleRate);
+
+                startBin = std::max(startBin, size_t(1));
+                endBin = std::min(endBin, numBins - 1);
+
+                if (startBin >= endBin) {
+                    endBin = startBin + 1;
+                    if (endBin >= numBins) endBin = numBins - 1;
+                }
+
+                float sum = 0.0f;
+                for (size_t i = startBin; i < endBin; i++) {
+                    sum += magnitudes[i];
+                }
+                sum /= (endBin - startBin);
+
+                float dB = 10.0f * std::log10(sum + 1e-12f);
+                newLevels[b] = clamp((dB + 60.0f) / 60.0f, 0.0f, 1.0f);
+            }
+        } else {
+            size_t binsPerBand = std::max<size_t>(1, numBins / numBands);
+            for (size_t b = 0; b < numBands; b++) {
+                size_t start = b * binsPerBand;
+                size_t end = (b == numBands - 1) ? numBins : (b + 1) * binsPerBand;
+                float sum = 0.f;
+                for (size_t i = start; i < end; i++) {
+                    sum += magnitudes[i];
+                }
+                sum /= (end - start);
+
+                float dB = 10.f * std::log10(sum + 1e-12f);
+                newLevels[b] = clamp((dB + 60.f) / 60.f, 0.f, 1.f);
+            }
         }
 
         float deltaTime = windowSize / sampleRate;
@@ -153,7 +194,7 @@ struct VFDFreqAnalyzer : Module {
 
 struct VFDDisplay : Widget {
     VFDFreqAnalyzer* module;
-    float segmentSpacing = 0.5f;
+    float segmentSpacing = 3.5f;
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1 || !module) return;
@@ -216,6 +257,7 @@ struct VFDFreqAnalyzerWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(60, 100)), module, VFDFreqAnalyzer::PEAK_FALL_DELAY_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(80, 100)), module, VFDFreqAnalyzer::GAIN_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(100, 100)), module, VFDFreqAnalyzer::RESPONSIVENESS_PARAM));
+        addParam(createParamCentered<VCVButton>(mm2px(Vec(120, 100)), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(110, 120)), module, VFDFreqAnalyzer::AUDIO_INPUT));
     }
 };
