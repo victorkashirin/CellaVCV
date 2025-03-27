@@ -33,7 +33,7 @@ struct VFDFreqAnalyzer : Module {
 
     VFDFreqAnalyzer() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
-        configParam(NUM_BANDS_PARAM, 1.f, 64.f, 16.f, "Number of Bands");
+        configParam(NUM_BANDS_PARAM, 1.f, 25.f, 16.f, "Number of Bands");
         configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
         configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
         configParam(GAIN_PARAM, 0.f, 2.f, 1.f, "Gain");
@@ -194,12 +194,19 @@ struct VFDFreqAnalyzer : Module {
 
 struct VFDDisplay : Widget {
     VFDFreqAnalyzer* module;
-    float segmentSpacing = 3.5f;
+    const float dotRadius = 2.0f;
+    const float dotSpacing = 2.0f;
+    // const NVGcolor activeColor = nvgRGB(0x90, 0xFF, 0x30);
+    const NVGcolor activeColor = nvgRGB(0x93, 0xEA, 0xFF);
+    const NVGcolor inactiveColor = nvgRGB(0x20, 0x20, 0x20);
+    const NVGcolor peakColor = nvgRGB(0xFF, 0x30, 0x30);
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1 || !module) return;
 
         nvgSave(args.vg);
+
+        // Draw dark background
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0, 0, box.size.x, box.size.y);
         nvgFillColor(args.vg, nvgRGB(0x10, 0x10, 0x10));
@@ -211,33 +218,96 @@ struct VFDDisplay : Widget {
             return;
         }
 
-        float bandWidth = box.size.x / numBands;
-        float segHeight = box.size.y / 25.f;
+        const float bandMargin = 3.0f;
+        const float totalWidth = box.size.x - 2 * bandMargin;
+        const float bandWidth = totalWidth / numBands;
 
         for (size_t b = 0; b < numBands; b++) {
             float level = module->bandLevels[b];
             float peak = module->bandPeaks[b];
-            float x = b * bandWidth;
+            float x = bandMargin + b * bandWidth;
 
-            for (int s = 0; s < 25; s++) {
-                float yPos = box.size.y - (s + 1) * segHeight;
-                float alpha = (s < 25 * level) ? 0.3f + 0.7f * (s / 24.f) : 0.f;
-                nvgFillColor(args.vg, nvgRGBA(0x90, 0xFF, 0x30, (int)(alpha * 255)));
-                nvgBeginPath(args.vg);
-                nvgRect(args.vg, x + 1, yPos, bandWidth - 2, segHeight - segmentSpacing);
-                nvgFill(args.vg);
+            // Calculate dot grid dimensions
+            float availableWidth = bandWidth - bandMargin * 2;
+            int cols = calculateColumnCount(availableWidth);
+            int rows = calculateRowCount(box.size.y - bandMargin * 2);
+
+            // Center the grid horizontally
+            float gridWidth = cols * (dotRadius * 2 + dotSpacing) - dotSpacing;
+            float xStart = x + (availableWidth - gridWidth) / 2 + bandMargin;
+
+            // Vertical positioning
+            float yStart = bandMargin;
+            float gridHeight = rows * (dotRadius * 2 + dotSpacing) - dotSpacing;
+            float yStep = (box.size.y - bandMargin * 2 - gridHeight) / (rows - 1);
+
+            // Draw inactive dots
+            drawDotGrid(args.vg, xStart, yStart, cols, rows, inactiveColor);
+
+            // Draw active dots
+            if (level > 0.0f) {
+                float activeHeight = box.size.y * level;
+                drawActiveDots(args.vg, xStart, yStart, cols, rows, activeHeight);
             }
 
-            if (peak > 0.f) {
-                float peakY = box.size.y - (peak * 24.f + 1) * segHeight;
-                nvgFillColor(args.vg, nvgRGB(0xFF, 0x30, 0x30));
-                nvgBeginPath(args.vg);
-                nvgRect(args.vg, x + 1, peakY, bandWidth - 2, 2.f);
-                nvgFill(args.vg);
+            // Draw peak indicator
+            if (peak > 0.0f) {
+                nvgFillColor(args.vg, peakColor);
+                float peakY = box.size.y - (box.size.y * peak);
+                int r = rows - ceil(peak * rows);
+                float dy = yStart + r * (dotRadius * 2 + dotSpacing);
+                for (int c = 0; c < cols; c++) {
+                    float dx = xStart + c * (dotRadius * 2 + dotSpacing);
+
+                    nvgBeginPath(args.vg);
+                    nvgCircle(args.vg, dx, dy, dotRadius);
+                    nvgFill(args.vg);
+                }
             }
         }
 
         nvgRestore(args.vg);
+    }
+
+   private:
+    int calculateColumnCount(float availableWidth) {
+        int cols = static_cast<int>((availableWidth + dotSpacing) /
+                                    (dotRadius * 2 + dotSpacing));
+        return clamp(cols, 3, 100);
+    }
+
+    int calculateRowCount(float availableHeight) {
+        int rows = static_cast<int>((availableHeight + dotSpacing) /
+                                    (dotRadius * 2 + dotSpacing));
+        return rows;
+    }
+
+    void drawDotGrid(NVGcontext* vg, float x, float y, int cols, int rows, NVGcolor color) {
+        nvgFillColor(vg, color);
+        for (int c = 0; c < cols; c++) {
+            for (int r = 0; r < rows; r++) {
+                float dx = x + c * (dotRadius * 2 + dotSpacing);
+                float dy = y + r * (dotRadius * 2 + dotSpacing);
+                nvgBeginPath(vg);
+                nvgCircle(vg, dx, dy, dotRadius);
+                nvgFill(vg);
+            }
+        }
+    }
+
+    void drawActiveDots(NVGcontext* vg, float x, float y, int cols, int rows, float activeHeight) {
+        nvgFillColor(vg, activeColor);
+        for (int c = 0; c < cols; c++) {
+            for (int r = 0; r < rows; r++) {
+                float dy = y + r * (dotRadius * 2 + dotSpacing);
+                if (box.size.y - dy <= activeHeight) {
+                    float dx = x + c * (dotRadius * 2 + dotSpacing);
+                    nvgBeginPath(vg);
+                    nvgCircle(vg, dx, dy, dotRadius);
+                    nvgFill(vg);
+                }
+            }
+        }
     }
 };
 
@@ -248,17 +318,17 @@ struct VFDFreqAnalyzerWidget : ModuleWidget {
 
         VFDDisplay* display = new VFDDisplay();
         display->module = module;
-        display->box.pos = mm2px(Vec(5.0, 15.0));
-        display->box.size = mm2px(Vec(120.0, 80.0));
+        display->box.pos = Vec(0.0, 25.0);
+        display->box.size = Vec(496.0, 280.0);
         addChild(display);
 
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(20, 100)), module, VFDFreqAnalyzer::NUM_BANDS_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(40, 100)), module, VFDFreqAnalyzer::FALL_DELAY_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(60, 100)), module, VFDFreqAnalyzer::PEAK_FALL_DELAY_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(80, 100)), module, VFDFreqAnalyzer::GAIN_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(100, 100)), module, VFDFreqAnalyzer::RESPONSIVENESS_PARAM));
-        addParam(createParamCentered<VCVButton>(mm2px(Vec(120, 100)), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(110, 120)), module, VFDFreqAnalyzer::AUDIO_INPUT));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(160, 329.25), module, VFDFreqAnalyzer::NUM_BANDS_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(205, 329.25), module, VFDFreqAnalyzer::FALL_DELAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(250, 329.25), module, VFDFreqAnalyzer::PEAK_FALL_DELAY_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(295, 329.25), module, VFDFreqAnalyzer::GAIN_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(340, 329.25), module, VFDFreqAnalyzer::RESPONSIVENESS_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(385, 329.25), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
+        addInput(createInputCentered<PJ301MPort>(Vec(115, 329.25), module, VFDFreqAnalyzer::AUDIO_INPUT));
     }
 };
 
