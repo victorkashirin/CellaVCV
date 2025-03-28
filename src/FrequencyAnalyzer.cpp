@@ -85,14 +85,30 @@ struct VFDFreqAnalyzer : Module {
     }
 
     void processFFT() {
+        // Apply window function and remove DC offset
+        float sum = 0.0f;
         for (size_t i = 0; i < windowSize; i++) {
-            float window = 0.5f * (1.f - std::cos(2.f * static_cast<float>(M_PI) * i / (windowSize - 1)));
-            fftBuffer[i] = std::complex<float>(sampleBuffer[i] * window, 0.f);
+            sum += sampleBuffer[i];
+        }
+        float dcOffset = sum / windowSize;
+
+        for (size_t i = 0; i < windowSize; i++) {
+            // Apply Hann window and remove DC offset
+            float window = 0.5f * (1.f - std::cos(2.f * M_PI * i / (windowSize - 1)));
+            fftBuffer[i] = std::complex<float>((sampleBuffer[i] - dcOffset) * window, 0.f);
         }
 
         fft(fftBuffer);
 
-        size_t numBins = windowSize / 2;
+        const size_t numBins = windowSize / 2;
+        const float binWidth = sampleRate / windowSize;
+
+        // Limit to human audible range (20Hz-20kHz)
+        const size_t minBin = std::ceil(20.0f / binWidth);  // 20Hz
+        const size_t maxBin = std::min<size_t>(
+            std::floor(20000.0f / binWidth),
+            numBins - 1);  // 20kHz or Nyquist
+
         std::vector<float> magnitudes(numBins);
         for (size_t i = 0; i < numBins; i++) {
             magnitudes[i] = std::norm(fftBuffer[i]);
@@ -102,19 +118,22 @@ struct VFDFreqAnalyzer : Module {
         std::vector<float> newLevels(numBands, 0.f);
 
         if (logarithmicBins) {
-            float nyquist = sampleRate / 2.0f;
-            float minFreq = sampleRate / windowSize;
-            float maxFreq = nyquist;
+            const float minFreq = 20.0f;  // Start at 20Hz instead of binWidth
+            const float maxFreq = std::min(20000.0f, sampleRate / 2.0f);
 
             for (size_t b = 0; b < numBands; b++) {
-                float bandStartFreq = minFreq * std::pow(maxFreq / minFreq, static_cast<float>(b) / numBands);
-                float bandEndFreq = minFreq * std::pow(maxFreq / minFreq, static_cast<float>(b + 1) / numBands);
+                float bandStartFreq = minFreq * std::pow(maxFreq / minFreq,
+                                                         static_cast<float>(b) / numBands);
+                float bandEndFreq = minFreq * std::pow(maxFreq / minFreq,
+                                                       static_cast<float>(b + 1) / numBands);
 
-                size_t startBin = static_cast<size_t>(bandStartFreq * windowSize / sampleRate);
-                size_t endBin = static_cast<size_t>(bandEndFreq * windowSize / sampleRate);
+                // Convert frequencies to bin indices
+                size_t startBin = static_cast<size_t>(bandStartFreq / binWidth);
+                size_t endBin = static_cast<size_t>(bandEndFreq / binWidth);
 
-                startBin = std::max(startBin, size_t(1));
-                endBin = std::min(endBin, numBins - 1);
+                // Clamp to our audible range
+                startBin = clamp((float)startBin, (float)minBin, (float)maxBin);
+                endBin = clamp((float)endBin, (float)minBin, (float)maxBin);
 
                 if (startBin >= endBin) {
                     endBin = startBin + 1;
@@ -131,10 +150,12 @@ struct VFDFreqAnalyzer : Module {
                 newLevels[b] = clamp((dB + 60.0f) / 60.0f, 0.0f, 1.0f);
             }
         } else {
-            size_t binsPerBand = std::max<size_t>(1, numBins / numBands);
+            const size_t audibleBins = maxBin - minBin + 1;
+            size_t binsPerBand = std::max<size_t>(1, audibleBins / numBands);
+
             for (size_t b = 0; b < numBands; b++) {
-                size_t start = b * binsPerBand;
-                size_t end = (b == numBands - 1) ? numBins : (b + 1) * binsPerBand;
+                size_t start = minBin + b * binsPerBand;
+                size_t end = (b == numBands - 1) ? maxBin : std::min(start + binsPerBand, maxBin);
                 float sum = 0.f;
                 for (size_t i = start; i < end; i++) {
                     sum += magnitudes[i];
@@ -314,7 +335,7 @@ struct VFDDisplay : Widget {
 struct VFDFreqAnalyzerWidget : ModuleWidget {
     VFDFreqAnalyzerWidget(VFDFreqAnalyzer* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/VFDFreqAnalyzer.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/VFDFreqAnalyzer.svg"), asset::plugin(pluginInstance, "res/VFDFreqAnalyzer-dark.svg")));
 
         VFDDisplay* display = new VFDDisplay();
         display->module = module;
