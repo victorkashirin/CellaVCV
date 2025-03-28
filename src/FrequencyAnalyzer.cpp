@@ -213,7 +213,7 @@ struct VFDFreqAnalyzer : Module {
     }
 };
 
-struct VFDDisplay : Widget {
+struct VFDDisplay : LedDisplay {
     VFDFreqAnalyzer* module;
     const float dotRadius = 2.0f;
     const float dotSpacing = 2.0f;
@@ -228,10 +228,10 @@ struct VFDDisplay : Widget {
         nvgSave(args.vg);
 
         // Draw dark background
-        nvgBeginPath(args.vg);
-        nvgRect(args.vg, 0, 0, box.size.x, box.size.y);
-        nvgFillColor(args.vg, nvgRGB(0x10, 0x10, 0x10));
-        nvgFill(args.vg);
+        // nvgBeginPath(args.vg);
+        // nvgRect(args.vg, 0, 0, box.size.x, box.size.y);
+        // nvgFillColor(args.vg, nvgRGB(0x10, 0x10, 0x10));
+        // nvgFill(args.vg);
 
         size_t numBands = module->bandLevels.size();
         if (numBands < 1) {
@@ -251,14 +251,14 @@ struct VFDDisplay : Widget {
             // Calculate dot grid dimensions
             float availableWidth = bandWidth - bandMargin * 2;
             int cols = calculateColumnCount(availableWidth);
-            int rows = calculateRowCount(box.size.y - bandMargin * 2);
+            int rows = calculateRowCount(box.size.y - 3 * bandMargin);
 
             // Center the grid horizontally
             float gridWidth = cols * (dotRadius * 2 + dotSpacing) - dotSpacing;
             float xStart = x + (availableWidth - gridWidth) / 2 + bandMargin;
 
             // Vertical positioning
-            float yStart = bandMargin;
+            float yStart = 2 * bandMargin + 1.5;
             float gridHeight = rows * (dotRadius * 2 + dotSpacing) - dotSpacing;
             float yStep = (box.size.y - bandMargin * 2 - gridHeight) / (rows - 1);
 
@@ -323,8 +323,17 @@ struct VFDDisplay : Widget {
                 float dy = y + r * (dotRadius * 2 + dotSpacing);
                 if (box.size.y - dy <= activeHeight) {
                     float dx = x + c * (dotRadius * 2 + dotSpacing);
+
+                    NVGpaint paint = nvgRadialGradient(vg, dx, dy, dotRadius * 0.f, dotRadius * 3, nvgTransRGBA(activeColor, 100), nvgTransRGBA(activeColor, 0.f));
+
+                    nvgBeginPath(vg);
+                    nvgCircle(vg, dx, dy, 3 * dotRadius);
+                    nvgFillPaint(vg, paint);
+                    nvgFill(vg);
+
                     nvgBeginPath(vg);
                     nvgCircle(vg, dx, dy, dotRadius);
+                    nvgFillColor(vg, activeColor);
                     nvgFill(vg);
                 }
             }
