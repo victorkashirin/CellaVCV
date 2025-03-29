@@ -1,3 +1,5 @@
+#include <ffft/FFTReal.h>  // Include the FFTReal library header
+
 #include "plugin.hpp"
 
 struct VFDFreqAnalyzer : Module {
@@ -6,7 +8,7 @@ struct VFDFreqAnalyzer : Module {
         FALL_DELAY_PARAM,
         PEAK_FALL_DELAY_PARAM,
         GAIN_PARAM,
-        RESPONSIVENESS_PARAM,
+        RESPONSIVENESS_PARAM,  // Now selects discrete window sizes
         LOG_BINS_PARAM,
         PARAMS_LEN
     };
@@ -21,10 +23,14 @@ struct VFDFreqAnalyzer : Module {
         LIGHTS_LEN
     };
 
+    const std::vector<size_t> WINDOW_SIZES = {256, 512, 1024, 2048, 4096, 8192};
+
     std::vector<float> sampleBuffer;
     size_t bufferIndex = 0;
     size_t windowSize = 1024;
-    std::vector<std::complex<float>> fftBuffer;
+    std::vector<float> fftInput;
+    std::vector<float> fftOutput;
+    ffft::FFTReal<float>* fft;
     std::vector<float> bandLevels;
     std::vector<float> bandPeaks;
     float sampleRate = 44100.f;
@@ -37,35 +43,51 @@ struct VFDFreqAnalyzer : Module {
         configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
         configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
         configParam(GAIN_PARAM, 0.f, 2.f, 1.f, "Gain");
-        configParam(RESPONSIVENESS_PARAM, 0.f, 3.f, 1.f, "Responsiveness", "", 0.5f, 256.f);
-        configParam(LOG_BINS_PARAM, 0.f, 1.f, 0.f, "Logarithmic Bins");
+        configParam(RESPONSIVENESS_PARAM, 0.f, 5.f, 2.f, "FFT Window Size", "", 0.f, 1.f, WINDOW_SIZES.size() - 1);
+        configParam(LOG_BINS_PARAM, 0.f, 1.f, 0.f, "Bins", {"Linear", "Logarithmic"});
         configInput(AUDIO_INPUT, "Audio");
+
+        // Initialize with default window size
+        windowSize = WINDOW_SIZES[2];  // Default to 1024
         sampleBuffer.resize(windowSize);
-        fftBuffer.resize(windowSize);
+        fftInput.resize(windowSize);
+        fftOutput.resize(windowSize);
+        fft = new ffft::FFTReal<float>(windowSize);
         bandLevels.resize(16, 0.f);
         bandPeaks.resize(16, 0.f);
+    }
+
+    ~VFDFreqAnalyzer() {
+        if (fft) {
+            delete fft;
+            fft = nullptr;
+        }
     }
 
     void process(const ProcessArgs& args) override {
         sampleRate = args.sampleRate;
 
         // Handle logarithmic bins toggle
-        if (logBinTrigger.process(params[LOG_BINS_PARAM].getValue() > 0.f)) {
-            logarithmicBins ^= true;
-        }
-
+        // if (logBinTrigger.process(params[LOG_BINS_PARAM].getValue() > 0.f)) {
+        //     logarithmicBins ^= true;
+        // }
+        logarithmicBins = (bool)params[LOG_BINS_PARAM].getValue();
         size_t newBands = static_cast<size_t>(std::max(1, (int)params[NUM_BANDS_PARAM].getValue()));
         if (bandLevels.size() != newBands) {
             bandLevels.resize(newBands, 0.f);
             bandPeaks.resize(newBands, 0.f);
         }
 
-        int resp = static_cast<int>(params[RESPONSIVENESS_PARAM].getValue());
-        windowSize = 256 * (1 << resp);
-        if (sampleBuffer.size() != windowSize) {
+        // Get discrete window size selection
+        size_t newWindowSize = WINDOW_SIZES[static_cast<int>(params[RESPONSIVENESS_PARAM].getValue())];
+        if (windowSize != newWindowSize) {
+            windowSize = newWindowSize;
             sampleBuffer.resize(windowSize);
-            fftBuffer.resize(windowSize);
+            fftInput.resize(windowSize);
+            fftOutput.resize(windowSize);
             bufferIndex = 0;
+            if (fft) delete fft;
+            fft = new ffft::FFTReal<float>(windowSize);
         }
 
         if (inputs[AUDIO_INPUT].isConnected()) {
@@ -95,13 +117,15 @@ struct VFDFreqAnalyzer : Module {
         for (size_t i = 0; i < windowSize; i++) {
             // Apply Hann window and remove DC offset
             float window = 0.5f * (1.f - std::cos(2.f * M_PI * i / (windowSize - 1)));
-            fftBuffer[i] = std::complex<float>((sampleBuffer[i] - dcOffset) * window, 0.f);
+            fftInput[i] = (sampleBuffer[i] - dcOffset) * window;
         }
 
-        fft(fftBuffer);
+        // Perform FFT using FFTReal
+        fft->do_fft(fftOutput.data(), fftInput.data());
 
-        const size_t numBins = windowSize / 2;
-        const float binWidth = sampleRate / windowSize;
+        const size_t N = windowSize;
+        const size_t numBins = N / 2 + 1;  // Bins 0 to N/2
+        const float binWidth = sampleRate / N;
 
         // Limit to human audible range (20Hz-20kHz)
         const size_t minBin = std::ceil(20.0f / binWidth);  // 20Hz
@@ -109,45 +133,65 @@ struct VFDFreqAnalyzer : Module {
             std::floor(20000.0f / binWidth),
             numBins - 1);  // 20kHz or Nyquist
 
-        std::vector<float> magnitudes(numBins);
-        for (size_t i = 0; i < numBins; i++) {
-            magnitudes[i] = std::norm(fftBuffer[i]);
+        std::vector<float> magnitudes(numBins, 0.f);
+        const size_t N_half = N / 2;
+
+        // Compute magnitudes from FFT output
+        magnitudes[0] = fftOutput[0] * fftOutput[0];
+        magnitudes[N_half] = fftOutput[N_half] * fftOutput[N_half];
+
+        for (size_t k = 1; k < N_half; k++) {
+            float re = fftOutput[k];
+            float im = fftOutput[N_half + k];
+            // magnitudes[k] = re * re + im * im;
+            magnitudes[k] = (re * re + im * im) / (windowSize * windowSize);
         }
 
         size_t numBands = bandLevels.size();
         std::vector<float> newLevels(numBands, 0.f);
 
         if (logarithmicBins) {
-            const float minFreq = 20.0f;  // Start at 20Hz instead of binWidth
+            const float minFreq = 20.0f;
             const float maxFreq = std::min(20000.0f, sampleRate / 2.0f);
+            const float freqRatio = maxFreq / minFreq;
 
             for (size_t b = 0; b < numBands; b++) {
-                float bandStartFreq = minFreq * std::pow(maxFreq / minFreq,
-                                                         static_cast<float>(b) / numBands);
-                float bandEndFreq = minFreq * std::pow(maxFreq / minFreq,
-                                                       static_cast<float>(b + 1) / numBands);
+                // Calculate frequency bounds using logarithmic spacing
+                float relStart = static_cast<float>(b) / numBands;
+                float relEnd = static_cast<float>(b + 1) / numBands;
 
-                // Convert frequencies to bin indices
+                float bandStartFreq = minFreq * std::pow(freqRatio, relStart);
+                float bandEndFreq = minFreq * std::pow(freqRatio, relEnd);
+
+                // Convert to bin indices
                 size_t startBin = static_cast<size_t>(bandStartFreq / binWidth);
                 size_t endBin = static_cast<size_t>(bandEndFreq / binWidth);
 
-                // Clamp to our audible range
-                startBin = clamp((float)startBin, (float)minBin, (float)maxBin);
-                endBin = clamp((float)endBin, (float)minBin, (float)maxBin);
+                // Clamp to audible range and ensure valid bin indices
+                startBin = (size_t)clamp((float)startBin, minBin, maxBin);
+                endBin = (size_t)clamp((float)endBin, minBin, maxBin);
+                endBin = std::max(endBin, startBin + 1);  // Ensure at least 1 bin width
 
-                if (startBin >= endBin) {
-                    endBin = startBin + 1;
-                    if (endBin >= numBins) endBin = numBins - 1;
-                }
+                // DEBUG("Band %zu: %.1fHz - %.1fHz (bins %zu-%zu)",
+                //       b, bandStartFreq, bandEndFreq, startBin, endBin);
 
+                // Sum magnitudes in this band
                 float sum = 0.0f;
+                size_t count = 0;
                 for (size_t i = startBin; i < endBin; i++) {
-                    sum += magnitudes[i];
+                    if (i >= 1 && i < numBins) {  // Skip DC and Nyquist if needed
+                        sum += magnitudes[i];
+                        count++;
+                    }
                 }
-                sum /= (endBin - startBin);
 
-                float dB = 10.0f * std::log10(sum + 1e-12f);
-                newLevels[b] = clamp((dB + 60.0f) / 60.0f, 0.0f, 1.0f);
+                if (count > 0) {
+                    sum /= count;
+                    float dB = 10.0f * std::log10(sum + 1e-12f);
+                    newLevels[b] = clamp((dB + 60.0f) / 60.0f, 0.0f, 1.0f);
+                } else {
+                    newLevels[b] = 0.f;
+                }
             }
         } else {
             const size_t audibleBins = maxBin - minBin + 1;
@@ -187,28 +231,6 @@ struct VFDFreqAnalyzer : Module {
                 bandPeaks[b] *= peakDecay;
                 bandPeaks[b] = std::max(bandPeaks[b], newLevel);
             }
-        }
-    }
-
-    void fft(std::vector<std::complex<float>>& x) {
-        const size_t N = x.size();
-        if (N <= 1) return;
-
-        std::vector<std::complex<float>> even(N / 2);
-        std::vector<std::complex<float>> odd(N / 2);
-        for (size_t i = 0; i < N / 2; i++) {
-            even[i] = x[2 * i];
-            odd[i] = x[2 * i + 1];
-        }
-
-        fft(even);
-        fft(odd);
-
-        for (size_t k = 0; k < N / 2; k++) {
-            float angle = -2.f * static_cast<float>(M_PI) * k / N;
-            std::complex<float> t = std::polar<float>(1.f, angle) * odd[k];
-            x[k] = even[k] + t;
-            x[k + N / 2] = even[k] - t;
         }
     }
 };
@@ -357,7 +379,9 @@ struct VFDFreqAnalyzerWidget : ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(250, 329.25), module, VFDFreqAnalyzer::PEAK_FALL_DELAY_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(295, 329.25), module, VFDFreqAnalyzer::GAIN_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(340, 329.25), module, VFDFreqAnalyzer::RESPONSIVENESS_PARAM));
-        addParam(createParamCentered<VCVButton>(Vec(385, 329.25), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
+        // addParam(createParamCentered<VCVButton>(Vec(385, 329.25), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
+        addParam(createParamCentered<CKSS>(Vec(385, 329.25), module, VFDFreqAnalyzer::LOG_BINS_PARAM));
+
         addInput(createInputCentered<PJ301MPort>(Vec(115, 329.25), module, VFDFreqAnalyzer::AUDIO_INPUT));
     }
 };
