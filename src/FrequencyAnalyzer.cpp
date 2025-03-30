@@ -8,7 +8,7 @@ struct VFDFreqAnalyzer : Module {
         FALL_DELAY_PARAM,
         PEAK_FALL_DELAY_PARAM,
         GAIN_PARAM,
-        RESPONSIVENESS_PARAM,  // Now selects discrete window sizes
+        RESPONSIVENESS_PARAM,
         LOG_BINS_PARAM,
         PARAMS_LEN
     };
@@ -25,17 +25,21 @@ struct VFDFreqAnalyzer : Module {
 
     const std::vector<size_t> WINDOW_SIZES = {256, 512, 1024, 2048, 4096, 8192};
 
-    std::vector<float> sampleBuffer;
-    size_t bufferIndex = 0;
+    std::vector<float> sampleBuffer;  // Will act as a circular buffer
     size_t windowSize = 1024;
-    std::vector<float> fftInput;
+    size_t hopSize = 512;                  // --- New: Hop size (windowSize / 2)
+    size_t bufferWritePos = 0;             // --- New: Current writing position in the circular buffer
+    size_t samplesSinceLastFFT = 0;        // --- New: Counter for triggering FFT based on hop size
+    bool isBufferInitiallyFilled = false;  // --- New: Tracks if buffer has enough data for first FFT
+
+    std::vector<float> fftInput;  // Linear buffer for FFT library input
     std::vector<float> fftOutput;
-    ffft::FFTReal<float>* fft;
+    ffft::FFTReal<float>* fft = nullptr;  // Initialize to nullptr
     std::vector<float> bandLevels;
     std::vector<float> bandPeaks;
     float sampleRate = 44100.f;
     bool logarithmicBins = false;
-    dsp::SchmittTrigger logBinTrigger;
+    // dsp::SchmittTrigger logBinTrigger; // Removed as unused
 
     VFDFreqAnalyzer() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -47,14 +51,9 @@ struct VFDFreqAnalyzer : Module {
         configParam(LOG_BINS_PARAM, 0.f, 1.f, 0.f, "Bins", {"Linear", "Logarithmic"});
         configInput(AUDIO_INPUT, "Audio");
 
-        // Initialize with default window size
-        windowSize = WINDOW_SIZES[2];  // Default to 1024
-        sampleBuffer.resize(windowSize);
-        fftInput.resize(windowSize);
-        fftOutput.resize(windowSize);
-        fft = new ffft::FFTReal<float>(windowSize);
-        bandLevels.resize(16, 0.f);
-        bandPeaks.resize(16, 0.f);
+        // Initialize with default window size (will call helper function)
+        updateWindowSize(WINDOW_SIZES[2]);  // Default to 1024
+        updateNumBands(16);                 // Default bands
     }
 
     ~VFDFreqAnalyzer() {
@@ -64,175 +63,292 @@ struct VFDFreqAnalyzer : Module {
         }
     }
 
-    void process(const ProcessArgs& args) override {
-        sampleRate = args.sampleRate;
+    // --- New helper function to handle window size changes ---
+    void updateWindowSize(size_t newWindowSize) {
+        if (windowSize == newWindowSize && fft != nullptr) return;  // No change needed
 
-        // Handle logarithmic bins toggle
-        // if (logBinTrigger.process(params[LOG_BINS_PARAM].getValue() > 0.f)) {
-        //     logarithmicBins ^= true;
-        // }
+        windowSize = newWindowSize;
+        hopSize = windowSize / 2;
+
+        // Resize buffers
+        sampleBuffer.resize(windowSize, 0.f);  // Initialize with zeros
+        fftInput.resize(windowSize);
+        fftOutput.resize(windowSize);
+
+        // Reset buffer state
+        bufferWritePos = 0;
+        samplesSinceLastFFT = 0;
+        isBufferInitiallyFilled = false;
+        std::fill(sampleBuffer.begin(), sampleBuffer.end(), 0.f);  // Clear buffer explicitly
+
+        // Recreate FFT object
+        if (fft) delete fft;
+        fft = new ffft::FFTReal<float>(windowSize);
+        // rack::INFO("FFT Analyzer: Window Size set to %zu, Hop Size %zu", windowSize, hopSize);
+    }
+
+    // --- New helper function to handle band changes ---
+    void updateNumBands(size_t newBands) {
+        if (bandLevels.size() == newBands) return;  // No change needed
+        bandLevels.resize(newBands, 0.f);
+        bandPeaks.resize(newBands, 0.f);
+        // rack::INFO("FFT Analyzer: Number of bands set to %zu", newBands);
+    }
+
+    void process(const ProcessArgs& args) override {
+        // --- Update sample rate ---
+        if (sampleRate != args.sampleRate) {
+            sampleRate = args.sampleRate;
+            // No buffer reset needed just for sample rate change, decay times will adjust implicitly
+        }
+
+        // --- Handle Parameter Changes ---
         logarithmicBins = (bool)params[LOG_BINS_PARAM].getValue();
         size_t newBands = static_cast<size_t>(std::max(1, (int)params[NUM_BANDS_PARAM].getValue()));
-        if (bandLevels.size() != newBands) {
-            bandLevels.resize(newBands, 0.f);
-            bandPeaks.resize(newBands, 0.f);
-        }
+        updateNumBands(newBands);  // Use helper
 
-        // Get discrete window size selection
         size_t newWindowSize = WINDOW_SIZES[static_cast<int>(params[RESPONSIVENESS_PARAM].getValue())];
-        if (windowSize != newWindowSize) {
-            windowSize = newWindowSize;
-            sampleBuffer.resize(windowSize);
-            fftInput.resize(windowSize);
-            fftOutput.resize(windowSize);
-            bufferIndex = 0;
-            if (fft) delete fft;
-            fft = new ffft::FFTReal<float>(windowSize);
-        }
+        updateWindowSize(newWindowSize);  // Use helper
 
+        // --- Process Audio Input ---
         if (inputs[AUDIO_INPUT].isConnected()) {
             float gain = params[GAIN_PARAM].getValue();
+            float summedInput = 0.f;
             int channels = inputs[AUDIO_INPUT].getChannels();
-            for (int c = 0; c < channels; c++) {
-                sampleBuffer[bufferIndex] += inputs[AUDIO_INPUT].getVoltage(c) * gain / 10.f;
-            }
-            bufferIndex++;
 
-            if (bufferIndex >= windowSize) {
-                processFFT();
-                bufferIndex = 0;
-                std::fill(sampleBuffer.begin(), sampleBuffer.end(), 0.f);
+            // --- Input Handling: Average stereo, take mono as is ---
+            // --- Removed the division by 10.f ---
+            if (channels == 1) {
+                summedInput = inputs[AUDIO_INPUT].getVoltage(0) * gain;
+            } else {
+                for (int c = 0; c < channels; c++) {
+                    summedInput += inputs[AUDIO_INPUT].getVoltage(c);
+                }
+                summedInput = (summedInput / channels) * gain;  // Average channels
             }
+
+            // --- Store sample in circular buffer ---
+            sampleBuffer[bufferWritePos] = summedInput;
+            bufferWritePos = (bufferWritePos + 1) % windowSize;  // Wrap around
+            samplesSinceLastFFT++;
+
+            // --- Track initial fill ---
+            if (!isBufferInitiallyFilled && samplesSinceLastFFT >= windowSize) {
+                isBufferInitiallyFilled = true;
+                samplesSinceLastFFT = 0;  // Reset counter to start counting for the *first* hop
+                                          // rack::INFO("Buffer initially filled.");
+            }
+
+            // --- Trigger FFT processing on hop ---
+            if (isBufferInitiallyFilled && samplesSinceLastFFT >= hopSize) {
+                prepareFFTInput();        // Copy from circular buffer to linear FFT input
+                processFFT();             // Perform FFT and update bands
+                samplesSinceLastFFT = 0;  // Reset hop counter
+            }
+
+        } else {
+            // Optional: If no input, maybe slowly decay levels?
+            // Or just do nothing, levels will hold/decay based on last FFT.
+            // Let's add a slow decay if input disconnects:
+            float deltaTime = args.sampleTime;  // Use Rack's provided delta time for this case
+            float fallDecay = std::exp(-deltaTime / params[FALL_DELAY_PARAM].getValue());
+            float peakDecay = std::exp(-deltaTime / params[PEAK_FALL_DELAY_PARAM].getValue());
+            for (size_t b = 0; b < bandLevels.size(); b++) {
+                bandLevels[b] *= fallDecay;
+                bandPeaks[b] *= peakDecay;
+            }
+            isBufferInitiallyFilled = false;  // Reset fill state if input disconnects
+            samplesSinceLastFFT = 0;
+            bufferWritePos = 0;  // Reset position too
+        }
+    }
+
+    // --- New helper to copy data from circular buffer to linear FFT input ---
+    void prepareFFTInput() {
+        // The `windowSize` samples we need end just BEFORE the current `bufferWritePos`.
+        // The starting position of the segment in the circular buffer:
+        size_t readStartPos = (bufferWritePos + windowSize) % windowSize;  // + windowSize handles wrap-around correctly
+
+        if (readStartPos + windowSize <= sampleBuffer.size()) {
+            // No wrap-around needed for the read segment
+            std::copy(sampleBuffer.begin() + readStartPos,
+                      sampleBuffer.begin() + readStartPos + windowSize,
+                      fftInput.begin());
+        } else {
+            // Read wraps around the end of the circular buffer
+            size_t firstChunkSize = sampleBuffer.size() - readStartPos;
+            size_t secondChunkSize = windowSize - firstChunkSize;
+
+            std::copy(sampleBuffer.begin() + readStartPos,
+                      sampleBuffer.end(),
+                      fftInput.begin());
+            std::copy(sampleBuffer.begin(),
+                      sampleBuffer.begin() + secondChunkSize,
+                      fftInput.begin() + firstChunkSize);
         }
     }
 
     void processFFT() {
-        // Apply window function and remove DC offset
+        if (!fft) return;  // Safety check
+
+        // --- Apply Blackman window function and remove DC offset ---
+        // Note: Operate on fftInput which now holds the correct time-domain window
         float sum = 0.0f;
         for (size_t i = 0; i < windowSize; i++) {
-            sum += sampleBuffer[i];
+            sum += fftInput[i];
         }
         float dcOffset = sum / windowSize;
 
+        // --- Blackman Window Calculation ---
+        const float a0 = 0.42f;
+        const float a1 = 0.50f;
+        const float a2 = 0.08f;
+        // Pre-calculate the factor for efficiency
+        const float factor = 2.f * M_PI / (windowSize > 1 ? (windowSize - 1) : 1);  // Avoid division by zero if windowSize=1
+
         for (size_t i = 0; i < windowSize; i++) {
-            // Apply Hann window and remove DC offset
-            float window = 0.5f * (1.f - std::cos(2.f * M_PI * i / (windowSize - 1)));
-            fftInput[i] = (sampleBuffer[i] - dcOffset) * window;
+            float term1 = std::cos(factor * i);
+            float term2 = std::cos(2.f * factor * i);
+            float window = a0 - a1 * term1 + a2 * term2;
+            // Apply window and remove DC offset *from the prepared fftInput*
+            fftInput[i] = (fftInput[i] - dcOffset) * window;
         }
+        // --- End Blackman Window ---
 
         // Perform FFT using FFTReal
         fft->do_fft(fftOutput.data(), fftInput.data());
 
+        // --- Magnitude Calculation (Mostly Unchanged Logic) ---
         const size_t N = windowSize;
-        const size_t numBins = N / 2 + 1;  // Bins 0 to N/2
+        const size_t numBins = N / 2 + 1;
         const float binWidth = sampleRate / N;
 
-        // Limit to human audible range (20Hz-20kHz)
-        const size_t minBin = std::ceil(20.0f / binWidth);  // 20Hz
-        const size_t maxBin = std::min<size_t>(
-            std::floor(20000.0f / binWidth),
-            numBins - 1);  // 20kHz or Nyquist
+        // minBin calculation ensures we skip DC bin 0 later
+        const size_t minBin = std::max<size_t>(1, std::ceil(20.0f / binWidth));
+        const size_t maxBin = std::min<size_t>(std::floor(20000.0f / binWidth), numBins - 1);
 
+        // Using a temporary vector for magnitudes (Power = Mag^2)
         std::vector<float> magnitudes(numBins, 0.f);
         const size_t N_half = N / 2;
 
-        // Compute magnitudes from FFT output
-        magnitudes[0] = fftOutput[0] * fftOutput[0];
-        magnitudes[N_half] = fftOutput[N_half] * fftOutput[N_half];
-
-        for (size_t k = 1; k < N_half; k++) {
+        // Calculate Magnitudes (Power) - Assuming validated FFTReal indexing
+        magnitudes[0] = fftOutput[0] * fftOutput[0];  // DC power (usually ignored later)
+        if (N % 2 == 0) {                             // Nyquist
+            magnitudes[N_half] = fftOutput[N_half] * fftOutput[N_half];
+        }
+        for (size_t k = 1; k < N_half; k++) {  // Bins 1 to N/2 - 1
             float re = fftOutput[k];
-            float im = fftOutput[N_half + k];
-            // magnitudes[k] = re * re + im * im;
-            magnitudes[k] = (re * re + im * im) / (windowSize * windowSize);
+            float im = fftOutput[N_half + k];   // Verified index for FFTReal
+            magnitudes[k] = re * re + im * im;  // Power
         }
 
+        // --- Bin Grouping (Logarithmic/Linear) using PEAK dB ---
         size_t numBands = bandLevels.size();
-        std::vector<float> newLevels(numBands, 0.f);
+        std::vector<float> newLevels(numBands, 0.f);  // Store new levels temporarily
+        const float epsilon = 1e-12f;                 // To prevent log10(0)
 
         if (logarithmicBins) {
-            const float minFreq = 20.0f;
+            const float minFreq = 20.0f;  // Use actual min frequency for range calculation
             const float maxFreq = std::min(20000.0f, sampleRate / 2.0f);
             const float freqRatio = maxFreq / minFreq;
 
             for (size_t b = 0; b < numBands; b++) {
-                // Calculate frequency bounds using logarithmic spacing
                 float relStart = static_cast<float>(b) / numBands;
                 float relEnd = static_cast<float>(b + 1) / numBands;
-
                 float bandStartFreq = minFreq * std::pow(freqRatio, relStart);
                 float bandEndFreq = minFreq * std::pow(freqRatio, relEnd);
 
-                // Convert to bin indices
+                // Convert frequency edges to bin indices
                 size_t startBin = static_cast<size_t>(bandStartFreq / binWidth);
                 size_t endBin = static_cast<size_t>(bandEndFreq / binWidth);
 
-                // Clamp to audible range and ensure valid bin indices
-                startBin = (size_t)clamp((float)startBin, minBin, maxBin);
-                endBin = (size_t)clamp((float)endBin, minBin, maxBin);
-                endBin = std::max(endBin, startBin + 1);  // Ensure at least 1 bin width
+                // Clamp bins to valid/audible range (minBin already excludes DC)
+                startBin = clamp((float)startBin, minBin, maxBin);
+                endBin = clamp((float)endBin, minBin, maxBin + 1);  // Allow endBin to reach maxBin+1 for loop condition
+                endBin = std::max(endBin, startBin + 1);            // Ensure at least one bin potential
 
-                // DEBUG("Band %zu: %.1fHz - %.1fHz (bins %zu-%zu)",
-                //       b, bandStartFreq, bandEndFreq, startBin, endBin);
+                float maxDbInBand = -200.0f;  // Initialize to a very low dB value
+                bool bandHasData = false;
 
-                // Sum magnitudes in this band
-                float sum = 0.0f;
-                size_t count = 0;
-                for (size_t i = startBin; i < endBin; i++) {
-                    if (i >= 1 && i < numBins) {  // Skip DC and Nyquist if needed
-                        sum += magnitudes[i];
-                        count++;
-                    }
+                // Find the maximum dB value within this band's bins
+                for (size_t i = startBin; i < endBin && i < numBins; i++) {  // Iterate bins in the band
+                    float currentDb = 10.0f * std::log10(magnitudes[i] + epsilon);
+                    maxDbInBand = std::max(maxDbInBand, currentDb);
+                    bandHasData = true;  // Mark that we processed at least one bin
                 }
 
-                if (count > 0) {
-                    sum /= count;
-                    float dB = 10.0f * std::log10(sum + 1e-12f);
-                    newLevels[b] = clamp((dB + 60.0f) / 60.0f, 0.0f, 1.0f);
+                if (bandHasData) {
+                    // Normalize the MAXIMUM dB value found in the band to [0, 1]
+                    // Using -60dB to 0dB range for normalization
+                    newLevels[b] = clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
                 } else {
-                    newLevels[b] = 0.f;
+                    newLevels[b] = 0.f;  // Band had no valid bins
                 }
             }
-        } else {
+        } else {                          // Linear Bins
+                                          // Ensure we only consider bins within the audible range
+            if (maxBin < minBin) return;  // Avoid issues if range is invalid
             const size_t audibleBins = maxBin - minBin + 1;
+            if (audibleBins < 1 || numBands < 1) {
+                return;
+            }
+
+            // Calculate bins per band, ensuring at least 1
             size_t binsPerBand = std::max<size_t>(1, audibleBins / numBands);
 
             for (size_t b = 0; b < numBands; b++) {
                 size_t start = minBin + b * binsPerBand;
-                size_t end = (b == numBands - 1) ? maxBin : std::min(start + binsPerBand, maxBin);
-                float sum = 0.f;
-                for (size_t i = start; i < end; i++) {
-                    sum += magnitudes[i];
-                }
-                sum /= (end - start);
+                // Ensure the last band goes all the way to maxBin
+                size_t end = (b == numBands - 1) ? (maxBin + 1) : std::min(start + binsPerBand, maxBin + 1);
+                start = std::min(start, maxBin);  // Clamp start just in case
 
-                float dB = 10.f * std::log10(sum + 1e-12f);
-                newLevels[b] = clamp((dB + 60.f) / 60.f, 0.f, 1.f);
+                float maxDbInBand = -200.0f;  // Initialize to a very low dB value
+                bool bandHasData = false;
+
+                // Find the maximum dB value within this band's bins
+                for (size_t i = start; i < end && i < numBins; i++) {  // Iterate bins in the band
+                    float currentDb = 10.0f * std::log10(magnitudes[i] + epsilon);
+                    maxDbInBand = std::max(maxDbInBand, currentDb);
+                    bandHasData = true;  // Mark that we processed at least one bin
+                }
+
+                if (bandHasData) {
+                    // Normalize the MAXIMUM dB value found in the band to [0, 1]
+                    // Using -60dB to 0dB range for normalization
+                    newLevels[b] = clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
+                } else {
+                    newLevels[b] = 0.f;  // Band had no valid bins
+                }
             }
         }
 
-        float deltaTime = windowSize / sampleRate;
+        // --- Update Band Levels & Peaks (Unchanged Logic, uses newLevels) ---
+        float deltaTime = (float)hopSize / sampleRate;  // Still based on hop rate
         float fallDecay = std::exp(-deltaTime / params[FALL_DELAY_PARAM].getValue());
         float peakDecay = std::exp(-deltaTime / params[PEAK_FALL_DELAY_PARAM].getValue());
 
-        for (size_t b = 0; b < bandLevels.size(); b++) {
+        for (size_t b = 0; b < numBands; b++) {
+            // Using the temporary newLevels vector calculated based on peak dB
             float newLevel = newLevels[b];
 
-            if (newLevel > bandLevels[b]) {
+            // Update main level (fast attack, slow decay)
+            if (newLevel >= bandLevels[b]) {
                 bandLevels[b] = newLevel;
             } else {
                 bandLevels[b] *= fallDecay;
-                bandLevels[b] = std::max(bandLevels[b], newLevel);
             }
 
-            if (newLevel > bandPeaks[b]) {
+            // Update peak level (fast attack, slower decay)
+            if (newLevel >= bandPeaks[b]) {
                 bandPeaks[b] = newLevel;
             } else {
                 bandPeaks[b] *= peakDecay;
-                bandPeaks[b] = std::max(bandPeaks[b], newLevel);
             }
+            // Clamp levels just in case (floating point inaccuracies)
+            bandLevels[b] = clamp(bandLevels[b], 0.f, 1.f);
+            bandPeaks[b] = clamp(bandPeaks[b], 0.f, 1.f);
         }
-    }
+    }  // End processFFT
 };
 
 struct VFDDisplay : LedDisplay {

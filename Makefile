@@ -6,7 +6,7 @@ FLAGS += -I./deps/ebur128
 FLAGS += -Ideps/ebur128/queue
 
 CFLAGS +=
-CXXFLAGS +=
+CXXFLAGS += -Idep/ffft
 
 # Careful about linking to shared libraries, since you can't assume much about the user's environment and library search path.
 # Static libraries are fine, but they should be added to this plugin's build system.
