@@ -383,6 +383,29 @@ struct CognitiveShift : Module {
         bool resetPressed = params[RESET_BUTTON_PARAM].getValue() > 0.f;
         lights[BUTTON_PRESS_LIGHT].setBrightness((writePressed || erasePressed || resetPressed) ? 1.0f : 0.0f);
     }
+
+    json_t* dataToJson() override {
+        json_t* rootJ = json_object();
+
+        json_t* valuesJ = json_array();
+        for (int i = 0; i < 8; i++) {
+            json_array_insert_new(valuesJ, i, json_real(bits[i]));
+        }
+        json_object_set_new(rootJ, "values", valuesJ);
+
+        return rootJ;
+    }
+
+    void dataFromJson(json_t* rootJ) override {
+        json_t* valuesJ = json_object_get(rootJ, "values");
+        if (valuesJ) {
+            for (int i = 0; i < 8; i++) {
+                json_t* valueJ = json_array_get(valuesJ, i);
+                if (valueJ)
+                    bits[i] = json_number_value(valueJ);
+            }
+        }
+    }
 };
 
 // --- Module Widget (GUI) ---
