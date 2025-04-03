@@ -225,7 +225,7 @@ struct CognitiveShift : Module {
         } else {
             float rateKnob = params[CLOCK_RATE_PARAM].getValue();
             float rateCV = inputs[CLOCK_RATE_CV_INPUT].isConnected() ? inputs[CLOCK_RATE_CV_INPUT].getVoltage() : 0.f;
-            float rateAttn = params[CLOCK_RATE_CV_ATTENUVERTER_PARAM].getValue();
+            float rateAttn = params[CLOCK_RATE_CV_ATTENUVERTER_PARAM].getValue() / 10.f;
             float combinedRateExp = rateKnob + rateCV * rateAttn * 0.5f * 8.f;
             currentClockFreq = powf(2.f, combinedRateExp);
             currentClockFreq = clamp(currentClockFreq, 0.01f, 1000.f);
