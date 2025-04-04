@@ -61,6 +61,8 @@ struct CognitiveShift : Module {
     dsp::SchmittTrigger clockInputTrigger;
     dsp::SchmittTrigger resetTrigger;
     bool bits[NUM_STEPS] = {};
+    bool previousBits[NUM_STEPS] = {};
+    int64_t lastClock = 0;
 
     CognitiveShift* inMods[NUM_INPUTS];
     int inputBits[NUM_INPUTS] = {-1};
@@ -167,6 +169,28 @@ struct CognitiveShift : Module {
         }
     }
 
+    bool getDataInput(int inputId) {
+        bool effectiveDataInputHigh = false;
+
+        if (inputs[inputId].isConnected()) {
+            if (inMods[inputId] != nullptr) {
+                // If we have a connected input, check if it's self-patched
+                int sourceOutputId = inputBits[inputId];
+                int bitIndex = outputIdToBitIndex(sourceOutputId);
+                if (bitIndex != -1) {
+                    if (inMods[DATA_INPUT]->lastClock - lastClock == 1) {
+                        effectiveDataInputHigh = inMods[inputId]->previousBits[bitIndex];
+                    } else {
+                        effectiveDataInputHigh = inMods[inputId]->bits[bitIndex];
+                    }
+                }
+            } else {
+                effectiveDataInputHigh = inputs[inputId].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
+            }
+        }
+        return effectiveDataInputHigh;
+    }
+
     void process(const ProcessArgs& args) override {
         checkInputConnections();
 
@@ -192,36 +216,10 @@ struct CognitiveShift : Module {
             bool eraseButtonPressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
 
             // 2. Determine effective Data Input state
-            bool effectiveDataInputHigh = false;
-
-            if (inputs[DATA_INPUT].isConnected()) {
-                if (inMods[DATA_INPUT] != nullptr) {
-                    // If we have a connected input, check if it's self-patched
-                    int sourceOutputId = inputBits[DATA_INPUT];
-                    int bitIndex = outputIdToBitIndex(sourceOutputId);
-                    if (bitIndex != -1) {
-                        effectiveDataInputHigh = inMods[DATA_INPUT]->bits[bitIndex];
-                    }
-                } else {
-                    effectiveDataInputHigh = inputs[DATA_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
-                }
-            }
+            bool effectiveDataInputHigh = getDataInput(DATA_INPUT);
 
             // 3. Determine effective XOR Input state (using the same logic)
-            bool effectiveXorInputHigh = false;
-
-            if (inputs[XOR_INPUT].isConnected()) {
-                if (inMods[XOR_INPUT] != nullptr) {
-                    // If we have a connected input, check if it's self-patched
-                    int sourceOutputId = inputBits[XOR_INPUT];
-                    int bitIndex = outputIdToBitIndex(sourceOutputId);
-                    if (bitIndex != -1) {
-                        effectiveXorInputHigh = inMods[XOR_INPUT]->bits[bitIndex];
-                    }
-                } else {
-                    effectiveXorInputHigh = inputs[XOR_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
-                }
-            }
+            bool effectiveXorInputHigh = getDataInput(XOR_INPUT);
 
             // --- End: Input Reading with Self-Patch Detection ---
 
@@ -240,13 +238,17 @@ struct CognitiveShift : Module {
 
             // 6. Calculate the bit to shift in
             bool nextBit = dataBit ^ xorBit;
-            // INFO("Clock tick! write:%d erase:%d dataInHigh:%d xorInHigh:%d | dataBit:%d xorBit:%d | nextBit:%d", writeButtonPressed, eraseButtonPressed, effectiveDataInputHigh, effectiveXorInputHigh, dataBit, xorBit, nextBit);
+
+            for (int i = 0; i < NUM_STEPS; i++) {
+                previousBits[i] = bits[i];
+            }
 
             // 7. Perform the shift
             for (int i = NUM_STEPS - 1; i > 0; --i) {
                 bits[i] = bits[i - 1];
             }
             bits[0] = nextBit;
+            lastClock = args.frame;
 
         }  // End of clocked_this_frame
 
