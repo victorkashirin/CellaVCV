@@ -173,29 +173,27 @@ struct CognitiveShift : Module {
 
             // 2. Determine effective Data Input state
             bool effectiveDataInputHigh = false;
-            bool dataInputIsSelfPatchedBit = false;  // Flag
 
             if (inputs[DATA_INPUT].isConnected()) {
                 effectiveDataInputHigh = inputs[DATA_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
 
                 // Iterate through cable IDs and get Cable objects
                 for (uint64_t cableId : APP->engine->getCableIds()) {
-                    rack::engine::Cable* cable = APP->engine->getCable(cableId);
+                    Cable* cable = APP->engine->getCable(cableId);
                     if (!cable)  // Safety check
                         continue;
 
                     // Is this cable plugged into *our* DATA_INPUT?
                     if (cable->inputModule == this && cable->inputId == DATA_INPUT) {
-                        // Is the *output* of this cable also from *our* module?
-                        if (cable->outputModule == this) {
-                            // Self-patch detected!
+                        Module* outputModule = cable->outputModule;
+                        if (!outputModule) continue;  // Safety check
+                        if (outputModule->getModel() == this->getModel()) {
+                            CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
                             int sourceOutputId = cable->outputId;
                             int bitIndex = outputIdToBitIndex(sourceOutputId);
                             if (bitIndex != -1) {
                                 // Self-patched from one of our bit outputs: read internal state
-                                effectiveDataInputHigh = bits[bitIndex];
-                                dataInputIsSelfPatchedBit = true;
-                                // rack::logger::info("Self-patch DATA_INPUT from BIT_%d (ID %d), reading internal state: %d", bitIndex + 1, sourceOutputId, effectiveDataInputHigh);
+                                effectiveDataInputHigh = sourceCognitiveShift->bits[bitIndex];
                             }
                             // else: Self-patched from non-bit output, voltage read is already default
                         }
@@ -205,11 +203,9 @@ struct CognitiveShift : Module {
                 }
                 // if (!dataInputIsSelfPatchedBit && inputs[DATA_INPUT].isConnected()) { rack::logger::info("DATA_INPUT reading voltage (external or non-bit self-patch)"); }
             }
-            // else { rack::logger::info("DATA_INPUT not connected"); }
 
             // 3. Determine effective XOR Input state (using the same logic)
             bool effectiveXorInputHigh = false;
-            bool xorInputIsSelfPatchedBit = false;  // Flag
 
             if (inputs[XOR_INPUT].isConnected()) {
                 effectiveXorInputHigh = inputs[XOR_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
@@ -220,21 +216,20 @@ struct CognitiveShift : Module {
                         continue;
 
                     if (cable->inputModule == this && cable->inputId == XOR_INPUT) {
-                        if (cable->outputModule == this) {
+                        Module* outputModule = cable->outputModule;
+                        if (!outputModule) continue;  // Safety check
+                        if (outputModule->getModel() == this->getModel()) {
+                            CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
                             int sourceOutputId = cable->outputId;
                             int bitIndex = outputIdToBitIndex(sourceOutputId);
                             if (bitIndex != -1) {
-                                effectiveXorInputHigh = bits[bitIndex];
-                                xorInputIsSelfPatchedBit = true;
-                                // rack::logger::info("Self-patch XOR_INPUT from BIT_%d (ID %d), reading internal state: %d", bitIndex + 1, sourceOutputId, effectiveXorInputHigh);
+                                effectiveXorInputHigh = sourceCognitiveShift->bits[bitIndex];
                             }
                         }
                         break;  // Found the cable
                     }
                 }
-                // if (!xorInputIsSelfPatchedBit && inputs[XOR_INPUT].isConnected()) { rack::logger::info("XOR_INPUT reading voltage (external or non-bit self-patch)"); }
             }
-            // else { rack::logger::info("XOR_INPUT not connected"); }
 
             // --- End: Input Reading with Self-Patch Detection ---
 
