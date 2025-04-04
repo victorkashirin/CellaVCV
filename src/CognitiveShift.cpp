@@ -215,12 +215,6 @@ struct CognitiveShift : Module {
             bool writeButtonPressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
             bool eraseButtonPressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
 
-            // 2. Determine effective Data Input state
-            bool effectiveDataInputHigh = getDataInput(DATA_INPUT);
-
-            // 3. Determine effective XOR Input state (using the same logic)
-            bool effectiveXorInputHigh = getDataInput(XOR_INPUT);
-
             // --- End: Input Reading with Self-Patch Detection ---
 
             // 4. Determine final dataBit based on priority: Write > Erase > Effective Data Input
@@ -230,11 +224,11 @@ struct CognitiveShift : Module {
             } else if (eraseButtonPressed) {
                 dataBit = false;
             } else {
-                dataBit = effectiveDataInputHigh;  // Use the potentially overridden value
+                dataBit = getDataInput(DATA_INPUT);  // Use the potentially overridden value
             }
 
             // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = effectiveXorInputHigh;  // Use the potentially overridden value
+            bool xorBit = getDataInput(XOR_INPUT);  // Use the potentially overridden value
 
             // 6. Calculate the bit to shift in
             bool nextBit = dataBit ^ xorBit;
