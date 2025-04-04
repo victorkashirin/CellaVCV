@@ -195,13 +195,10 @@ struct CognitiveShift : Module {
                                 // Self-patched from one of our bit outputs: read internal state
                                 effectiveDataInputHigh = sourceCognitiveShift->bits[bitIndex];
                             }
-                            // else: Self-patched from non-bit output, voltage read is already default
                         }
-                        // Found the cable connected to this input, no need to check others
                         break;
                     }
                 }
-                // if (!dataInputIsSelfPatchedBit && inputs[DATA_INPUT].isConnected()) { rack::logger::info("DATA_INPUT reading voltage (external or non-bit self-patch)"); }
             }
 
             // 3. Determine effective XOR Input state (using the same logic)
