@@ -32,7 +32,6 @@ struct CognitiveShift : Module {
         CLOCK_INPUT,
         DATA_INPUT,
         XOR_INPUT,
-        // CLOCK_RATE_CV_INPUT, // REMOVED
         NUM_INPUTS
     };
     enum OutputIds {
@@ -61,29 +60,25 @@ struct CognitiveShift : Module {
     // Internal state
     dsp::SchmittTrigger clockInputTrigger;
     dsp::SchmittTrigger resetTrigger;
-    // Removed intention triggers: writeTrigger, eraseTrigger, dataInputTrigger, xorInputTrigger
-    // Removed internal clock state: phase, clockOutputPulse, estimatedClockInterval, lastClockTime
-    // Removed gate timing: gateEndTime
-    // Removed intention flags: writeIntention, eraseIntention, dataInputHighIntention, xorInputHighIntention
     bool bits[NUM_STEPS] = {};
+
+    CognitiveShift* inMods[NUM_INPUTS];
+    int inputBits[NUM_INPUTS] = {-1};
+    bool wasInputConnected[NUM_INPUTS] = {false};
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configButton(WRITE_BUTTON_PARAM, "Data + (Write)");
         configButton(ERASE_BUTTON_PARAM, "Data - (Erase)");
         configButton(RESET_BUTTON_PARAM, "Reset Bits");
-        // configParam(CLOCK_RATE_PARAM, -2.f, 6.f, 2.f, "Clock Rate", " Hz", 2.f); // REMOVED
-        // configParam(CLOCK_RATE_CV_ATTENUVERTER_PARAM, -1.f, 1.f, 1.f, "Clock Rate CV Attenuation"); // REMOVED
         configParam(R2R_1_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 1 (Bits 1-4) Level");
         configParam(R2R_2_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 2 (Bits 3-6) Level");
         configParam(R2R_3_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 3 (Bits 5-8) Level");
-        // configParam(GATE_LENGTH_PARAM, 0.f, 1.f, 0.5f, "Gate Length", "%", 0.f, 100.f); // REMOVED
         configParam(DAC_ATTENUVERTER_PARAM, -1.f, 1.f, 1.f, "8-Bit DAC Level");
 
         configInput(CLOCK_INPUT, "Clock Trigger");  // Renamed for clarity
         configInput(DATA_INPUT, "Data In");
         configInput(XOR_INPUT, "XOR In");
-        // configInput(CLOCK_RATE_CV_INPUT, "Clock Rate CV"); // REMOVED
 
         configOutput(R2R_1_OUTPUT, "R2R 1 (Bits 1-4)");
         configOutput(R2R_2_OUTPUT, "R2R 2 (Bits 3-6)");
@@ -96,7 +91,6 @@ struct CognitiveShift : Module {
         configOutput(BIT_6_OUTPUT, "Bit 6 Out");
         configOutput(BIT_7_OUTPUT, "Bit 7 Out");
         configOutput(BIT_8_OUTPUT, "Bit 8 Out");
-        // configOutput(CLOCK_OUTPUT, "Clock Out"); // REMOVED
         configOutput(DAC_OUTPUT, "8-Bit DAC Out");
 
         onReset();  // Initialize state properly
@@ -137,9 +131,6 @@ struct CognitiveShift : Module {
         for (int i = 0; i < NUM_STEPS; ++i) {
             bits[i] = (random::uniform() > 0.5f);
         }
-        // Clear removed state variables
-        // Randomize DAC attenuverter? Optional.
-        // params[DAC_ATTENUVERTER_PARAM].setValue(random::uniform() * 2.f - 1.f);
     }
 
     int outputIdToBitIndex(int outputId) {
@@ -149,7 +140,36 @@ struct CognitiveShift : Module {
         return -1;
     }
 
+    void checkInputConnections() {
+        for (int i = 0; i < NUM_INPUTS; ++i) {
+            if (inputs[i].isConnected()) {
+                if (!wasInputConnected[i]) {
+                    inMods[i] = nullptr;
+                    wasInputConnected[i] = true;
+                    for (uint64_t cableId : APP->engine->getCableIds()) {
+                        Cable* cable = APP->engine->getCable(cableId);
+                        if (!cable) continue;
+                        if (cable->inputModule == this && cable->inputId == i) {
+                            Module* outputModule = cable->outputModule;
+                            if (outputModule && outputModule->getModel() == this->getModel()) {
+                                CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
+                                inMods[i] = sourceCognitiveShift;
+                                inputBits[i] = cable->outputId;
+                            }
+                        }
+                    }
+                }
+            } else if (wasInputConnected[i]) {
+                inMods[i] = nullptr;
+                inputBits[i] = -1;
+                wasInputConnected[i] = false;
+            }
+        }
+    }
+
     void process(const ProcessArgs& args) override {
+        checkInputConnections();
+
         // --- Immediate Reset Button Logic ---
         if (resetTrigger.process(params[RESET_BUTTON_PARAM].getValue())) {
             std::fill(bits, bits + NUM_STEPS, false);
@@ -177,26 +197,12 @@ struct CognitiveShift : Module {
             if (inputs[DATA_INPUT].isConnected()) {
                 effectiveDataInputHigh = inputs[DATA_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
 
-                // Iterate through cable IDs and get Cable objects
-                for (uint64_t cableId : APP->engine->getCableIds()) {
-                    Cable* cable = APP->engine->getCable(cableId);
-                    if (!cable)  // Safety check
-                        continue;
-
-                    // Is this cable plugged into *our* DATA_INPUT?
-                    if (cable->inputModule == this && cable->inputId == DATA_INPUT) {
-                        Module* outputModule = cable->outputModule;
-                        if (!outputModule) continue;  // Safety check
-                        if (outputModule->getModel() == this->getModel()) {
-                            CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
-                            int sourceOutputId = cable->outputId;
-                            int bitIndex = outputIdToBitIndex(sourceOutputId);
-                            if (bitIndex != -1) {
-                                // Self-patched from one of our bit outputs: read internal state
-                                effectiveDataInputHigh = sourceCognitiveShift->bits[bitIndex];
-                            }
-                        }
-                        break;
+                if (inMods[DATA_INPUT] != nullptr) {
+                    // If we have a connected input, check if it's self-patched
+                    int sourceOutputId = inputBits[DATA_INPUT];
+                    int bitIndex = outputIdToBitIndex(sourceOutputId);
+                    if (bitIndex != -1) {
+                        effectiveDataInputHigh = inMods[DATA_INPUT]->bits[bitIndex];
                     }
                 }
             }
@@ -207,23 +213,12 @@ struct CognitiveShift : Module {
             if (inputs[XOR_INPUT].isConnected()) {
                 effectiveXorInputHigh = inputs[XOR_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
 
-                for (uint64_t cableId : APP->engine->getCableIds()) {
-                    rack::engine::Cable* cable = APP->engine->getCable(cableId);
-                    if (!cable)
-                        continue;
-
-                    if (cable->inputModule == this && cable->inputId == XOR_INPUT) {
-                        Module* outputModule = cable->outputModule;
-                        if (!outputModule) continue;  // Safety check
-                        if (outputModule->getModel() == this->getModel()) {
-                            CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
-                            int sourceOutputId = cable->outputId;
-                            int bitIndex = outputIdToBitIndex(sourceOutputId);
-                            if (bitIndex != -1) {
-                                effectiveXorInputHigh = sourceCognitiveShift->bits[bitIndex];
-                            }
-                        }
-                        break;  // Found the cable
+                if (inMods[XOR_INPUT] != nullptr) {
+                    // If we have a connected input, check if it's self-patched
+                    int sourceOutputId = inputBits[XOR_INPUT];
+                    int bitIndex = outputIdToBitIndex(sourceOutputId);
+                    if (bitIndex != -1) {
+                        effectiveXorInputHigh = inMods[XOR_INPUT]->bits[bitIndex];
                     }
                 }
             }
