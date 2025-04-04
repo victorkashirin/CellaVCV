@@ -195,8 +195,6 @@ struct CognitiveShift : Module {
             bool effectiveDataInputHigh = false;
 
             if (inputs[DATA_INPUT].isConnected()) {
-                effectiveDataInputHigh = inputs[DATA_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
-
                 if (inMods[DATA_INPUT] != nullptr) {
                     // If we have a connected input, check if it's self-patched
                     int sourceOutputId = inputBits[DATA_INPUT];
@@ -204,6 +202,8 @@ struct CognitiveShift : Module {
                     if (bitIndex != -1) {
                         effectiveDataInputHigh = inMods[DATA_INPUT]->bits[bitIndex];
                     }
+                } else {
+                    effectiveDataInputHigh = inputs[DATA_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
                 }
             }
 
@@ -211,8 +211,6 @@ struct CognitiveShift : Module {
             bool effectiveXorInputHigh = false;
 
             if (inputs[XOR_INPUT].isConnected()) {
-                effectiveXorInputHigh = inputs[XOR_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
-
                 if (inMods[XOR_INPUT] != nullptr) {
                     // If we have a connected input, check if it's self-patched
                     int sourceOutputId = inputBits[XOR_INPUT];
@@ -220,6 +218,8 @@ struct CognitiveShift : Module {
                     if (bitIndex != -1) {
                         effectiveXorInputHigh = inMods[XOR_INPUT]->bits[bitIndex];
                     }
+                } else {
+                    effectiveXorInputHigh = inputs[XOR_INPUT].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
                 }
             }
 
@@ -240,7 +240,7 @@ struct CognitiveShift : Module {
 
             // 6. Calculate the bit to shift in
             bool nextBit = dataBit ^ xorBit;
-            // rack::logger::info("Clock tick! write:%d erase:%d dataInHigh:%d xorInHigh:%d | dataBit:%d xorBit:%d | nextBit:%d", writeButtonPressed, eraseButtonPressed, effectiveDataInputHigh, effectiveXorInputHigh, dataBit, xorBit, nextBit);
+            // INFO("Clock tick! write:%d erase:%d dataInHigh:%d xorInHigh:%d | dataBit:%d xorBit:%d | nextBit:%d", writeButtonPressed, eraseButtonPressed, effectiveDataInputHigh, effectiveXorInputHigh, dataBit, xorBit, nextBit);
 
             // 7. Perform the shift
             for (int i = NUM_STEPS - 1; i > 0; --i) {
