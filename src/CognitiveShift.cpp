@@ -25,13 +25,14 @@ struct CognitiveShift : Module {
         R2R_2_ATTN_PARAM,
         R2R_3_ATTN_PARAM,
         DAC_ATTENUVERTER_PARAM,
+        LOGIC_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
         CLOCK_INPUT,
         DATA_INPUT,
         XOR_INPUT,
-        XOR_2_INPUT,
+        LOGIC_INPUT,
         RESET_INPUT,
         THRESHOLD_CV_INPUT,
         NUM_INPUTS
@@ -79,7 +80,7 @@ struct CognitiveShift : Module {
     };
 
     int outputType = OutputType::CLOCK_OUTPUT;
-    bool signalDelayCompensation = true;
+    int logicType = 0;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -95,8 +96,8 @@ struct CognitiveShift : Module {
 
         configInput(CLOCK_INPUT, "Clock Trigger");
         configInput(DATA_INPUT, "Data");
-        configInput(XOR_INPUT, "XOR A");
-        configInput(XOR_2_INPUT, "XOR B");
+        configInput(XOR_INPUT, "XOR");
+        configInput(LOGIC_INPUT, "Logic");
         configInput(RESET_INPUT, "Reset");
         configInput(THRESHOLD_CV_INPUT, "Threshold CV");
 
@@ -161,9 +162,6 @@ struct CognitiveShift : Module {
     }
 
     void checkInputConnections() {
-        if (!signalDelayCompensation) {
-            return;
-        }
         for (int i = 0; i < NUM_INPUTS; ++i) {
             if (inputs[i].isConnected()) {
                 if (!wasInputConnected[i]) {
@@ -194,7 +192,7 @@ struct CognitiveShift : Module {
         bool effectiveDataInputHigh = false;
 
         if (inputs[inputId].isConnected()) {
-            if (signalDelayCompensation && inMods[inputId] != nullptr) {
+            if (inMods[inputId] != nullptr) {
                 // If we have a connected input, check if it's self-patched
                 int sourceOutputId = inputBits[inputId];
                 int bitIndex = outputIdToBitIndex(sourceOutputId);
@@ -211,6 +209,23 @@ struct CognitiveShift : Module {
             }
         }
         return effectiveDataInputHigh;
+    }
+
+    bool applyLogicOperation(bool dataBit, bool logicBit, int logicType) {
+        switch (logicType) {
+            case 0:  // XOR
+                return dataBit ^ logicBit;
+            case 1:  // NAND
+                return !(dataBit && logicBit);
+            case 2:  // XNOR
+                return !(dataBit ^ logicBit);
+            case 3:  // OR
+                return dataBit || logicBit;
+            case 4:  // AND
+                return dataBit && logicBit;
+            default:
+                return dataBit;  // Default to no operation
+        }
     }
 
     void process(const ProcessArgs& args) override {
@@ -253,11 +268,15 @@ struct CognitiveShift : Module {
             }
 
             // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = getDataInput(XOR_INPUT, threshold);     // Use the potentially overridden value
-            bool xor2Bit = getDataInput(XOR_2_INPUT, threshold);  // Use the potentially overridden value
+            bool xorBit = getDataInput(XOR_INPUT, threshold);  // Use the potentially overridden value
 
             // 6. Calculate the bit to shift in
-            bool nextBit = dataBit ^ xorBit ^ xor2Bit;
+            bool nextBit = dataBit ^ xorBit;
+
+            if (getInput(LOGIC_INPUT).isConnected()) {
+                bool logicBit = getDataInput(LOGIC_INPUT, threshold);  // Use the potentially overridden value
+                nextBit = applyLogicOperation(nextBit, logicBit, logicType);
+            }
 
             for (int i = 0; i < NUM_STEPS; i++) {
                 previousBits[i] = bits[i];
@@ -380,8 +399,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));  // Kept position
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));   // Kept position
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));    // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_2_INPUT));  // Kept position
-        // addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::CLOCK_OUTPUT)); // REMOVED
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::LOGIC_INPUT));  // Kept position
 
         // Row 4: Buttons and Button Press Light (Kept positions)
         addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
@@ -439,9 +457,9 @@ struct CognitiveShiftWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Bit output mode",
                                                  {"Clocks", "Gates", "Triggers"},
                                                  &module->outputType));
-        menu->addChild(createIndexPtrSubmenuItem("Signal delay compensation",
-                                                 {"Disabled", "Enabled"},
-                                                 &module->signalDelayCompensation));
+        menu->addChild(createIndexPtrSubmenuItem("Logic type",
+                                                 {"XOR", "NAND", "XNOR", "OR", "AND"},
+                                                 &module->logicType));
     }
 };
 

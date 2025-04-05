@@ -3,7 +3,6 @@
 #include "plugin.hpp"
 #include "rack.hpp"
 
-
 template <typename TBase>
 struct LargeFresnelLight : TSvgLight<TBase> {
     LargeFresnelLight() {
