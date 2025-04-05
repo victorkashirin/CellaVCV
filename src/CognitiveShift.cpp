@@ -30,6 +30,7 @@ struct CognitiveShift : Module {
         DATA_INPUT,
         XOR_INPUT,
         XOR_2_INPUT,
+        RESET_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -57,9 +58,11 @@ struct CognitiveShift : Module {
     // Internal state
     dsp::SchmittTrigger clockInputTrigger;
     dsp::SchmittTrigger resetTrigger;
+    dsp::SchmittTrigger resetInputTrigger;
     bool bits[NUM_STEPS] = {};
     bool previousBits[NUM_STEPS] = {};
-    int64_t lastClock = 0;
+    int64_t currentClock = 0;
+    int64_t previousClock = 0;
 
     CognitiveShift* inMods[NUM_INPUTS];
     int inputBits[NUM_INPUTS] = {-1};
@@ -75,7 +78,7 @@ struct CognitiveShift : Module {
         configParam(R2R_3_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 3 (Bits 5-8) Level");
         configParam(DAC_ATTENUVERTER_PARAM, -1.f, 1.f, 1.f, "8-Bit DAC Level");
 
-        configInput(CLOCK_INPUT, "Clock Trigger");  // Renamed for clarity
+        configInput(CLOCK_INPUT, "Clock Trigger");
         configInput(DATA_INPUT, "Data");
         configInput(XOR_INPUT, "XOR A");
         configInput(XOR_2_INPUT, "XOR B");
@@ -176,7 +179,7 @@ struct CognitiveShift : Module {
                 int sourceOutputId = inputBits[inputId];
                 int bitIndex = outputIdToBitIndex(sourceOutputId);
                 if (bitIndex != -1) {
-                    if (inMods[inputId]->lastClock - lastClock == 1) {
+                    if (inMods[inputId]->previousClock == currentClock) {
                         effectiveDataInputHigh = inMods[inputId]->previousBits[bitIndex];
                     } else {
                         effectiveDataInputHigh = inMods[inputId]->bits[bitIndex];
@@ -193,7 +196,7 @@ struct CognitiveShift : Module {
         checkInputConnections();
 
         // --- Immediate Reset Button Logic ---
-        if (resetTrigger.process(params[RESET_BUTTON_PARAM].getValue())) {
+        if (resetTrigger.process(params[RESET_BUTTON_PARAM].getValue()) || resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
             std::fill(bits, bits + NUM_STEPS, false);
         }
 
@@ -241,7 +244,8 @@ struct CognitiveShift : Module {
                 bits[i] = bits[i - 1];
             }
             bits[0] = nextBit;
-            lastClock = args.frame;
+            previousClock = currentClock;
+            currentClock = args.frame;
 
         }  // End of clocked_this_frame
 
@@ -325,6 +329,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col4 = 157.5f;
 
         // Row 1 & 2: Original Clock Rate controls and Gate Length REMOVED
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 53.5f), module, CognitiveShift::RESET_INPUT));  // Kept position
         // addParam(createParamCentered<RoundBlackKnob>(Vec(col1, 53.5f), module, CognitiveShift::CLOCK_RATE_PARAM)); // REMOVED
         // addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 53.5f), module, CognitiveShift::CLOCK_RATE_CV_INPUT)); // REMOVED
         // addParam(createParamCentered<Trimpot>(Vec(col3, 53.5f), module, CognitiveShift::CLOCK_RATE_CV_ATTENUVERTER_PARAM)); // REMOVED
@@ -338,10 +343,10 @@ struct CognitiveShiftWidget : ModuleWidget {
         // addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::CLOCK_OUTPUT)); // REMOVED
 
         // Row 4: Buttons and Button Press Light (Kept positions)
-        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col1, 103.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));  // Kept position
+        addParam(createParamCentered<VCVButton>(Vec(col1, 103.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
         addParam(createParamCentered<VCVButton>(Vec(col2, 103.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));                    // Kept position
         addParam(createParamCentered<VCVButton>(Vec(col3, 103.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));                    // Kept position
-        addParam(createParamCentered<VCVButton>(Vec(col4, 103.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
+        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 103.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));  // Kept position
 
         // Row 5 & 6: Step Lights (Kept positions)
         float light_start_x = 34.84f;
