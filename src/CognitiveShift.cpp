@@ -19,6 +19,8 @@ struct CognitiveShift : Module {
         WRITE_BUTTON_PARAM,
         ERASE_BUTTON_PARAM,
         RESET_BUTTON_PARAM,
+        THRESHOLD_PARAM,
+        THRESHOLD_CV_ATTENUVERTER_PARAM,
         R2R_1_ATTN_PARAM,
         R2R_2_ATTN_PARAM,
         R2R_3_ATTN_PARAM,
@@ -31,6 +33,7 @@ struct CognitiveShift : Module {
         XOR_INPUT,
         XOR_2_INPUT,
         RESET_INPUT,
+        THRESHOLD_CV_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -82,6 +85,8 @@ struct CognitiveShift : Module {
         configButton(WRITE_BUTTON_PARAM, "Data + (Write)");
         configButton(ERASE_BUTTON_PARAM, "Data - (Erase)");
         configButton(RESET_BUTTON_PARAM, "Reset Bits");
+        configParam(THRESHOLD_PARAM, 1.f, 9.f, 1.f, "Data Input Threshold");
+        configParam(THRESHOLD_CV_ATTENUVERTER_PARAM, -1.f, 1.f, 0.f, "Threshold CV Attenuverter");
         configParam(R2R_1_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 1 (Bits 1-4) Level");
         configParam(R2R_2_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 2 (Bits 3-6) Level");
         configParam(R2R_3_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 3 (Bits 5-8) Level");
@@ -91,6 +96,8 @@ struct CognitiveShift : Module {
         configInput(DATA_INPUT, "Data");
         configInput(XOR_INPUT, "XOR A");
         configInput(XOR_2_INPUT, "XOR B");
+        configInput(RESET_INPUT, "Reset");
+        configInput(THRESHOLD_CV_INPUT, "Threshold CV");
 
         configOutput(R2R_1_OUTPUT, "R2R 1 (Bits 1-4)");
         configOutput(R2R_2_OUTPUT, "R2R 2 (Bits 3-6)");
@@ -179,7 +186,7 @@ struct CognitiveShift : Module {
         }
     }
 
-    bool getDataInput(int inputId) {
+    bool getDataInput(int inputId, float threshold = DATA_INPUT_THRESHOLD) {
         bool effectiveDataInputHigh = false;
 
         if (inputs[inputId].isConnected()) {
@@ -195,7 +202,7 @@ struct CognitiveShift : Module {
                     }
                 }
             } else {
-                effectiveDataInputHigh = inputs[inputId].getVoltage() >= DATA_INPUT_THRESHOLD;  // Default
+                effectiveDataInputHigh = inputs[inputId].getVoltage() >= threshold;  // Default
             }
         }
         return effectiveDataInputHigh;
@@ -221,6 +228,9 @@ struct CognitiveShift : Module {
         if (clocked_this_frame) {
             // --- Start: Input Reading with Self-Patch Detection (Rack v2 Engine ID Method) ---
 
+            float thresholdCV = params[THRESHOLD_CV_ATTENUVERTER_PARAM].getValue() * inputs[THRESHOLD_CV_INPUT].getVoltage();
+            float threshold = clamp(params[THRESHOLD_PARAM].getValue() + thresholdCV, 1.f, 9.f);
+
             // 1. Read button states
             bool writeButtonPressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
             bool eraseButtonPressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
@@ -234,12 +244,12 @@ struct CognitiveShift : Module {
             } else if (eraseButtonPressed) {
                 dataBit = false;
             } else {
-                dataBit = getDataInput(DATA_INPUT);  // Use the potentially overridden value
+                dataBit = getDataInput(DATA_INPUT, threshold);  // Use the potentially overridden value
             }
 
             // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = getDataInput(XOR_INPUT);     // Use the potentially overridden value
-            bool xor2Bit = getDataInput(XOR_2_INPUT);  // Use the potentially overridden value
+            bool xorBit = getDataInput(XOR_INPUT, threshold);     // Use the potentially overridden value
+            bool xor2Bit = getDataInput(XOR_2_INPUT, threshold);  // Use the potentially overridden value
 
             // 6. Calculate the bit to shift in
             bool nextBit = dataBit ^ xorBit ^ xor2Bit;
@@ -352,11 +362,10 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col4 = 157.5f;
 
         // Row 1 & 2: Original Clock Rate controls and Gate Length REMOVED
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 53.5f), module, CognitiveShift::RESET_INPUT));  // Kept position
-        // addParam(createParamCentered<RoundBlackKnob>(Vec(col1, 53.5f), module, CognitiveShift::CLOCK_RATE_PARAM)); // REMOVED
-        // addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 53.5f), module, CognitiveShift::CLOCK_RATE_CV_INPUT)); // REMOVED
-        // addParam(createParamCentered<Trimpot>(Vec(col3, 53.5f), module, CognitiveShift::CLOCK_RATE_CV_ATTENUVERTER_PARAM)); // REMOVED
-        // addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 53.5f), module, CognitiveShift::GATE_LENGTH_PARAM)); // REMOVED
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 53.5f), module, CognitiveShift::RESET_INPUT));             // Kept position
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 53.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));      // REMOVED
+        addParam(createParamCentered<Trimpot>(Vec(col3, 53.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));  // REMOVED
+        addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 53.5f), module, CognitiveShift::THRESHOLD_PARAM));
 
         // Row 3: Inputs and CLOCK_OUTPUT REMOVED
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));  // Kept position
