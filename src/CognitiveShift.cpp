@@ -110,7 +110,7 @@ struct CognitiveShift : Module {
         configOutput(BIT_6_OUTPUT, "Bit 6");
         configOutput(BIT_7_OUTPUT, "Bit 7");
         configOutput(BIT_8_OUTPUT, "Bit 8");
-        configOutput(DAC_OUTPUT, "8-Bit DAC");
+        configOutput(DAC_OUTPUT, "8-Bit Bipolar DAC");
 
         onReset();  // Initialize state properly
     }
@@ -362,10 +362,10 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col4 = 157.5f;
 
         // Row 1 & 2: Original Clock Rate controls and Gate Length REMOVED
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 53.5f), module, CognitiveShift::RESET_INPUT));             // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 53.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));      // REMOVED
-        addParam(createParamCentered<Trimpot>(Vec(col3, 53.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));  // REMOVED
-        addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 53.5f), module, CognitiveShift::THRESHOLD_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::RESET_INPUT));             // Kept position
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));      // REMOVED
+        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));  // REMOVED
+        addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
 
         // Row 3: Inputs and CLOCK_OUTPUT REMOVED
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));  // Kept position
@@ -375,10 +375,10 @@ struct CognitiveShiftWidget : ModuleWidget {
         // addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::CLOCK_OUTPUT)); // REMOVED
 
         // Row 4: Buttons and Button Press Light (Kept positions)
-        addParam(createParamCentered<VCVButton>(Vec(col1, 103.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
-        addParam(createParamCentered<VCVButton>(Vec(col2, 103.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));                    // Kept position
-        addParam(createParamCentered<VCVButton>(Vec(col3, 103.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));                    // Kept position
-        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 103.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));  // Kept position
+        addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
+        addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));                    // Kept position
+        addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));                    // Kept position
+        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));  // Kept position
 
         // Row 5 & 6: Step Lights (Kept positions)
         float light_start_x = 34.84f;
