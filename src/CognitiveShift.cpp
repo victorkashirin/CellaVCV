@@ -79,6 +79,7 @@ struct CognitiveShift : Module {
     };
 
     int outputType = OutputType::CLOCK_OUTPUT;
+    bool signalDelayCompensation = true;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -160,6 +161,9 @@ struct CognitiveShift : Module {
     }
 
     void checkInputConnections() {
+        if (!signalDelayCompensation) {
+            return;
+        }
         for (int i = 0; i < NUM_INPUTS; ++i) {
             if (inputs[i].isConnected()) {
                 if (!wasInputConnected[i]) {
@@ -190,7 +194,7 @@ struct CognitiveShift : Module {
         bool effectiveDataInputHigh = false;
 
         if (inputs[inputId].isConnected()) {
-            if (inMods[inputId] != nullptr) {
+            if (signalDelayCompensation && inMods[inputId] != nullptr) {
                 // If we have a connected input, check if it's self-patched
                 int sourceOutputId = inputBits[inputId];
                 int bitIndex = outputIdToBitIndex(sourceOutputId);
@@ -202,6 +206,7 @@ struct CognitiveShift : Module {
                     }
                 }
             } else {
+                DEBUG("Voltage input %d: %f", inputId, inputs[inputId].getVoltage());
                 effectiveDataInputHigh = inputs[inputId].getVoltage() >= threshold;  // Default
             }
         }
@@ -330,6 +335,7 @@ struct CognitiveShift : Module {
             json_array_insert_new(valuesJ, i, json_boolean(bits[i]));  // Use json_boolean for clarity
         }
         json_object_set_new(rootJ, "values", valuesJ);
+        json_object_set_new(rootJ, "outputType", json_integer(outputType));
         return rootJ;
     }
 
@@ -342,6 +348,9 @@ struct CognitiveShift : Module {
                     bits[i] = json_boolean_value(valueJ);  // Use json_boolean_value
             }
         }
+        json_t* outputTypeJ = json_object_get(rootJ, "outputType");
+        if (outputTypeJ)
+            outputType = json_integer_value(outputTypeJ);
     }
 };
 
@@ -430,6 +439,9 @@ struct CognitiveShiftWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Bit output mode",
                                                  {"Clocks", "Gates", "Triggers"},
                                                  &module->outputType));
+        menu->addChild(createIndexPtrSubmenuItem("Signal delay compensation",
+                                                 {"Disabled", "Enabled"},
+                                                 &module->signalDelayCompensation));
     }
 };
 
