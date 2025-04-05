@@ -59,6 +59,7 @@ struct CognitiveShift : Module {
     dsp::SchmittTrigger clockInputTrigger;
     dsp::SchmittTrigger resetTrigger;
     dsp::SchmittTrigger resetInputTrigger;
+    dsp::PulseGenerator pulseGen;
     bool bits[NUM_STEPS] = {};
     bool previousBits[NUM_STEPS] = {};
     int64_t currentClock = 0;
@@ -67,6 +68,14 @@ struct CognitiveShift : Module {
     CognitiveShift* inMods[NUM_INPUTS];
     int inputBits[NUM_INPUTS] = {-1};
     bool wasInputConnected[NUM_INPUTS] = {false};
+
+    enum OutputType {
+        CLOCK_OUTPUT,
+        GATE_OUTPUT,
+        TRIGGER_OUTPUT
+    };
+
+    int outputType = OutputType::CLOCK_OUTPUT;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -255,7 +264,21 @@ struct CognitiveShift : Module {
         bool isClockHigh = clockInputVoltage >= CLOCK_HIGH_THRESHOLD;
 
         for (int i = 0; i < NUM_STEPS; ++i) {
-            float bitVoltage = (bits[i] && isClockHigh) ? GATE_VOLTAGE : 0.0f;
+            float bitVoltage = 0.0f;
+
+            if (bits[i]) {
+                if (outputType == OutputType::GATE_OUTPUT) {
+                    bitVoltage = GATE_VOLTAGE;
+                } else if (outputType == OutputType::TRIGGER_OUTPUT) {
+                    if (clocked_this_frame) {
+                        pulseGen.trigger(0.001f);
+                    }
+                    bitVoltage = pulseGen.process(args.sampleTime) ? GATE_VOLTAGE : 0.0f;
+                } else if (outputType == OutputType::CLOCK_OUTPUT) {
+                    bitVoltage = isClockHigh ? GATE_VOLTAGE : 0.0f;
+                }
+            }
+
             int outputId = BIT_1_OUTPUT + i;
             if (outputId >= BIT_1_OUTPUT && outputId <= BIT_8_OUTPUT) {
                 outputs[outputId].setVoltage(bitVoltage);
@@ -389,6 +412,15 @@ struct CognitiveShiftWidget : ModuleWidget {
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 1 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_6_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 2 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_7_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 3 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_8_OUTPUT));
+    }
+
+    void appendContextMenu(Menu* menu) override {
+        CognitiveShift* module = dynamic_cast<CognitiveShift*>(this->module);
+        assert(module);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexPtrSubmenuItem("Bit output mode",
+                                                 {"Clocks", "Gates", "Triggers"},
+                                                 &module->outputType));
     }
 };
 
