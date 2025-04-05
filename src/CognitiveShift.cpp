@@ -6,7 +6,7 @@
 
 // Define constants for clarity
 const int NUM_STEPS = 8;
-const float R2R_MAX_VOLTAGE = 8.0f;
+const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
 const float DATA_INPUT_THRESHOLD = 1.0f;  // Voltage threshold for data/xor input trigger
@@ -19,12 +19,9 @@ struct CognitiveShift : Module {
         WRITE_BUTTON_PARAM,
         ERASE_BUTTON_PARAM,
         RESET_BUTTON_PARAM,
-        // CLOCK_RATE_PARAM, // REMOVED
-        // CLOCK_RATE_CV_ATTENUVERTER_PARAM, // REMOVED
         R2R_1_ATTN_PARAM,
         R2R_2_ATTN_PARAM,
         R2R_3_ATTN_PARAM,
-        // GATE_LENGTH_PARAM, // REMOVED
         DAC_ATTENUVERTER_PARAM,
         NUM_PARAMS
     };
@@ -32,6 +29,7 @@ struct CognitiveShift : Module {
         CLOCK_INPUT,
         DATA_INPUT,
         XOR_INPUT,
+        XOR_2_INPUT,
         NUM_INPUTS
     };
     enum OutputIds {
@@ -46,7 +44,6 @@ struct CognitiveShift : Module {
         BIT_6_OUTPUT,
         BIT_7_OUTPUT,
         BIT_8_OUTPUT,
-        // CLOCK_OUTPUT, // REMOVED
         DAC_OUTPUT,
         NUM_OUTPUTS
     };
@@ -79,21 +76,22 @@ struct CognitiveShift : Module {
         configParam(DAC_ATTENUVERTER_PARAM, -1.f, 1.f, 1.f, "8-Bit DAC Level");
 
         configInput(CLOCK_INPUT, "Clock Trigger");  // Renamed for clarity
-        configInput(DATA_INPUT, "Data In");
-        configInput(XOR_INPUT, "XOR In");
+        configInput(DATA_INPUT, "Data");
+        configInput(XOR_INPUT, "XOR A");
+        configInput(XOR_2_INPUT, "XOR B");
 
         configOutput(R2R_1_OUTPUT, "R2R 1 (Bits 1-4)");
         configOutput(R2R_2_OUTPUT, "R2R 2 (Bits 3-6)");
         configOutput(R2R_3_OUTPUT, "R2R 3 (Bits 5-8)");
-        configOutput(BIT_1_OUTPUT, "Bit 1 Out");
-        configOutput(BIT_2_OUTPUT, "Bit 2 Out");
-        configOutput(BIT_3_OUTPUT, "Bit 3 Out");
-        configOutput(BIT_4_OUTPUT, "Bit 4 Out");
-        configOutput(BIT_5_OUTPUT, "Bit 5 Out");
-        configOutput(BIT_6_OUTPUT, "Bit 6 Out");
-        configOutput(BIT_7_OUTPUT, "Bit 7 Out");
-        configOutput(BIT_8_OUTPUT, "Bit 8 Out");
-        configOutput(DAC_OUTPUT, "8-Bit DAC Out");
+        configOutput(BIT_1_OUTPUT, "Bit 1");
+        configOutput(BIT_2_OUTPUT, "Bit 2");
+        configOutput(BIT_3_OUTPUT, "Bit 3");
+        configOutput(BIT_4_OUTPUT, "Bit 4");
+        configOutput(BIT_5_OUTPUT, "Bit 5");
+        configOutput(BIT_6_OUTPUT, "Bit 6");
+        configOutput(BIT_7_OUTPUT, "Bit 7");
+        configOutput(BIT_8_OUTPUT, "Bit 8");
+        configOutput(DAC_OUTPUT, "8-Bit DAC");
 
         onReset();  // Initialize state properly
     }
@@ -178,7 +176,7 @@ struct CognitiveShift : Module {
                 int sourceOutputId = inputBits[inputId];
                 int bitIndex = outputIdToBitIndex(sourceOutputId);
                 if (bitIndex != -1) {
-                    if (inMods[DATA_INPUT]->lastClock - lastClock == 1) {
+                    if (inMods[inputId]->lastClock - lastClock == 1) {
                         effectiveDataInputHigh = inMods[inputId]->previousBits[bitIndex];
                     } else {
                         effectiveDataInputHigh = inMods[inputId]->bits[bitIndex];
@@ -228,10 +226,11 @@ struct CognitiveShift : Module {
             }
 
             // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = getDataInput(XOR_INPUT);  // Use the potentially overridden value
+            bool xorBit = getDataInput(XOR_INPUT);     // Use the potentially overridden value
+            bool xor2Bit = getDataInput(XOR_2_INPUT);  // Use the potentially overridden value
 
             // 6. Calculate the bit to shift in
-            bool nextBit = dataBit ^ xorBit;
+            bool nextBit = dataBit ^ xorBit ^ xor2Bit;
 
             for (int i = 0; i < NUM_STEPS; i++) {
                 previousBits[i] = bits[i];
@@ -335,6 +334,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));  // Kept position
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));   // Kept position
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));    // Kept position
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_2_INPUT));  // Kept position
         // addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::CLOCK_OUTPUT)); // REMOVED
 
         // Row 4: Buttons and Button Press Light (Kept positions)
