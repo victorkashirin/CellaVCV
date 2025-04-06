@@ -1,8 +1,8 @@
-#include <algorithm>  // For std::copy, std::fill
-#include <vector>     // Still needed for std::vector in dataFromJson potentially, though not strictly necessary for current state vars
+#include <algorithm>
+#include <vector>
 
-#include "components.hpp"  // Assuming this includes necessary VCV components like SchmittTrigger, etc.
-#include "plugin.hpp"      // Assuming this includes Module, ModuleWidget, etc.
+#include "components.hpp"
+#include "plugin.hpp"
 
 // Define constants for clarity
 const int NUM_STEPS = 8;
@@ -204,7 +204,6 @@ struct CognitiveShift : Module {
                     }
                 }
             } else {
-                DEBUG("Voltage input %d: %f", inputId, inputs[inputId].getVoltage());
                 effectiveDataInputHigh = inputs[inputId].getVoltage() >= threshold;  // Default
             }
         }
@@ -223,6 +222,8 @@ struct CognitiveShift : Module {
                 return dataBit || logicBit;
             case 4:  // AND
                 return dataBit && logicBit;
+            case 5:  // NOR
+                return !(dataBit || logicBit);
             default:
                 return dataBit;  // Default to no operation
         }
@@ -264,17 +265,17 @@ struct CognitiveShift : Module {
             } else if (eraseButtonPressed) {
                 dataBit = false;
             } else {
-                dataBit = getDataInput(DATA_INPUT, threshold);  // Use the potentially overridden value
+                dataBit = getDataInput(DATA_INPUT, threshold);
             }
 
             // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = getDataInput(XOR_INPUT, threshold);  // Use the potentially overridden value
+            bool xorBit = getDataInput(XOR_INPUT, threshold);
 
             // 6. Calculate the bit to shift in
             bool nextBit = dataBit ^ xorBit;
 
             if (getInput(LOGIC_INPUT).isConnected()) {
-                bool logicBit = getDataInput(LOGIC_INPUT, threshold);  // Use the potentially overridden value
+                bool logicBit = getDataInput(LOGIC_INPUT, threshold);
                 nextBit = applyLogicOperation(nextBit, logicBit, logicType);
             }
 
@@ -377,35 +378,33 @@ struct CognitiveShift : Module {
 struct CognitiveShiftWidget : ModuleWidget {
     CognitiveShiftWidget(CognitiveShift* module) {
         setModule(module);
-        // Ensure panel files exist at these paths
         setPanel(createPanel(asset::plugin(pluginInstance, "res/CognitiveShift.svg"), asset::plugin(pluginInstance, "res/CognitiveShift-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        // Panel layout constants (Keep existing ones)
         float col1 = 22.5f;
         float col2 = 67.5f;
         float col3 = 112.5f;
         float col4 = 157.5f;
 
         // Row 1 & 2: Original Clock Rate controls and Gate Length REMOVED
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::RESET_INPUT));             // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));      // REMOVED
-        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));  // REMOVED
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::RESET_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
+        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
 
         // Row 3: Inputs and CLOCK_OUTPUT REMOVED
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));  // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));   // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));    // Kept position
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::LOGIC_INPUT));  // Kept position
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::LOGIC_INPUT));
 
         // Row 4: Buttons and Button Press Light (Kept positions)
-        addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));                    // Kept position
-        addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));                    // Kept position
-        addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));                    // Kept position
-        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));  // Kept position
+        addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
+        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
 
         // Row 5 & 6: Step Lights (Kept positions)
         float light_start_x = 34.84f;
@@ -423,27 +422,27 @@ struct CognitiveShiftWidget : ModuleWidget {
 
         // Row 7: R2R and DAC Outputs (Kept positions)
         float r2r_out_y = 231.29;
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col1, r2r_out_y), module, CognitiveShift::R2R_1_OUTPUT));  // Kept position
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, r2r_out_y), module, CognitiveShift::R2R_2_OUTPUT));  // Kept position
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col3, r2r_out_y), module, CognitiveShift::R2R_3_OUTPUT));  // Kept position
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, r2r_out_y), module, CognitiveShift::DAC_OUTPUT));    // Kept position
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col1, r2r_out_y), module, CognitiveShift::R2R_1_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, r2r_out_y), module, CognitiveShift::R2R_2_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col3, r2r_out_y), module, CognitiveShift::R2R_3_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, r2r_out_y), module, CognitiveShift::DAC_OUTPUT));
 
         // Row 8: R2R and DAC Attenuators (Kept positions)
         float r2r_attn_y = 203.81;
-        addParam(createParamCentered<Trimpot>(Vec(col1, r2r_attn_y), module, CognitiveShift::R2R_1_ATTN_PARAM));        // Kept position
-        addParam(createParamCentered<Trimpot>(Vec(col2, r2r_attn_y), module, CognitiveShift::R2R_2_ATTN_PARAM));        // Kept position
-        addParam(createParamCentered<Trimpot>(Vec(col3, r2r_attn_y), module, CognitiveShift::R2R_3_ATTN_PARAM));        // Kept position
-        addParam(createParamCentered<Trimpot>(Vec(col4, r2r_attn_y), module, CognitiveShift::DAC_ATTENUVERTER_PARAM));  // Kept position
+        addParam(createParamCentered<Trimpot>(Vec(col1, r2r_attn_y), module, CognitiveShift::R2R_1_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, r2r_attn_y), module, CognitiveShift::R2R_2_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col3, r2r_attn_y), module, CognitiveShift::R2R_3_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col4, r2r_attn_y), module, CognitiveShift::DAC_ATTENUVERTER_PARAM));
 
         // Row 9 & 10: Individual Bit Outputs (Kept positions)
         float bit_out_start_x = 22.5f;
         float bit_out_spacing_x = 45.f;
-        float bit_out_row1_y = 280;  // Adjusted slightly based on light Y coord? Keep original if preferred.
+        float bit_out_row1_y = 280;
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 0 * bit_out_spacing_x, bit_out_row1_y), module, CognitiveShift::BIT_1_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 1 * bit_out_spacing_x, bit_out_row1_y), module, CognitiveShift::BIT_2_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 2 * bit_out_spacing_x, bit_out_row1_y), module, CognitiveShift::BIT_3_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 3 * bit_out_spacing_x, bit_out_row1_y), module, CognitiveShift::BIT_4_OUTPUT));
-        float bit_out_row2_y = 329.25;  // Adjusted slightly based on light Y coord? Keep original if preferred.
+        float bit_out_row2_y = 329.25;
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 0 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_5_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 1 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_6_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 2 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_7_OUTPUT));
@@ -458,7 +457,7 @@ struct CognitiveShiftWidget : ModuleWidget {
                                                  {"Clocks", "Gates", "Triggers"},
                                                  &module->outputType));
         menu->addChild(createIndexPtrSubmenuItem("Logic type",
-                                                 {"XOR", "NAND", "XNOR", "OR", "AND"},
+                                                 {"XOR", "NAND", "XNOR", "OR", "AND", "NOR"},
                                                  &module->logicType));
     }
 };

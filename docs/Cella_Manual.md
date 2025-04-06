@@ -244,3 +244,97 @@ You can also find and test a lot of bytebeats online [here](https://dollchan.net
 
 Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
+
+# **Cognitive Shift**
+
+## Overview
+
+Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, multiple overlapping R2R DAC outputs, a bipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
+
+## Core Concept: The Shift Register
+
+At its heart, Cognitive Shift is an 8-bit memory bank.
+
+1.  **Clocking:** When a trigger or gate signal arrives at the **CLOCK** input (specifically, on its rising edge), the module performs a "shift" operation.
+2.  **Input:** Before shifting, the module determines the value (1 or 0, High or Low) of the *next bit* to be introduced into the register. This is based on the **DATA**, **XOR**, and **LOGIC** inputs, as well as the **WRITE** and **ERASE** buttons.
+3.  **Shifting:** The determined input bit becomes the new state of Bit 1. The previous state of Bit 1 moves to Bit 2, Bit 2 moves to Bit 3, and so on, up to Bit 7 moving to Bit 8. The previous state of Bit 8 is discarded.
+4.  **Output:** The state of each of the 8 bits (0 or 1) is available at the individual **BIT 1-8** outputs and is used to generate the various DAC outputs.
+
+## Features
+
+*   8-bit digital shift register.
+*   Clock-driven operation via the **CLOCK** input.
+*   Flexible data input threshold control (**THRES** knob and **THRES CV** input/attenuverter).
+*   Multiple input sources for determining the next bit:
+    *   **DATA** input (primary voltage input).
+    *   **WRITE** button (manually force input bit to 1).
+    *   **ERASE** button (manually force input bit to 0).
+    *   **XOR** input (XORs with the DATA/Button value).
+    *   **LOGIC** input (combines with the `(DATA/Button XOR XOR)` result using a selectable logic function).
+*   Manual **CLEAR** button and CV input to set all bits to 0 instantly.
+*   8 individual bit outputs (**BIT 1** to **BIT 8**) with selectable behavior (Clock, Gate, Trigger) via the context menu.
+*   Multiple Digital-to-Analog Converter (DAC) outputs based on the R2R ladder principle:
+    *   Three 4-bit unipolar outputs (**1-4**, **3-6**, **5-8**) with individual attenuators, providing CV based on overlapping bit ranges (0V to approx. +10V before attenuation).
+    *   One 8-bit bipolar output (**1-8**) with an attenuverter, providing CV based on all 8 bits (approx. -5V to +5V before attenuation).
+*   Intelligent self-patching detection for stable feedback loops.
+*   Context menu options for Bit Output Mode and Logic Type selection.
+
+## Operational Details
+
+### Input Logic Determination
+
+On each **CLOCK** pulse, the value for the *next* Bit 1 is determined as follows:
+
+1.  **Manual Override:**
+    *   If **ERASE** button is pressed, the input bit is `0`.
+    *   Else if **WRITE** button is pressed, the input bit is `1`.
+2.  **DATA Input:** If neither button is pressed, the voltage at the **DATA** input is compared to the effective threshold ( **THRES** knob value + modulated **THRES CV**). If `DATA Voltage >= Threshold`, the input bit is `1`, otherwise `0`. Let's call this `dataBit`.
+3.  **XOR Input:** The voltage at the **XOR** input is compared to the threshold. If `XOR Voltage >= Threshold`, the XOR bit is `1`, otherwise `0`. Let's call this `xorBit`.
+4.  **Initial Combination:** The effective input bit after XOR is calculated: `intermediateBit = dataBit XOR xorBit`.
+5.  **LOGIC Input:** The voltage at the **LOGIC** input is compared to the threshold. If `LOGIC Voltage >= Threshold`, the logic bit is `1`, otherwise `0`. Let's call this `logicBit`.
+6.  **Final Combination:** The final bit to be shifted into Bit 1 is determined by combining the `intermediateBit` and `logicBit` using the **Logic Type** selected in the context menu:
+    *   `finalBit = applyLogicOperation(intermediateBit, logicBit, selectedLogicType)`
+
+### Bit Output Modes (Context Menu)
+
+You can change how the individual **BIT 1-8** outputs behave by right-clicking the module panel and selecting an option under "Bit output mode":
+
+*   **Clocks:** When a bit is High (1), its output jack will pass through the signal present at the **CLOCK** input. If the bit is Low (0), the output is 0V. Useful for creating clock divisions or rhythmic gate patterns based on the CLOCK input waveform.
+*   **Gates:** When a bit is High, its output jack emits a constant high voltage of +10V. When the bit is Low, the output is 0V. Note that consecutive positive bits generate one long gate rather than few individual ones.
+*   **Triggers:** When a bit is High *and* a **CLOCK** pulse arrives, its output jack emits a short trigger pulse.
+
+### Logic Types (Context Menu)
+
+You can change how the **LOGIC** input interacts with the DATA and XOR result by right-clicking the module panel and selecting an option under "Logic type":
+
+*   **XOR (Default):** `finalBit = intermediateBit XOR logicBit`
+*   **NAND:** `finalBit = NOT (intermediateBit AND logicBit)`
+*   **XNOR:** `finalBit = NOT (intermediateBit XOR logicBit)`
+*   **OR:** `finalBit = intermediateBit OR logicBit`
+*   **AND:** `finalBit = intermediateBit AND logicBit`
+*   **NOR:** `finalBit = NOT (intermediateBit AND logicBit)`
+
+## Self-Patching
+
+Cognitive Shift is designed to handle self-patching gracefully. This means you can connect one of its own outputs (e.g., **BIT 3**) to one of its inputs (e.g., **DATA**, **XOR**, **LOGIC**) without causing instability common in digital feedback loops.
+
+*   **Detection:** The module automatically detects when an input is connected to an output of another Cognitive Shift module (or itself).
+*   **Timing Compensation:** When reading an input that is self-patched, if the source output bit changed *on the exact same clock event* that is currently being processed, the module reads the *previous* state of that bit (the state *before* the current clock pulse). This prevents a one-sample feedback delay that can lead to unpredictable behavior. If the source bit changed on a different clock cycle, its current value is read as normal.
+
+**Why use self-patching?**
+Self-patching allows Cognitive Shift to generate complex, evolving, and often pseudo-random sequences based on its own internal state. For example:
+*   Patching **BIT 8** to **DATA** creates a simple feedback loop.
+*   Patching **BIT 5** to **XOR** and **BIT 8** to **DATA** creates patterns similar to a Linear Feedback Shift Register (LFSR), often used for pseudo-random sequence generation.
+*   Experimenting with different bit outputs patched into **DATA**, **XOR**, and **LOGIC** inputs, potentially combined with different **Logic Types**, can yield a vast range of complex rhythmic and melodic patterns.
+
+**Important disclaimer**
+Due to complex logic of handling self-patching, stacked cables on DATA, XOR and LOGIC won't be handled properly. If you need to merge few sources of data, program LOGIC input to `AND` mode.
+
+## Patch Ideas
+
+*   **Basic Sequencer:** Use **BIT 1-8** outputs (in Gate mode) to trigger drum sounds or envelopes for an 8-step sequence. Manually enter patterns with **WRITE**/**ERASE**, or feed a gate pattern into **DATA**.
+*   **CV Sequencer:** Use the **R2R** or **DAC** outputs to generate stepped CV sequences for pitch or modulation.
+*   **Clock Divider/Multiplier:** Use **BIT** outputs in Clock mode with specific patterns loaded.
+*   **Rhythmic Complexity:** Patch outputs back into **DATA**, **XOR**, or **LOGIC** inputs. Use external random sources or LFOs into these inputs as well. Experiment with different Logic Types.
+*   **Complex Modulation:** Use the **DAC** outputs, potentially with slow clock rates, to generate evolving CV signals.
+*   **Generative Melodies:** Use pseudo-random patterns generated via self-patching into the **DAC** output, quantize the result, and use it for pitch sequencing.
