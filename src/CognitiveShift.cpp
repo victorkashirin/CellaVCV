@@ -7,6 +7,7 @@
 // Define constants for clarity
 const int NUM_STEPS = 8;
 const int NUM_R2R_DAC = 4;
+const int NUM_COMPLEX_INPUTS = 4;  // only DATA, XOR and LOGIC
 const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
@@ -30,8 +31,8 @@ struct CognitiveShift : Module {
     };
     enum InputIds {
         DATA_INPUT,
-        XOR_INPUT,
         LOGIC_INPUT,
+        XOR_INPUT,
         CLOCK_INPUT,
         RESET_INPUT,
         THRESHOLD_CV_INPUT,
@@ -69,10 +70,9 @@ struct CognitiveShift : Module {
     int64_t currentClock = 0;
     int64_t previousClock = 0;
 
-    // only DATA, XOR and LOGIC
-    CognitiveShift* inMods[3];
-    int inputBits[3] = {-1};
-    bool wasInputConnected[3] = {false};
+    CognitiveShift* inMods[NUM_COMPLEX_INPUTS];
+    int inputBits[NUM_COMPLEX_INPUTS] = {-1};
+    bool wasInputConnected[NUM_COMPLEX_INPUTS] = {false};
 
     enum OutputType {
         CLOCK_OUTPUT,
@@ -151,9 +151,9 @@ struct CognitiveShift : Module {
     void onReset() override {
         std::fill(bits, bits + NUM_STEPS, false);
         std::fill(previousBits, previousBits + NUM_STEPS, false);
-        std::fill(inMods, inMods + 3, nullptr);
-        std::fill(inputBits, inputBits + 3, -1);
-        std::fill(wasInputConnected, wasInputConnected + 3, false);
+        std::fill(inMods, inMods + NUM_COMPLEX_INPUTS, nullptr);
+        std::fill(inputBits, inputBits + NUM_COMPLEX_INPUTS, -1);
+        std::fill(wasInputConnected, wasInputConnected + NUM_COMPLEX_INPUTS, false);
     }
 
     void onRandomize() override {
@@ -170,7 +170,7 @@ struct CognitiveShift : Module {
     }
 
     void checkInputConnections() {
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < NUM_COMPLEX_INPUTS; ++i) {
             if (inputs[i].isConnected()) {
                 if (!wasInputConnected[i]) {
                     inMods[i] = nullptr;
@@ -281,13 +281,13 @@ struct CognitiveShift : Module {
                 // 5. Determine final xorBit from the effective XOR input
                 bool xorBit = getDataInput(XOR_INPUT, threshold);
 
-                // 6. Calculate the bit to shift in
-                nextBit = nextBit ^ xorBit;
-
                 if (getInput(LOGIC_INPUT).isConnected()) {
                     bool logicBit = getDataInput(LOGIC_INPUT, threshold);
                     nextBit = applyLogicOperation(nextBit, logicBit, logicType);
                 }
+
+                // 6. Calculate the bit to shift in
+                nextBit = nextBit ^ xorBit;
             }
 
             for (int i = 0; i < NUM_STEPS; i++) {
@@ -443,8 +443,8 @@ struct CognitiveShiftWidget : ModuleWidget {
         // Row 3
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::LOGIC_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::LOGIC_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_INPUT));
 
         // Row 4: Buttons and Button Press Light
         addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));
