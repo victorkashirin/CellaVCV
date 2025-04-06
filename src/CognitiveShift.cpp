@@ -6,6 +6,7 @@
 
 // Define constants for clarity
 const int NUM_STEPS = 8;
+const int NUM_R2R_DAC = 4;
 const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
@@ -82,6 +83,9 @@ struct CognitiveShift : Module {
     int outputType = OutputType::CLOCK_OUTPUT;
     int logicType = 0;
     bool inputOverridesEverything = true;
+
+    bool showBitLights = true;
+    bool showR2RLights = true;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -377,6 +381,8 @@ struct CognitiveShift : Module {
         json_object_set_new(rootJ, "outputType", json_integer(outputType));
         json_object_set_new(rootJ, "logicType", json_integer(logicType));
         json_object_set_new(rootJ, "inputOverridesEverything", json_boolean(inputOverridesEverything));
+        json_object_set_new(rootJ, "showBitLights", json_boolean(showBitLights));
+        json_object_set_new(rootJ, "showR2RLights", json_boolean(showR2RLights));
         return rootJ;
     }
 
@@ -400,11 +406,22 @@ struct CognitiveShift : Module {
         json_t* inputOverridesEverythingJ = json_object_get(rootJ, "inputOverridesEverything");
         if (inputOverridesEverythingJ)
             inputOverridesEverything = json_boolean_value(inputOverridesEverythingJ);
+
+        json_t* showBitLightsJ = json_object_get(rootJ, "showBitLights");
+        if (showBitLightsJ)
+            showBitLights = json_boolean_value(showBitLightsJ);
+
+        json_t* showR2RLightsJ = json_object_get(rootJ, "showR2RLights");
+        if (showR2RLightsJ)
+            showR2RLights = json_boolean_value(showR2RLightsJ);
     }
 };
 
 // --- Module Widget (GUI) ---
 struct CognitiveShiftWidget : ModuleWidget {
+    std::array<rack::widget::Widget*, NUM_STEPS> stepLightWidgets;
+    std::array<rack::widget::Widget*, NUM_R2R_DAC> r2rDacLightWidgets;
+
     CognitiveShiftWidget(CognitiveShift* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/CognitiveShift.svg"), asset::plugin(pluginInstance, "res/CognitiveShift-dark.svg")));
@@ -441,18 +458,26 @@ struct CognitiveShiftWidget : ModuleWidget {
         float light_row1_y = 268.03f;
         for (int i = 0; i < 4; ++i) {
             float lightX = light_start_x + i * light_spacing_x;
-            addChild(createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i));
+            auto* light = createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i);
+            addChild(light);
+            stepLightWidgets[i] = light;
+
+            // addChild(createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i));
         }
         float light_row2_y = 318.58;
         for (int i = 0; i < 4; ++i) {
             float lightX = light_start_x + i * light_spacing_x;
-            addChild(createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row2_y), module, CognitiveShift::STEP_LIGHTS + 4 + i));
+            auto* light = createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row2_y), module, CognitiveShift::STEP_LIGHTS + 4 + i);
+            addChild(light);
+            stepLightWidgets[4 + i] = light;  // Store pointer
         }
 
         float light_row_r2r_y = 219.58;
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < NUM_R2R_DAC; i++) {
             float lightX = light_start_x + i * light_spacing_x;
-            addChild(createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_r2r_y), module, CognitiveShift::R2R_LIGHTS + 2 * i));
+            auto* light = createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_r2r_y), module, CognitiveShift::R2R_LIGHTS + 2 * i);
+            r2rDacLightWidgets[i] = light;  // Store for the 'green' part index
+            addChild(light);
         }
 
         // Row 7: R2R and DAC Outputs (Kept positions)
@@ -484,10 +509,36 @@ struct CognitiveShiftWidget : ModuleWidget {
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 3 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_8_OUTPUT));
     }
 
+    // Update widget visibility based on module state
+    void step() override {
+        ModuleWidget::step();  // Call base class step first
+
+        CognitiveShift* csModule = dynamic_cast<CognitiveShift*>(module);
+        if (csModule) {
+            // Get desired visibility states from the module
+            bool bitLightsVisible = csModule->showBitLights;
+            bool r2rLightsVisible = csModule->showR2RLights;
+
+            // Update visibility of Step (Bit) light widgets
+            for (int i = 0; i < NUM_STEPS; ++i) {
+                if (stepLightWidgets[i]) {
+                    stepLightWidgets[i]->visible = bitLightsVisible;
+                }
+            }
+
+            for (int i = 0; i < NUM_R2R_DAC; i++) {
+                if (r2rDacLightWidgets[i]) {
+                    r2rDacLightWidgets[i]->visible = r2rLightsVisible;
+                }
+            }
+        }
+    }
+
     void appendContextMenu(Menu* menu) override {
         CognitiveShift* module = dynamic_cast<CognitiveShift*>(this->module);
         assert(module);
         menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Settings"));
         menu->addChild(createIndexPtrSubmenuItem("Bit output mode",
                                                  {"Clocks", "Gates", "Triggers"},
                                                  &module->outputType));
@@ -497,6 +548,9 @@ struct CognitiveShiftWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Input overrides",
                                                  {"Data", "Everything"},
                                                  &module->inputOverridesEverything));
+        menu->addChild(createMenuLabel("UI"));
+        menu->addChild(createBoolPtrMenuItem("Show R2R lights", "", &module->showR2RLights));
+        menu->addChild(createBoolPtrMenuItem("Show bit lights", "", &module->showBitLights));
     }
 };
 
