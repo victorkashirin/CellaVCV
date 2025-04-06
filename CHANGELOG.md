@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.0.7 (2025-04-06)
+
+New modules:
+* Cognitive Shift - advanced digital shift register
+
 ### 2.0.6 (2025-01-30)
 
 New modules:
@@ -7,9 +12,6 @@ New modules:
 
 Updates:
 * Resonators - CV inputs for Decay, Color and Gain are made polyphonic.
-
-Other:
-* Move manual from pdf to github
 
 ### 2.0.5 (2024-11-24)
 

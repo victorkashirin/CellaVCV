@@ -84,7 +84,7 @@
     {
       "slug": "CognitiveShift",
       "name": "Cognitive Shift",
-      "description": "Overengineered 8-bit digital shift register with 4 DAC outputs and self-patching capabilities",
+      "description": "Overengineered 8-bit digital shift register with 4 DAC outputs and various self-patching capabilities",
       "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#cognitive-shift",
       "keywords": "lfsr feedback r2r dac",
       "tags": [

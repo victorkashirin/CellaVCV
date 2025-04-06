@@ -9,7 +9,6 @@ const int NUM_STEPS = 8;
 const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
-const float DATA_INPUT_THRESHOLD = 1.0f;  // Voltage threshold for data/xor input trigger
 const float CLOCK_HIGH_THRESHOLD = 1.0f;  // Voltage threshold for clock input considered 'high' for gate output
 const float DAC_BIPOLAR_VOLTAGE = 5.0f;   // Target nominal bipolar range (+/- 5V) before attenuverter
 
@@ -53,8 +52,7 @@ struct CognitiveShift : Module {
         NUM_OUTPUTS
     };
     enum LightIds {
-        STEP_LIGHTS,  // 0-7
-        // CLOCK_LIGHT, // REMOVED - Light ID 8 is now BUTTON_PRESS_LIGHT
+        STEP_LIGHTS,                                   // 0-7
         BUTTON_PRESS_LIGHT = STEP_LIGHTS + NUM_STEPS,  // 8
         NUM_LIGHTS                                     // 9
     };
@@ -81,6 +79,7 @@ struct CognitiveShift : Module {
 
     int outputType = OutputType::CLOCK_OUTPUT;
     int logicType = 0;
+    bool inputOverridesEverything = true;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -188,7 +187,7 @@ struct CognitiveShift : Module {
         }
     }
 
-    bool getDataInput(int inputId, float threshold = DATA_INPUT_THRESHOLD) {
+    bool getDataInput(int inputId, float threshold) {
         bool effectiveDataInputHigh = false;
 
         if (inputs[inputId].isConnected()) {
@@ -247,8 +246,6 @@ struct CognitiveShift : Module {
 
         // --- Shift Register Logic (Only execute on clock tick) ---
         if (clocked_this_frame) {
-            // --- Start: Input Reading with Self-Patch Detection (Rack v2 Engine ID Method) ---
-
             float thresholdCV = params[THRESHOLD_CV_ATTENUVERTER_PARAM].getValue() * inputs[THRESHOLD_CV_INPUT].getVoltage();
             float threshold = clamp(params[THRESHOLD_PARAM].getValue() + thresholdCV, 1.f, 9.f);
 
@@ -259,24 +256,29 @@ struct CognitiveShift : Module {
             // --- End: Input Reading with Self-Patch Detection ---
 
             // 4. Determine final dataBit based on priority: Write > Erase > Effective Data Input
-            bool dataBit = false;
+            bool nextBit = false;
             if (writeButtonPressed) {
-                dataBit = true;
+                nextBit = true;
             } else if (eraseButtonPressed) {
-                dataBit = false;
+                nextBit = false;
             } else {
-                dataBit = getDataInput(DATA_INPUT, threshold);
+                nextBit = getDataInput(DATA_INPUT, threshold);
             }
 
-            // 5. Determine final xorBit from the effective XOR input
-            bool xorBit = getDataInput(XOR_INPUT, threshold);
+            bool buttonPressed = writeButtonPressed || eraseButtonPressed;
+            bool doXorAndLogic = (!buttonPressed) || (buttonPressed && !inputOverridesEverything);
 
-            // 6. Calculate the bit to shift in
-            bool nextBit = dataBit ^ xorBit;
+            if (doXorAndLogic) {
+                // 5. Determine final xorBit from the effective XOR input
+                bool xorBit = getDataInput(XOR_INPUT, threshold);
 
-            if (getInput(LOGIC_INPUT).isConnected()) {
-                bool logicBit = getDataInput(LOGIC_INPUT, threshold);
-                nextBit = applyLogicOperation(nextBit, logicBit, logicType);
+                // 6. Calculate the bit to shift in
+                nextBit = nextBit ^ xorBit;
+
+                if (getInput(LOGIC_INPUT).isConnected()) {
+                    bool logicBit = getDataInput(LOGIC_INPUT, threshold);
+                    nextBit = applyLogicOperation(nextBit, logicBit, logicType);
+                }
             }
 
             for (int i = 0; i < NUM_STEPS; i++) {
@@ -356,6 +358,8 @@ struct CognitiveShift : Module {
         }
         json_object_set_new(rootJ, "values", valuesJ);
         json_object_set_new(rootJ, "outputType", json_integer(outputType));
+        json_object_set_new(rootJ, "logicType", json_integer(logicType));
+        json_object_set_new(rootJ, "inputOverridesEverything", json_boolean(inputOverridesEverything));
         return rootJ;
     }
 
@@ -371,6 +375,14 @@ struct CognitiveShift : Module {
         json_t* outputTypeJ = json_object_get(rootJ, "outputType");
         if (outputTypeJ)
             outputType = json_integer_value(outputTypeJ);
+
+        json_t* logicTypeJ = json_object_get(rootJ, "logicType");
+        if (logicTypeJ)
+            logicType = json_integer_value(logicTypeJ);
+
+        json_t* inputOverridesEverythingJ = json_object_get(rootJ, "inputOverridesEverything");
+        if (inputOverridesEverythingJ)
+            inputOverridesEverything = json_boolean_value(inputOverridesEverythingJ);
     }
 };
 
@@ -388,25 +400,25 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col3 = 112.5f;
         float col4 = 157.5f;
 
-        // Row 1 & 2: Original Clock Rate controls and Gate Length REMOVED
+        // Row 1 & 2
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::RESET_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
         addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
 
-        // Row 3: Inputs and CLOCK_OUTPUT REMOVED
+        // Row 3
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::XOR_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::LOGIC_INPUT));
 
-        // Row 4: Buttons and Button Press Light (Kept positions)
+        // Row 4: Buttons and Button Press Light
         addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
-        addChild(createLightCentered<LargeFresnelLight<RedLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
+        addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
 
-        // Row 5 & 6: Step Lights (Kept positions)
+        // Row 5 & 6: Step Lights
         float light_start_x = 34.84f;
         float light_spacing_x = 45.f;
         float light_row1_y = 268.03f;
@@ -459,8 +471,10 @@ struct CognitiveShiftWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Logic type",
                                                  {"XOR", "NAND", "XNOR", "OR", "AND", "NOR"},
                                                  &module->logicType));
+        menu->addChild(createIndexPtrSubmenuItem("Input overrides",
+                                                 {"Data", "Everything"},
+                                                 &module->inputOverridesEverything));
     }
 };
 
-// --- Plugin Registration --- (Ensure your plugin/model slugs are correct)
-Model* modelCognitiveShift = createModel<CognitiveShift, CognitiveShiftWidget>("CognitiveShift");  // Use your actual plugin slug and a unique model slug
+Model* modelCognitiveShift = createModel<CognitiveShift, CognitiveShiftWidget>("CognitiveShift");
