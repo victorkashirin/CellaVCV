@@ -422,22 +422,41 @@ struct CognitiveShift : Module {
 
 struct LogicThemedPJ301MPort : ThemedPJ301MPort {
     bool isHovered = false;
-    Tooltip* tooltip = nullptr;
+    Tooltip* customTooltip = nullptr;
     Tooltip* originalTooltip = nullptr;
+
+    ~LogicThemedPJ301MPort() {
+        cleanupTooltips();
+    }
+
+    void cleanupTooltips() {
+        if (customTooltip) {
+            customTooltip->requestDelete();
+            customTooltip = nullptr;
+        }
+        originalTooltip = nullptr;
+    }
 
     void onEnter(const EnterEvent& e) override {
         ThemedPJ301MPort::onEnter(e);
         this->isHovered = true;
     }
 
+    void onDragDrop(const DragDropEvent& e) override {
+        ThemedPJ301MPort::onDragDrop(e);
+        this->isHovered = true;
+    }
+
     void onLeave(const LeaveEvent& e) override {
         ThemedPJ301MPort::onLeave(e);
         this->isHovered = false;
-        if (this->tooltip) {
-            this->tooltip->requestDelete();
-            this->tooltip = nullptr;
-        }
-        this->originalTooltip = nullptr;
+        cleanupTooltips();
+    }
+
+    void onDragStart(const DragStartEvent& e) override {
+        ThemedPJ301MPort::onDragStart(e);
+        this->isHovered = false;
+        cleanupTooltips();
     }
 
     std::string getLogicModeName(CognitiveShift* module) {
@@ -450,29 +469,36 @@ struct LogicThemedPJ301MPort : ThemedPJ301MPort {
 
     void step() override {
         ThemedPJ301MPort::step();
-        // Only modify tooltip if we're currently hovered
-        if (this->isHovered && APP->scene) {
-            CognitiveShift* csModule = dynamic_cast<CognitiveShift*>(module);
-            if (csModule) {
-                // Find the existing tooltip
-                for (Widget* w : APP->scene->children) {
-                    if (Tooltip* tt = dynamic_cast<Tooltip*>(w)) {
-                        if (tt == this->tooltip) {
-                            continue;
-                        }
-                        if (this->tooltip == nullptr) {
-                            this->tooltip = new Tooltip;
-                            this->tooltip->setPosition(tt->getPosition());
-                            APP->scene->addChild(this->tooltip);
-                        }
-                        std::string modeText = getLogicModeName(csModule);
-                        this->tooltip->text = rack::string::f("Current logic mode: %s\n%s", modeText.c_str(), tt->text.c_str());
-                        tt->hide();
-                        break;
-                    }
+        // Only modify customTooltip if we're currently hovered
+
+        if (!isHovered || !APP->scene) return;
+
+        CognitiveShift* csModule = dynamic_cast<CognitiveShift*>(module);
+        if (!csModule) return;
+
+        if (!originalTooltip) {
+            for (Widget* w : APP->scene->children) {
+                if (Tooltip* tt = dynamic_cast<Tooltip*>(w)) {
+                    originalTooltip = tt;
+                    break;
                 }
             }
+            if (!originalTooltip) return;
         }
+
+        if (!customTooltip) {
+            customTooltip = new Tooltip;
+            customTooltip->setPosition(originalTooltip->getPosition());
+            APP->scene->addChild(customTooltip);
+        }
+
+        std::string modeText = getLogicModeName(csModule);
+        customTooltip->text = rack::string::f("Current logic mode: %s\n%s",
+                                              modeText.c_str(),
+                                              originalTooltip->text.c_str());
+
+        // Hide original tooltip
+        originalTooltip->hide();
     }
 };
 
