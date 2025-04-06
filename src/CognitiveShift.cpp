@@ -9,8 +9,8 @@ const int NUM_STEPS = 8;
 const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
-const float CLOCK_HIGH_THRESHOLD = 1.0f;  // Voltage threshold for clock input considered 'high' for gate output
-const float DAC_BIPOLAR_VOLTAGE = 5.0f;   // Target nominal bipolar range (+/- 5V) before attenuverter
+const float CLOCK_HIGH_THRESHOLD = 1.0f;
+const float DAC_BIPOLAR_VOLTAGE = 5.0f;
 
 // --- Module Logic ---
 struct CognitiveShift : Module {
@@ -28,10 +28,10 @@ struct CognitiveShift : Module {
         NUM_PARAMS
     };
     enum InputIds {
-        CLOCK_INPUT,
         DATA_INPUT,
         XOR_INPUT,
         LOGIC_INPUT,
+        CLOCK_INPUT,
         RESET_INPUT,
         THRESHOLD_CV_INPUT,
         NUM_INPUTS
@@ -54,7 +54,8 @@ struct CognitiveShift : Module {
     enum LightIds {
         STEP_LIGHTS,                                   // 0-7
         BUTTON_PRESS_LIGHT = STEP_LIGHTS + NUM_STEPS,  // 8
-        NUM_LIGHTS                                     // 9
+        R2R_LIGHTS,
+        NUM_LIGHTS = R2R_LIGHTS + 8  // 9
     };
 
     // Internal state
@@ -67,9 +68,10 @@ struct CognitiveShift : Module {
     int64_t currentClock = 0;
     int64_t previousClock = 0;
 
-    CognitiveShift* inMods[NUM_INPUTS];
-    int inputBits[NUM_INPUTS] = {-1};
-    bool wasInputConnected[NUM_INPUTS] = {false};
+    // only DATA, XOR and LOGIC
+    CognitiveShift* inMods[3];
+    int inputBits[3] = {-1};
+    bool wasInputConnected[3] = {false};
 
     enum OutputType {
         CLOCK_OUTPUT,
@@ -113,7 +115,7 @@ struct CognitiveShift : Module {
         configOutput(BIT_8_OUTPUT, "Bit 8");
         configOutput(DAC_OUTPUT, "8-Bit Bipolar DAC");
 
-        onReset();  // Initialize state properly
+        onReset();
     }
 
     // R2R Helper (unchanged)
@@ -144,7 +146,10 @@ struct CognitiveShift : Module {
 
     void onReset() override {
         std::fill(bits, bits + NUM_STEPS, false);
-        // Clear removed state variables
+        std::fill(previousBits, previousBits + NUM_STEPS, false);
+        std::fill(inMods, inMods + 3, nullptr);
+        std::fill(inputBits, inputBits + 3, -1);
+        std::fill(wasInputConnected, wasInputConnected + 3, false);
     }
 
     void onRandomize() override {
@@ -161,7 +166,7 @@ struct CognitiveShift : Module {
     }
 
     void checkInputConnections() {
-        for (int i = 0; i < NUM_INPUTS; ++i) {
+        for (int i = 0; i < 3; ++i) {
             if (inputs[i].isConnected()) {
                 if (!wasInputConnected[i]) {
                     inMods[i] = nullptr;
@@ -335,12 +340,24 @@ struct CognitiveShift : Module {
         outputs[R2R_2_OUTPUT].setVoltage(r2r2_final);
         outputs[R2R_3_OUTPUT].setVoltage(r2r3_final);
 
+        lights[R2R_LIGHTS + 0].setBrightness(fmaxf(0.0f, r2r1_final / 10.f));
+        lights[R2R_LIGHTS + 1].setBrightness(fmaxf(0.0f, -r2r1_final / 10.f));
+
+        lights[R2R_LIGHTS + 2].setBrightness(fmaxf(0.0f, r2r2_final / 10.f));
+        lights[R2R_LIGHTS + 3].setBrightness(fmaxf(0.0f, -r2r2_final / 10.f));
+
+        lights[R2R_LIGHTS + 4].setBrightness(fmaxf(0.0f, r2r3_final / 10.f));
+        lights[R2R_LIGHTS + 5].setBrightness(fmaxf(0.0f, -r2r3_final / 10.f));
+
         // --- Calculate and Output 8-Bit DAC --- (Unchanged)
         float dacRawValue = calculate8BitDACRaw();
         float dacBipolarValue = (dacRawValue / 255.0f) * (2.0f * DAC_BIPOLAR_VOLTAGE) - DAC_BIPOLAR_VOLTAGE;
         float dacAttn = params[DAC_ATTENUVERTER_PARAM].getValue();
         float finalDacOutput = dacBipolarValue * dacAttn;
         outputs[DAC_OUTPUT].setVoltage(finalDacOutput);
+
+        lights[R2R_LIGHTS + 6].setBrightness(fmaxf(0.0f, finalDacOutput / 5.f));
+        lights[R2R_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / 5.f));
 
         // --- Update Button Press Light --- (Unchanged)
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
@@ -354,7 +371,7 @@ struct CognitiveShift : Module {
         json_t* rootJ = json_object();
         json_t* valuesJ = json_array();
         for (int i = 0; i < NUM_STEPS; i++) {
-            json_array_insert_new(valuesJ, i, json_boolean(bits[i]));  // Use json_boolean for clarity
+            json_array_insert_new(valuesJ, i, json_boolean(bits[i]));
         }
         json_object_set_new(rootJ, "values", valuesJ);
         json_object_set_new(rootJ, "outputType", json_integer(outputType));
@@ -369,7 +386,7 @@ struct CognitiveShift : Module {
             for (int i = 0; i < NUM_STEPS; i++) {
                 json_t* valueJ = json_array_get(valuesJ, i);
                 if (valueJ)
-                    bits[i] = json_boolean_value(valueJ);  // Use json_boolean_value
+                    bits[i] = json_boolean_value(valueJ);
             }
         }
         json_t* outputTypeJ = json_object_get(rootJ, "outputType");
@@ -430,6 +447,12 @@ struct CognitiveShiftWidget : ModuleWidget {
         for (int i = 0; i < 4; ++i) {
             float lightX = light_start_x + i * light_spacing_x;
             addChild(createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row2_y), module, CognitiveShift::STEP_LIGHTS + 4 + i));
+        }
+
+        float light_row_r2r_y = 219.58;
+        for (int i = 0; i < 4; ++i) {
+            float lightX = light_start_x + i * light_spacing_x;
+            addChild(createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_r2r_y), module, CognitiveShift::R2R_LIGHTS + 2 * i));
         }
 
         // Row 7: R2R and DAC Outputs (Kept positions)
