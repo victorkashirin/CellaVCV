@@ -14,6 +14,9 @@ const float GATE_VOLTAGE = 10.0f;
 const float CLOCK_HIGH_THRESHOLD = 1.0f;
 const float DAC_BIPOLAR_VOLTAGE = 5.0f;
 
+const std::vector<std::string> logicOperatorNames = {
+    "XOR", "NAND", "XNOR", "OR", "AND", "NOR"};
+
 // --- Module Logic ---
 struct CognitiveShift : Module {
     enum ParamIds {
@@ -417,7 +420,62 @@ struct CognitiveShift : Module {
     }
 };
 
-// --- Module Widget (GUI) ---
+struct LogicThemedPJ301MPort : ThemedPJ301MPort {
+    bool isHovered = false;
+    Tooltip* tooltip = nullptr;
+    Tooltip* originalTooltip = nullptr;
+
+    void onEnter(const EnterEvent& e) override {
+        ThemedPJ301MPort::onEnter(e);
+        this->isHovered = true;
+    }
+
+    void onLeave(const LeaveEvent& e) override {
+        ThemedPJ301MPort::onLeave(e);
+        this->isHovered = false;
+        if (this->tooltip) {
+            this->tooltip->requestDelete();
+            this->tooltip = nullptr;
+        }
+        this->originalTooltip = nullptr;
+    }
+
+    std::string getLogicModeName(CognitiveShift* module) {
+        if (!module) return "Unknown";
+        int currentLogicType = module->logicType;
+        return (currentLogicType >= 0 && (size_t)currentLogicType < logicOperatorNames.size())
+                   ? logicOperatorNames[currentLogicType]
+                   : "Unknown";
+    }
+
+    void step() override {
+        ThemedPJ301MPort::step();
+        // Only modify tooltip if we're currently hovered
+        if (this->isHovered && APP->scene) {
+            CognitiveShift* csModule = dynamic_cast<CognitiveShift*>(module);
+            if (csModule) {
+                // Find the existing tooltip
+                for (Widget* w : APP->scene->children) {
+                    if (Tooltip* tt = dynamic_cast<Tooltip*>(w)) {
+                        if (tt == this->tooltip) {
+                            continue;
+                        }
+                        if (this->tooltip == nullptr) {
+                            this->tooltip = new Tooltip;
+                            this->tooltip->setPosition(tt->getPosition());
+                            APP->scene->addChild(this->tooltip);
+                        }
+                        std::string modeText = getLogicModeName(csModule);
+                        this->tooltip->text = rack::string::f("Current logic mode: %s\n%s", modeText.c_str(), tt->text.c_str());
+                        tt->hide();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+};
+
 struct CognitiveShiftWidget : ModuleWidget {
     std::array<rack::widget::Widget*, NUM_STEPS> stepLightWidgets;
     std::array<rack::widget::Widget*, NUM_R2R_DAC> r2rDacLightWidgets;
@@ -443,7 +501,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         // Row 3
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::LOGIC_INPUT));
+        addInput(createInputCentered<LogicThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::LOGIC_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_INPUT));
 
         // Row 4: Buttons and Button Press Light
@@ -543,7 +601,7 @@ struct CognitiveShiftWidget : ModuleWidget {
                                                  {"Clocks", "Gates", "Triggers"},
                                                  &module->outputType));
         menu->addChild(createIndexPtrSubmenuItem("Logic type",
-                                                 {"XOR", "NAND", "XNOR", "OR", "AND", "NOR"},
+                                                 logicOperatorNames,
                                                  &module->logicType));
         menu->addChild(createIndexPtrSubmenuItem("Input overrides",
                                                  {"Data", "Everything"},
