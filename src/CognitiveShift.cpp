@@ -131,7 +131,7 @@ struct CognitiveShift : Module {
         onReset();
     }
 
-    // R2R Helper (unchanged)
+    // R2R Helper
     float calculateR2R(int startIndex, int numBits = 4) {
         float r2rValue = 0.0f;
         float weight = 1.0f;
@@ -144,7 +144,7 @@ struct CognitiveShift : Module {
         return r2rValue * R2R_SCALE;
     }
 
-    // 8-Bit DAC Calculation Helper (unchanged)
+    // 8-Bit DAC Calculation Helper
     float calculate8BitDACRaw() {
         float dacValue = 0.0f;
         float weight = 1.0f;  // Start with LSB weight
@@ -312,7 +312,6 @@ struct CognitiveShift : Module {
         }  // End of clocked_this_frame
 
         // --- Update Individual Bit Outputs & Lights ---
-        // (This part remains unchanged)
         float clockInputVoltage = inputs[CLOCK_INPUT].isConnected() ? inputs[CLOCK_INPUT].getVoltage() : 0.f;
         bool isClockHigh = clockInputVoltage >= CLOCK_HIGH_THRESHOLD;
 
@@ -339,7 +338,7 @@ struct CognitiveShift : Module {
             lights[STEP_LIGHTS + i].setBrightness(bits[i] ? 1.0f : 0.0f);
         }
 
-        // --- Calculate and Output R2R --- (Unchanged)
+        // --- Calculate and Output R2R ---
         float r2r1_raw = calculateR2R(0, 4);
         float r2r2_raw = calculateR2R(2, 4);
         float r2r3_raw = calculateR2R(4, 4);
@@ -378,7 +377,7 @@ struct CognitiveShift : Module {
             .setBrightness(fmaxf(0.0f, finalDacOutput / lightScale));
         lights[R2R_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / lightScale));
 
-        // --- Update Button Press Light --- (Unchanged)
+        // --- Update Button Press Light ---
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
         bool erasePressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
         bool clearPressed = params[CLEAR_BUTTON_PARAM].getValue() > 0.f;
