@@ -12,7 +12,6 @@ const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
 const float CLOCK_HIGH_THRESHOLD = 1.0f;
-const float DAC_BIPOLAR_VOLTAGE = 5.0f;
 
 const std::vector<std::string> logicOperatorNames = {
     "XOR", "NAND", "XNOR", "OR", "AND", "NOR"};
@@ -83,9 +82,16 @@ struct CognitiveShift : Module {
         TRIGGER_OUTPUT
     };
 
+    enum AllBitDACOutputType {
+        BIPOLAR,
+        UNIPOLAR
+    };
+
+    // Context menu options
     int outputType = OutputType::CLOCK_OUTPUT;
     int logicType = 0;
     bool inputOverridesEverything = true;
+    int dacOutputType = AllBitDACOutputType::BIPOLAR;
 
     bool showBitLights = true;
     bool showR2RLights = true;
@@ -353,15 +359,24 @@ struct CognitiveShift : Module {
         lights[R2R_LIGHTS + 4].setBrightness(fmaxf(0.0f, r2r3_final / 10.f));
         lights[R2R_LIGHTS + 5].setBrightness(fmaxf(0.0f, -r2r3_final / 10.f));
 
-        // --- Calculate and Output 8-Bit DAC --- (Unchanged)
+        // --- Calculate and Output 8-Bit DAC ---
         float dacRawValue = calculate8BitDACRaw();
-        float dacBipolarValue = (dacRawValue / 255.0f) * (2.0f * DAC_BIPOLAR_VOLTAGE) - DAC_BIPOLAR_VOLTAGE;
+        float dacBipolarValue = dacRawValue / 255.0f;
+        if (dacOutputType == AllBitDACOutputType::BIPOLAR) {
+            dacBipolarValue = (dacBipolarValue * 10.0f) - 5.f;  // Convert to bipolar range
+        } else {
+            dacBipolarValue = (dacBipolarValue * 10.f);  // Convert to unipolar range
+        }
+
         float dacAttn = params[DAC_ATTENUVERTER_PARAM].getValue();
         float finalDacOutput = dacBipolarValue * dacAttn;
         outputs[DAC_OUTPUT].setVoltage(finalDacOutput);
 
-        lights[R2R_LIGHTS + 6].setBrightness(fmaxf(0.0f, finalDacOutput / 5.f));
-        lights[R2R_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / 5.f));
+        float lightScale = (dacOutputType == AllBitDACOutputType::BIPOLAR) ? 5.f : 10.f;
+
+        lights[R2R_LIGHTS + 6]
+            .setBrightness(fmaxf(0.0f, finalDacOutput / lightScale));
+        lights[R2R_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / lightScale));
 
         // --- Update Button Press Light --- (Unchanged)
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
@@ -381,6 +396,7 @@ struct CognitiveShift : Module {
         json_object_set_new(rootJ, "outputType", json_integer(outputType));
         json_object_set_new(rootJ, "logicType", json_integer(logicType));
         json_object_set_new(rootJ, "inputOverridesEverything", json_boolean(inputOverridesEverything));
+        json_object_set_new(rootJ, "allBitDACOutputType", json_integer(dacOutputType));
         json_object_set_new(rootJ, "showBitLights", json_boolean(showBitLights));
         json_object_set_new(rootJ, "showR2RLights", json_boolean(showR2RLights));
         return rootJ;
@@ -406,6 +422,12 @@ struct CognitiveShift : Module {
         json_t* inputOverridesEverythingJ = json_object_get(rootJ, "inputOverridesEverything");
         if (inputOverridesEverythingJ)
             inputOverridesEverything = json_boolean_value(inputOverridesEverythingJ);
+
+        json_t* allBitDACOutputTypeJ = json_object_get(rootJ, "allBitDACOutputType");
+        if (allBitDACOutputTypeJ)
+            dacOutputType = json_integer_value(allBitDACOutputTypeJ);
+
+        // UI
 
         json_t* showBitLightsJ = json_object_get(rootJ, "showBitLights");
         if (showBitLightsJ)
@@ -631,6 +653,9 @@ struct CognitiveShiftWidget : ModuleWidget {
         menu->addChild(createIndexPtrSubmenuItem("Input overrides",
                                                  {"Data", "Everything"},
                                                  &module->inputOverridesEverything));
+        menu->addChild(createIndexPtrSubmenuItem("8 Bit DAC output",
+                                                 {"Bipolar", "Unipolar"},
+                                                 &module->dacOutputType));
         menu->addChild(createMenuLabel("UI"));
         menu->addChild(createBoolPtrMenuItem("Show R2R lights", "", &module->showR2RLights));
         menu->addChild(createBoolPtrMenuItem("Show bit lights", "", &module->showBitLights));

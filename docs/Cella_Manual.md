@@ -249,7 +249,7 @@ Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
 <img src="images/CognitiveShift.png" alt="Cella - Cognitive Shift" style="height: 380px;">
 
-Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, multiple overlapping R2R DAC outputs, a bipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
+Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, multiple overlapping unipolar R2R DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
 
 Main differentiator from other implementations is the ability to output triggers or gates per each step without merging consecutive gates together, and yet allow for self-patching. This was inspised by shift register behaviour of "Double Knot" instrument by Lorre Mill.
 
@@ -277,7 +277,7 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
 *   8 individual bit outputs (**BIT 1** to **BIT 8**) with selectable behavior (Clock, Gate, Trigger) via the context menu.
 *   Multiple Digital-to-Analog Converter (DAC) outputs based on the R2R ladder principle:
     *   Three 4-bit unipolar outputs (**1-4**, **3-6**, **5-8**) with individual attenuators, providing CV based on overlapping bit ranges (0V to +10V before attenuation).
-    *   One 8-bit bipolar output (**1-8**) with an attenuverter, providing CV based on all 8 bits (-5V to +5V before attenuation).
+    *   One 8-bit configurable bipolar/unipolar output (**1-8**) with an attenuverter, providing CV based on all 8 bits (-5V to +5V or 0V to +10V before attenuation).
 *   Intelligent self-patching detection for stable feedback loops.
 *   Context menu options for Bit Output Mode, Logic Type selection, and Input Override behavior.
 
