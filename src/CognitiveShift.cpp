@@ -521,8 +521,8 @@ struct LogicThemedPJ301MPort : ThemedPJ301MPort {
 };
 
 struct CognitiveShiftWidget : ModuleWidget {
-    std::array<rack::widget::Widget*, NUM_STEPS> stepLightWidgets;
-    std::array<rack::widget::Widget*, NUM_R2R_DAC> r2rDacLightWidgets;
+    rack::widget::Widget* stepLightWidgets[NUM_STEPS];
+    rack::widget::Widget* r2rDacLightWidgets[NUM_R2R_DAC];
 
     CognitiveShiftWidget(CognitiveShift* module) {
         setModule(module);
