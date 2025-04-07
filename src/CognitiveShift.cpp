@@ -362,9 +362,9 @@ struct CognitiveShift : Module {
         float dacRawValue = calculate8BitDACRaw();
         float dacBipolarValue = dacRawValue / 255.0f;
         if (dacOutputType == AllBitDACOutputType::BIPOLAR) {
-            dacBipolarValue = (dacBipolarValue * 10.0f) - 5.f;  // Convert to bipolar range
+            dacBipolarValue = dacBipolarValue * 10.0f - 5.f;  // Convert to bipolar range
         } else {
-            dacBipolarValue = (dacBipolarValue * 10.f);  // Convert to unipolar range
+            dacBipolarValue = dacBipolarValue * 10.f;  // Convert to unipolar range
         }
 
         float dacAttn = params[DAC_ATTENUVERTER_PARAM].getValue();
@@ -536,25 +536,25 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col3 = 112.5f;
         float col4 = 157.5f;
 
-        // Row 1 & 2
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::CLEAR_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
-        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
-
-        // Row 3
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
-        addInput(createInputCentered<LogicThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::LOGIC_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_INPUT));
-
-        // Row 4: Buttons and Button Press Light
+        // Buttons and Button Press Light
         addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::CLEAR_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
         addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
 
-        // Row 5 & 6: Step Lights
+        // INPUTS
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 153.5f), module, CognitiveShift::CLOCK_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 153.5f), module, CognitiveShift::DATA_INPUT));
+        addInput(createInputCentered<LogicThemedPJ301MPort>(Vec(col3, 153.5f), module, CognitiveShift::LOGIC_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_INPUT));
+
+        // Params
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::CLEAR_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
+        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
+
+        // Step and DAC Lights
         float light_start_x = 34.84f;
         float light_spacing_x = 45.f;
         float light_row1_y = 268.03f;
@@ -563,40 +563,38 @@ struct CognitiveShiftWidget : ModuleWidget {
             auto* light = createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i);
             addChild(light);
             stepLightWidgets[i] = light;
-
-            // addChild(createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i));
         }
         float light_row2_y = 318.58;
         for (int i = 0; i < 4; ++i) {
             float lightX = light_start_x + i * light_spacing_x;
             auto* light = createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row2_y), module, CognitiveShift::STEP_LIGHTS + 4 + i);
             addChild(light);
-            stepLightWidgets[4 + i] = light;  // Store pointer
+            stepLightWidgets[4 + i] = light;
         }
 
         float light_row_r2r_y = 219.58;
         for (int i = 0; i < NUM_R2R_DAC; i++) {
             float lightX = light_start_x + i * light_spacing_x;
             auto* light = createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_r2r_y), module, CognitiveShift::R2R_LIGHTS + 2 * i);
-            r2rDacLightWidgets[i] = light;  // Store for the 'green' part index
+            r2rDacLightWidgets[i] = light;
             addChild(light);
         }
 
-        // Row 7: R2R and DAC Outputs (Kept positions)
+        // R2R and DAC Outputs
         float r2r_out_y = 231.29;
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col1, r2r_out_y), module, CognitiveShift::R2R_1_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, r2r_out_y), module, CognitiveShift::R2R_2_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col3, r2r_out_y), module, CognitiveShift::R2R_3_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, r2r_out_y), module, CognitiveShift::DAC_OUTPUT));
 
-        // Row 8: R2R and DAC Attenuators (Kept positions)
+        // R2R and DAC Attenuators
         float r2r_attn_y = 203.81;
         addParam(createParamCentered<Trimpot>(Vec(col1, r2r_attn_y), module, CognitiveShift::R2R_1_ATTN_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(col2, r2r_attn_y), module, CognitiveShift::R2R_2_ATTN_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(col3, r2r_attn_y), module, CognitiveShift::R2R_3_ATTN_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(col4, r2r_attn_y), module, CognitiveShift::DAC_ATTENUVERTER_PARAM));
 
-        // Row 9 & 10: Individual Bit Outputs (Kept positions)
+        // Individual Bit Outputs
         float bit_out_start_x = 22.5f;
         float bit_out_spacing_x = 45.f;
         float bit_out_row1_y = 280;
