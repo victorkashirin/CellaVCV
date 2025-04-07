@@ -7,7 +7,7 @@
 // Define constants for clarity
 const int NUM_STEPS = 8;
 const int NUM_R2R_DAC = 4;
-const int NUM_COMPLEX_INPUTS = 4;  // only DATA, XOR and LOGIC
+const int NUM_COMPLEX_INPUTS = 3;  // only DATA, XOR and LOGIC
 const float R2R_MAX_VOLTAGE = 10.0f;
 const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
@@ -22,7 +22,7 @@ struct CognitiveShift : Module {
     enum ParamIds {
         WRITE_BUTTON_PARAM,
         ERASE_BUTTON_PARAM,
-        RESET_BUTTON_PARAM,
+        CLEAR_BUTTON_PARAM,
         THRESHOLD_PARAM,
         THRESHOLD_CV_ATTENUVERTER_PARAM,
         R2R_1_ATTN_PARAM,
@@ -37,7 +37,7 @@ struct CognitiveShift : Module {
         LOGIC_INPUT,
         XOR_INPUT,
         CLOCK_INPUT,
-        RESET_INPUT,
+        CLEAR_INPUT,
         THRESHOLD_CV_INPUT,
         NUM_INPUTS
     };
@@ -65,16 +65,16 @@ struct CognitiveShift : Module {
 
     // Internal state
     dsp::SchmittTrigger clockInputTrigger;
-    dsp::SchmittTrigger resetTrigger;
-    dsp::SchmittTrigger resetInputTrigger;
+    dsp::SchmittTrigger clearTrigger;
+    dsp::SchmittTrigger clearInputTrigger;
     dsp::PulseGenerator pulseGen;
     bool bits[NUM_STEPS] = {};
     bool previousBits[NUM_STEPS] = {};
     int64_t currentClock = 0;
     int64_t previousClock = 0;
 
-    CognitiveShift* inMods[NUM_COMPLEX_INPUTS];
-    int inputBits[NUM_COMPLEX_INPUTS] = {-1};
+    CognitiveShift* connectedSourceModules[NUM_COMPLEX_INPUTS];
+    int connectedSourceOutputIds[NUM_COMPLEX_INPUTS] = {-1};
     bool wasInputConnected[NUM_COMPLEX_INPUTS] = {false};
 
     enum OutputType {
@@ -94,7 +94,7 @@ struct CognitiveShift : Module {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configButton(WRITE_BUTTON_PARAM, "Data + (Write)");
         configButton(ERASE_BUTTON_PARAM, "Data - (Erase)");
-        configButton(RESET_BUTTON_PARAM, "Reset Bits");
+        configButton(CLEAR_BUTTON_PARAM, "Clear register");
         configParam(THRESHOLD_PARAM, 1.f, 9.f, 1.f, "Data Input Threshold");
         configParam(THRESHOLD_CV_ATTENUVERTER_PARAM, -1.f, 1.f, 0.f, "Threshold CV Attenuverter");
         configParam(R2R_1_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 1 (Bits 1-4) Level");
@@ -106,7 +106,7 @@ struct CognitiveShift : Module {
         configInput(DATA_INPUT, "Data");
         configInput(XOR_INPUT, "XOR");
         configInput(LOGIC_INPUT, "Logic");
-        configInput(RESET_INPUT, "Reset");
+        configInput(CLEAR_INPUT, "Clear register");
         configInput(THRESHOLD_CV_INPUT, "Threshold CV");
 
         configOutput(R2R_1_OUTPUT, "R2R 1 (Bits 1-4)");
@@ -154,8 +154,8 @@ struct CognitiveShift : Module {
     void onReset() override {
         std::fill(bits, bits + NUM_STEPS, false);
         std::fill(previousBits, previousBits + NUM_STEPS, false);
-        std::fill(inMods, inMods + NUM_COMPLEX_INPUTS, nullptr);
-        std::fill(inputBits, inputBits + NUM_COMPLEX_INPUTS, -1);
+        std::fill(connectedSourceModules, connectedSourceModules + NUM_COMPLEX_INPUTS, nullptr);
+        std::fill(connectedSourceOutputIds, connectedSourceOutputIds + NUM_COMPLEX_INPUTS, -1);
         std::fill(wasInputConnected, wasInputConnected + NUM_COMPLEX_INPUTS, false);
     }
 
@@ -176,7 +176,7 @@ struct CognitiveShift : Module {
         for (int i = 0; i < NUM_COMPLEX_INPUTS; ++i) {
             if (inputs[i].isConnected()) {
                 if (!wasInputConnected[i]) {
-                    inMods[i] = nullptr;
+                    connectedSourceModules[i] = nullptr;
                     wasInputConnected[i] = true;
                     for (uint64_t cableId : APP->engine->getCableIds()) {
                         Cable* cable = APP->engine->getCable(cableId);
@@ -185,15 +185,15 @@ struct CognitiveShift : Module {
                             Module* outputModule = cable->outputModule;
                             if (outputModule && outputModule->getModel() == this->getModel()) {
                                 CognitiveShift* sourceCognitiveShift = dynamic_cast<CognitiveShift*>(outputModule);
-                                inMods[i] = sourceCognitiveShift;
-                                inputBits[i] = cable->outputId;
+                                connectedSourceModules[i] = sourceCognitiveShift;
+                                connectedSourceOutputIds[i] = cable->outputId;
                             }
                         }
                     }
                 }
             } else if (wasInputConnected[i]) {
-                inMods[i] = nullptr;
-                inputBits[i] = -1;
+                connectedSourceModules[i] = nullptr;
+                connectedSourceOutputIds[i] = -1;
                 wasInputConnected[i] = false;
             }
         }
@@ -203,15 +203,15 @@ struct CognitiveShift : Module {
         bool effectiveDataInputHigh = false;
 
         if (inputs[inputId].isConnected()) {
-            if (inMods[inputId] != nullptr) {
+            if (connectedSourceModules[inputId] != nullptr) {
                 // If we have a connected input, check if it's self-patched
-                int sourceOutputId = inputBits[inputId];
+                int sourceOutputId = connectedSourceOutputIds[inputId];
                 int bitIndex = outputIdToBitIndex(sourceOutputId);
                 if (bitIndex != -1) {
-                    if (inMods[inputId]->previousClock == currentClock) {
-                        effectiveDataInputHigh = inMods[inputId]->previousBits[bitIndex];
+                    if (connectedSourceModules[inputId]->previousClock == currentClock) {
+                        effectiveDataInputHigh = connectedSourceModules[inputId]->previousBits[bitIndex];
                     } else {
-                        effectiveDataInputHigh = inMods[inputId]->bits[bitIndex];
+                        effectiveDataInputHigh = connectedSourceModules[inputId]->bits[bitIndex];
                     }
                 }
             } else {
@@ -241,10 +241,8 @@ struct CognitiveShift : Module {
     }
 
     void process(const ProcessArgs& args) override {
-        // checkInputConnections();
-
         // --- Immediate Reset Button Logic ---
-        if (resetTrigger.process(params[RESET_BUTTON_PARAM].getValue()) || resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
+        if (clearTrigger.process(params[CLEAR_BUTTON_PARAM].getValue()) || clearInputTrigger.process(inputs[CLEAR_INPUT].getVoltage())) {
             std::fill(bits, bits + NUM_STEPS, false);
         }
 
@@ -339,10 +337,9 @@ struct CognitiveShift : Module {
         float r2r1_raw = calculateR2R(0, 4);
         float r2r2_raw = calculateR2R(2, 4);
         float r2r3_raw = calculateR2R(4, 4);
-        float output_scale = 10.0f / R2R_MAX_VOLTAGE;
-        float r2r1_final = r2r1_raw * params[R2R_1_ATTN_PARAM].getValue() * output_scale;
-        float r2r2_final = r2r2_raw * params[R2R_2_ATTN_PARAM].getValue() * output_scale;
-        float r2r3_final = r2r3_raw * params[R2R_3_ATTN_PARAM].getValue() * output_scale;
+        float r2r1_final = r2r1_raw * params[R2R_1_ATTN_PARAM].getValue();
+        float r2r2_final = r2r2_raw * params[R2R_2_ATTN_PARAM].getValue();
+        float r2r3_final = r2r3_raw * params[R2R_3_ATTN_PARAM].getValue();
         outputs[R2R_1_OUTPUT].setVoltage(r2r1_final);
         outputs[R2R_2_OUTPUT].setVoltage(r2r2_final);
         outputs[R2R_3_OUTPUT].setVoltage(r2r3_final);
@@ -369,8 +366,8 @@ struct CognitiveShift : Module {
         // --- Update Button Press Light --- (Unchanged)
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
         bool erasePressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
-        bool resetPressed = params[RESET_BUTTON_PARAM].getValue() > 0.f;
-        lights[BUTTON_PRESS_LIGHT].setBrightness((writePressed || erasePressed || resetPressed) ? 1.0f : 0.0f);
+        bool clearPressed = params[CLEAR_BUTTON_PARAM].getValue() > 0.f;
+        lights[BUTTON_PRESS_LIGHT].setBrightness((writePressed || erasePressed || clearPressed) ? 1.0f : 0.0f);
     }
 
     // dataToJson/FromJson remain the same as they only handle the 'bits' array
@@ -519,7 +516,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col4 = 157.5f;
 
         // Row 1 & 2
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::RESET_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::CLEAR_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
         addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
@@ -531,7 +528,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col4, 153.5f), module, CognitiveShift::XOR_INPUT));
 
         // Row 4: Buttons and Button Press Light
-        addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::RESET_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::CLEAR_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
         addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
         addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
