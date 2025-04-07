@@ -5,7 +5,7 @@
 ## Modules Overview
 
 
-<img src="docs/Dark.png" alt="Cella - Dark Theme" style="width: 615px;">
+<img src="docs/Dark.png" alt="Cella - Dark Theme" style="width: 700px;">
 
 ### Resonators
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in popular DAW.

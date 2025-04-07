@@ -241,7 +241,7 @@ struct CognitiveShift : Module {
     }
 
     void process(const ProcessArgs& args) override {
-        checkInputConnections();
+        // checkInputConnections();
 
         // --- Immediate Reset Button Logic ---
         if (resetTrigger.process(params[RESET_BUTTON_PARAM].getValue()) || resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
@@ -593,12 +593,14 @@ struct CognitiveShiftWidget : ModuleWidget {
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(bit_out_start_x + 3 * bit_out_spacing_x, bit_out_row2_y), module, CognitiveShift::BIT_8_OUTPUT));
     }
 
-    // Update widget visibility based on module state
     void step() override {
-        ModuleWidget::step();  // Call base class step first
+        ModuleWidget::step();
 
         CognitiveShift* csModule = dynamic_cast<CognitiveShift*>(module);
         if (csModule) {
+            // Run from UI thread to avoid lock collisions
+            csModule->checkInputConnections();
+
             // Get desired visibility states from the module
             bool bitLightsVisible = csModule->showBitLights;
             bool r2rLightsVisible = csModule->showR2RLights;

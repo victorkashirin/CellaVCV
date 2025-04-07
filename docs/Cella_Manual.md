@@ -247,7 +247,7 @@ Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
 # **Cognitive Shift**
 
-## Overview
+<img src="images/CognitiveShift.png" alt="Cella - Cognitive Shift" style="height: 380px;">
 
 Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, multiple overlapping R2R DAC outputs, a bipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
 
@@ -271,8 +271,8 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
     *   **DATA** input (primary voltage input).
     *   **WRITE** button (manually force input bit to 1).
     *   **ERASE** button (manually force input bit to 0).
-    *   **XOR** input (XORs with the DATA/Buttons value).
-    *   **LOGIC** input (combines with the DATA/Buttons/XOR result using a selectable logic function).
+    *   **LOGIC** input (combines with the DATA/Buttons result using a selectable logic function).
+    *   **XOR** input (XORs with the DATA/Buttons/LOGIC value).
 *   Manual **CLEAR** button and CV input to set all bits to 0 instantly.
 *   8 individual bit outputs (**BIT 1** to **BIT 8**) with selectable behavior (Clock, Gate, Trigger) via the context menu.
 *   Multiple Digital-to-Analog Converter (DAC) outputs based on the R2R ladder principle:
@@ -290,14 +290,19 @@ On each **CLOCK** pulse, the value for the *next* Bit 1 is determined as follows
 1.  **Manual Override:**
     *   If **ERASE** button is pressed, the input bit is `0`.
     *   Else if **WRITE** button is pressed, the input bit is `1`.
-    * If **Input override** context menu option is set to **Everything**, input bit is a `finalBit`, otherwise next steps follow.
+    *   If **Input override** context menu option is set to **Everything**, this manually set bit becomes the `finalBit`, and the following steps are skipped. Otherwise, manually set bit becomes the `dataBit` and sequence proceeds from step 3.
 
-2.  **DATA Input:** If neither button is pressed, the voltage at the **DATA** input is compared to the effective threshold ( **THRES** knob value + modulated **THRES CV**). If `DATA Voltage >= Threshold`, the input bit is `1`, otherwise `0`. Let's call this `dataBit`.
-3.  **XOR Input:** The voltage at the **XOR** input is compared to the threshold. If `XOR Voltage >= Threshold`, the XOR bit is `1`, otherwise `0`. Let's call this `xorBit`.
-4.  **Initial Combination:** The effective input bit after XOR is calculated: `intermediateBit = dataBit XOR xorBit`.
-5.  **LOGIC Input:** The voltage at the **LOGIC** input is compared to the threshold. If `LOGIC Voltage >= Threshold`, the logic bit is `1`, otherwise `0`. Let's call this `logicBit`.
-6.  **Final Combination:** The final bit to be shifted into Bit 1 is determined by combining the `intermediateBit` and `logicBit` using the **Logic Type** selected in the context menu:
-    *   `finalBit = applyLogicOperation(intermediateBit, logicBit, LogicType)`
+2.  **DATA Input:** If neither button is pressed, the voltage at the **DATA** input is compared to the effective threshold (**THRES** knob value + modulated **THRES CV**). If `DATA Voltage >= Threshold`, the input bit is `1`, otherwise `0`. Let's call this `dataBit`.
+
+3.  **LOGIC Input:** The voltage at the **LOGIC** input is compared to the threshold. If `LOGIC Voltage >= Threshold`, the logic bit is `1`, otherwise `0`. Let's call this `logicBit`.
+
+4.  **Initial Combination (Logic):** The `dataBit` is combined with the `logicBit` using the **Logic Type** selected in the context menu:
+    *   `intermediateBit = applyLogicOperation(dataBit, logicBit, LogicType)`
+
+5.  **XOR Input:** The voltage at the **XOR** input is compared to the threshold. If `XOR Voltage >= Threshold`, the XOR bit is `1`, otherwise `0`. Let's call this `xorBit`.
+
+6.  **Final Combination (XOR):** The final bit to be shifted into Bit 1 is determined by XORing the result from the previous step (`intermediateBit`) with the `xorBit`:
+    *   `finalBit = intermediateBit XOR xorBit`
 
 ### Bit Output Modes (Context Menu)
 
@@ -309,14 +314,14 @@ You can change how the individual **BIT 1-8** outputs behave by right-clicking t
 
 ### Logic Types (Context Menu)
 
-You can change how the **LOGIC** input interacts with the DATA and XOR result by right-clicking the module panel and selecting an option under "Logic type":
+You can change how the **LOGIC** input interacts with the DATA input result by right-clicking the module panel and selecting an option under "Logic type":
 
-*   **XOR (Default):** `finalBit = intermediateBit XOR logicBit`
-*   **NAND:** `finalBit = NOT (intermediateBit AND logicBit)`
-*   **XNOR:** `finalBit = NOT (intermediateBit XOR logicBit)`
-*   **OR:** `finalBit = intermediateBit OR logicBit`
-*   **AND:** `finalBit = intermediateBit AND logicBit`
-*   **NOR:** `finalBit = NOT (intermediateBit AND logicBit)`
+*   **XOR (Default):** `finalBit = dataBit XOR logicBit`
+*   **NAND:** `finalBit = NOT (dataBit AND logicBit)`
+*   **XNOR:** `finalBit = NOT (dataBit XOR logicBit)`
+*   **OR:** `finalBit = dataBit OR logicBit`
+*   **AND:** `finalBit = dataBit AND logicBit`
+*   **NOR:** `finalBit = NOT (dataBit AND logicBit)`
 
 ## Self-Patching
 
