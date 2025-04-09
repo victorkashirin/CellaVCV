@@ -22,3 +22,11 @@ struct ScrewGrey : app::ThemedSvgScrew {
         setSvg(Svg::load(asset::plugin(pluginInstance, "res/components/ScrewGrey.svg")), Svg::load(asset::plugin(pluginInstance, "res/components/ScrewDark.svg")));
     }
 };
+
+struct VCVButtonHuge : app::SvgSwitch {
+    VCVButtonHuge() {
+        momentary = true;
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonHuge_0.svg")));
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonHuge_1.svg")));
+    }
+};

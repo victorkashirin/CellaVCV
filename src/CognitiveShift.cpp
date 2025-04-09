@@ -29,6 +29,7 @@ struct CognitiveShift : Module {
         R2R_3_ATTN_PARAM,
         DAC_ATTENUVERTER_PARAM,
         LOGIC_PARAM,
+        INPUT_BUTTON_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -66,11 +67,16 @@ struct CognitiveShift : Module {
     dsp::SchmittTrigger clockInputTrigger;
     dsp::SchmittTrigger clearTrigger;
     dsp::SchmittTrigger clearInputTrigger;
-    dsp::PulseGenerator pulseGen;
+    dsp::SchmittTrigger writeTrigger;
+    dsp::SchmittTrigger eraseTrigger;
+
+    std::array<dsp::PulseGenerator, NUM_STEPS> pulseGens;
+    dsp::BooleanTrigger inputBoolean;
     bool bits[NUM_STEPS] = {};
     bool previousBits[NUM_STEPS] = {};
     int64_t currentClock = 0;
     int64_t previousClock = 0;
+    bool editMode = false;
 
     CognitiveShift* connectedSourceModules[NUM_COMPLEX_INPUTS];
     int connectedSourceOutputIds[NUM_COMPLEX_INPUTS] = {-1};
@@ -101,6 +107,7 @@ struct CognitiveShift : Module {
         configButton(WRITE_BUTTON_PARAM, "Data + (Write)");
         configButton(ERASE_BUTTON_PARAM, "Data - (Erase)");
         configButton(CLEAR_BUTTON_PARAM, "Clear register");
+        configButton(INPUT_BUTTON_PARAM, "Manual input");
         configParam(THRESHOLD_PARAM, 1.f, 9.f, 1.f, "Data Input Threshold");
         configParam(THRESHOLD_CV_ATTENUVERTER_PARAM, -1.f, 1.f, 0.f, "Threshold CV Attenuverter");
         configParam(R2R_1_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 1 (Bits 1-4) Level");
@@ -247,14 +254,37 @@ struct CognitiveShift : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        if (inputBoolean.process(params[INPUT_BUTTON_PARAM].getValue()))
+            editMode ^= true;
+
+        bool editShift = false;
+
         // --- Immediate Reset Button Logic ---
         if (clearTrigger.process(params[CLEAR_BUTTON_PARAM].getValue()) || clearInputTrigger.process(inputs[CLEAR_INPUT].getVoltage())) {
             std::fill(bits, bits + NUM_STEPS, false);
         }
 
+        if (editMode) {
+            bool value = false;
+            if (writeTrigger.process(params[WRITE_BUTTON_PARAM].getValue())) {
+                editShift = true;
+                value = true;
+            }
+            if (eraseTrigger.process(params[ERASE_BUTTON_PARAM].getValue())) {
+                editShift = true;
+                value = false;
+            }
+            if (editShift) {
+                for (int i = NUM_STEPS - 1; i > 0; --i) {
+                    bits[i] = bits[i - 1];
+                }
+                bits[0] = value;
+            }
+        }
+
         // --- Clock Input Processing ---
         bool clocked_this_frame = false;
-        if (inputs[CLOCK_INPUT].isConnected()) {
+        if (!editMode & inputs[CLOCK_INPUT].isConnected()) {
             if (clockInputTrigger.process(inputs[CLOCK_INPUT].getVoltage())) {
                 clocked_this_frame = true;
             }
@@ -312,21 +342,25 @@ struct CognitiveShift : Module {
         }  // End of clocked_this_frame
 
         // --- Update Individual Bit Outputs & Lights ---
-        float clockInputVoltage = inputs[CLOCK_INPUT].isConnected() ? inputs[CLOCK_INPUT].getVoltage() : 0.f;
-        bool isClockHigh = clockInputVoltage >= CLOCK_HIGH_THRESHOLD;
-
         for (int i = 0; i < NUM_STEPS; ++i) {
             float bitVoltage = 0.0f;
 
             if (bits[i]) {
-                if (outputType == OutputType::GATE_OUTPUT) {
+                if (editMode) {
+                    if (editShift) {
+                        pulseGens[i].trigger(0.001f);
+                    }
+                    bitVoltage = pulseGens[i].process(args.sampleTime) ? GATE_VOLTAGE : 0.0f;
+                } else if (outputType == OutputType::GATE_OUTPUT) {
                     bitVoltage = GATE_VOLTAGE;
                 } else if (outputType == OutputType::TRIGGER_OUTPUT) {
                     if (clocked_this_frame) {
-                        pulseGen.trigger(0.001f);
+                        pulseGens[i].trigger(0.001f);
                     }
-                    bitVoltage = pulseGen.process(args.sampleTime) ? GATE_VOLTAGE : 0.0f;
+                    bitVoltage = pulseGens[i].process(args.sampleTime) ? GATE_VOLTAGE : 0.0f;
                 } else if (outputType == OutputType::CLOCK_OUTPUT) {
+                    float clockInputVoltage = inputs[CLOCK_INPUT].isConnected() ? inputs[CLOCK_INPUT].getVoltage() : 0.f;
+                    bool isClockHigh = clockInputVoltage >= CLOCK_HIGH_THRESHOLD;
                     bitVoltage = isClockHigh ? GATE_VOLTAGE : 0.0f;
                 }
             }
@@ -381,7 +415,7 @@ struct CognitiveShift : Module {
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
         bool erasePressed = params[ERASE_BUTTON_PARAM].getValue() > 0.f;
         bool clearPressed = params[CLEAR_BUTTON_PARAM].getValue() > 0.f;
-        lights[BUTTON_PRESS_LIGHT].setBrightness((writePressed || erasePressed || clearPressed) ? 1.0f : 0.0f);
+        lights[BUTTON_PRESS_LIGHT].setBrightness((writePressed || erasePressed || clearPressed || editMode) ? 1.0f : 0.0f);
     }
 
     // dataToJson/FromJson remain the same as they only handle the 'bits' array
@@ -536,10 +570,13 @@ struct CognitiveShiftWidget : ModuleWidget {
         float col3 = 112.5f;
         float col4 = 157.5f;
 
+        // addParam(createParamCentered<VCVButtonMini>(Vec(90.f, 38.5f), module, CognitiveShift::CLEAR_BUTTON_PARAM));
+
         // Buttons and Button Press Light
         addParam(createParamCentered<VCVButton>(Vec(col1, 53.5f), module, CognitiveShift::CLEAR_BUTTON_PARAM));
-        addParam(createParamCentered<VCVButton>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
-        addParam(createParamCentered<VCVButton>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButtonHuge>(Vec(col2, 53.5f), module, CognitiveShift::WRITE_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButtonHuge>(Vec(col3, 53.5f), module, CognitiveShift::ERASE_BUTTON_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(col4, 53.5f), module, CognitiveShift::INPUT_BUTTON_PARAM));
         addChild(createLightCentered<LargeFresnelLight<BlueLight>>(Vec(col4, 53.5f), module, CognitiveShift::BUTTON_PRESS_LIGHT));
 
         // INPUTS
