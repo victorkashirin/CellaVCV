@@ -249,7 +249,7 @@ Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
 <img src="images/CognitiveShift.png" alt="Cella - Cognitive Shift" style="height: 380px;">
 
-Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, multiple overlapping unipolar R2R DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
+Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, three overlapping unipolar 3-bit DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
 
 Main differentiator from other implementations is the ability to output triggers or gates per each step without merging consecutive gates together, and yet allow for self-patching. This was inspised by shift register behaviour of "Double Knot" instrument by Lorre Mill.
 
@@ -275,8 +275,8 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
     *   **XOR** input (XORs with the DATA/Buttons/LOGIC value).
 *   Manual **CLEAR** button and CV input to set all bits to 0 instantly.
 *   8 individual bit outputs (**BIT 1** to **BIT 8**) with selectable behavior (Clock, Gate, Trigger) via the context menu.
-*   Multiple Digital-to-Analog Converter (DAC) outputs based on the R2R ladder principle:
-    *   Three 4-bit unipolar outputs (**1-4**, **3-6**, **5-8**) with individual attenuators, providing CV based on overlapping bit ranges (0V to +10V before attenuation).
+*   Multiple Digital-to-Analog Converter (DAC) outputs:
+    *   Three 4-bit DAC unipolar outputs (**1-4**, **3-6**, **5-8**) with individual attenuators, providing CV based on overlapping bit ranges (0V to +10V before attenuation).
     *   One 8-bit configurable bipolar/unipolar output (**1-8**) with an attenuverter, providing CV based on all 8 bits (-5V to +5V or 0V to +10V before attenuation).
 *   Intelligent self-patching detection for stable feedback loops.
 *   Context menu options for Bit Output Mode, Logic Type selection, and Input Override behavior.
@@ -349,7 +349,7 @@ Due to complex logic of handling self-patching, stacked cables on DATA, XOR and 
 ## Patch Ideas
 
 *   **Basic Sequencer:** Use **BIT 1-8** outputs (in Gate mode) to trigger drum sounds or envelopes for an 8-step sequence. Manually enter patterns with **WRITE**/**ERASE**, or feed a gate pattern into **DATA**.
-*   **CV Sequencer:** Use the **R2R** or **DAC** outputs to generate stepped CV sequences for pitch or modulation.
+*   **CV Sequencer:** Use the **DAC** outputs to generate stepped CV sequences for pitch or modulation.
 *   **Clock Divider/Multiplier:** Use **BIT** outputs in Clock mode with specific patterns loaded.
 *   **Rhythmic Complexity:** Patch outputs back into **DATA**, **XOR**, or **LOGIC** inputs. Use external random sources or LFOs into these inputs as well. Experiment with different Logic Types.
 *   **Complex Modulation:** Use the **DAC** outputs, potentially with slow clock rates, to generate evolving CV signals.

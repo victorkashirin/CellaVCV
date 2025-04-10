@@ -6,10 +6,8 @@
 
 // Define constants for clarity
 const int NUM_STEPS = 8;
-const int NUM_R2R_DAC = 4;
+const int NUM_DAC = 4;
 const int NUM_COMPLEX_INPUTS = 3;  // only DATA, XOR and LOGIC
-const float R2R_MAX_VOLTAGE = 10.0f;
-const float R2R_SCALE = R2R_MAX_VOLTAGE / 15.0f;  // For 4 bits (2^4 - 1 = 15)
 const float GATE_VOLTAGE = 10.0f;
 const float CLOCK_HIGH_THRESHOLD = 1.0f;
 
@@ -23,12 +21,11 @@ struct CognitiveShift : Module {
         ERASE_BUTTON_PARAM,
         CLEAR_BUTTON_PARAM,
         THRESHOLD_PARAM,
-        THRESHOLD_CV_ATTENUVERTER_PARAM,
-        R2R_1_ATTN_PARAM,
-        R2R_2_ATTN_PARAM,
-        R2R_3_ATTN_PARAM,
-        DAC_ATTENUVERTER_PARAM,
-        LOGIC_PARAM,
+        THRESHOLD_CV_ATTN_PARAM,
+        DAC_1_ATTN_PARAM,
+        DAC_2_ATTN_PARAM,
+        DAC_3_ATTN_PARAM,
+        DAC_4_ATTN_PARAM,
         INPUT_BUTTON_PARAM,
         NUM_PARAMS
     };
@@ -42,9 +39,9 @@ struct CognitiveShift : Module {
         NUM_INPUTS
     };
     enum OutputIds {
-        R2R_1_OUTPUT,
-        R2R_2_OUTPUT,
-        R2R_3_OUTPUT,
+        DAC_1_OUTPUT,
+        DAC_2_OUTPUT,
+        DAC_3_OUTPUT,
         BIT_1_OUTPUT,
         BIT_2_OUTPUT,
         BIT_3_OUTPUT,
@@ -59,8 +56,8 @@ struct CognitiveShift : Module {
     enum LightIds {
         STEP_LIGHTS,                                   // 0-7
         BUTTON_PRESS_LIGHT = STEP_LIGHTS + NUM_STEPS,  // 8
-        R2R_LIGHTS,
-        NUM_LIGHTS = R2R_LIGHTS + 8  // 9
+        DAC_LIGHTS,
+        NUM_LIGHTS = DAC_LIGHTS + 8  // 9
     };
 
     // Internal state
@@ -70,7 +67,7 @@ struct CognitiveShift : Module {
     dsp::SchmittTrigger writeTrigger;
     dsp::SchmittTrigger eraseTrigger;
 
-    std::array<dsp::PulseGenerator, NUM_STEPS> pulseGens;
+    dsp::PulseGenerator pulseGens[NUM_STEPS];
     dsp::BooleanTrigger inputBoolean;
     bool bits[NUM_STEPS] = {};
     bool previousBits[NUM_STEPS] = {};
@@ -100,7 +97,7 @@ struct CognitiveShift : Module {
     int dacOutputType = AllBitDACOutputType::BIPOLAR;
 
     bool showBitLights = true;
-    bool showR2RLights = true;
+    bool showDACLights = true;
 
     CognitiveShift() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -109,11 +106,11 @@ struct CognitiveShift : Module {
         configButton(CLEAR_BUTTON_PARAM, "Clear register");
         configButton(INPUT_BUTTON_PARAM, "Manual input");
         configParam(THRESHOLD_PARAM, 1.f, 9.f, 1.f, "Data Input Threshold");
-        configParam(THRESHOLD_CV_ATTENUVERTER_PARAM, -1.f, 1.f, 0.f, "Threshold CV Attenuverter");
-        configParam(R2R_1_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 1 (Bits 1-4) Level");
-        configParam(R2R_2_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 2 (Bits 3-6) Level");
-        configParam(R2R_3_ATTN_PARAM, -1.f, 1.f, 1.f, "R2R 3 (Bits 5-8) Level");
-        configParam(DAC_ATTENUVERTER_PARAM, -1.f, 1.f, 1.f, "8-Bit DAC Level");
+        configParam(THRESHOLD_CV_ATTN_PARAM, -1.f, 1.f, 0.f, "Threshold CV Attenuverter");
+        configParam(DAC_1_ATTN_PARAM, -1.f, 1.f, 1.f, "DAC 1 (Bits 1-4) Level");
+        configParam(DAC_2_ATTN_PARAM, -1.f, 1.f, 1.f, "DAC 2 (Bits 3-6) Level");
+        configParam(DAC_3_ATTN_PARAM, -1.f, 1.f, 1.f, "DAC 3 (Bits 5-8) Level");
+        configParam(DAC_4_ATTN_PARAM, -1.f, 1.f, 1.f, "DAC 4 (Bits 1-8) Level");
 
         configInput(CLOCK_INPUT, "Clock Trigger");
         configInput(DATA_INPUT, "Data");
@@ -122,9 +119,9 @@ struct CognitiveShift : Module {
         configInput(CLEAR_INPUT, "Clear register");
         configInput(THRESHOLD_CV_INPUT, "Threshold CV");
 
-        configOutput(R2R_1_OUTPUT, "R2R 1 (Bits 1-4)");
-        configOutput(R2R_2_OUTPUT, "R2R 2 (Bits 3-6)");
-        configOutput(R2R_3_OUTPUT, "R2R 3 (Bits 5-8)");
+        configOutput(DAC_1_OUTPUT, "DAC 1 (Bits 1-4)");
+        configOutput(DAC_2_OUTPUT, "DAC 2 (Bits 3-6)");
+        configOutput(DAC_3_OUTPUT, "DAC 3 (Bits 5-8)");
         configOutput(BIT_1_OUTPUT, "Bit 1");
         configOutput(BIT_2_OUTPUT, "Bit 2");
         configOutput(BIT_3_OUTPUT, "Bit 3");
@@ -133,35 +130,21 @@ struct CognitiveShift : Module {
         configOutput(BIT_6_OUTPUT, "Bit 6");
         configOutput(BIT_7_OUTPUT, "Bit 7");
         configOutput(BIT_8_OUTPUT, "Bit 8");
-        configOutput(DAC_OUTPUT, "8-Bit Bipolar DAC");
+        configOutput(DAC_OUTPUT, "DAC 4 (Bits 1-8)");
 
         onReset();
     }
 
-    // R2R Helper
-    float calculateR2R(int startIndex, int numBits = 4) {
-        float r2rValue = 0.0f;
+    float calculateDACvalue(int startIndex, int numBits = 4) {
+        float dac3Value = 0.0f;
         float weight = 1.0f;
         for (int i = 0; i < numBits; ++i) {
             int bitIndex = startIndex + i;
             if (bitIndex < NUM_STEPS && bits[bitIndex])
-                r2rValue += weight;
+                dac3Value += weight;
             weight *= 2.0f;
         }
-        return r2rValue * R2R_SCALE;
-    }
-
-    // 8-Bit DAC Calculation Helper
-    float calculate8BitDACRaw() {
-        float dacValue = 0.0f;
-        float weight = 1.0f;  // Start with LSB weight
-        for (int i = 0; i < NUM_STEPS; ++i) {
-            if (bits[i]) {
-                dacValue += weight;
-            }
-            weight *= 2.0f;  // Move to next bit's weight
-        }
-        return dacValue;  // Raw value is 0 to 255
+        return dac3Value;
     }
 
     void onReset() override {
@@ -170,6 +153,7 @@ struct CognitiveShift : Module {
         std::fill(connectedSourceModules, connectedSourceModules + NUM_COMPLEX_INPUTS, nullptr);
         std::fill(connectedSourceOutputIds, connectedSourceOutputIds + NUM_COMPLEX_INPUTS, -1);
         std::fill(wasInputConnected, wasInputConnected + NUM_COMPLEX_INPUTS, false);
+        editMode = false;
     }
 
     void onRandomize() override {
@@ -292,7 +276,7 @@ struct CognitiveShift : Module {
 
         // --- Shift Register Logic (Only execute on clock tick) ---
         if (clocked_this_frame) {
-            float thresholdCV = params[THRESHOLD_CV_ATTENUVERTER_PARAM].getValue() * inputs[THRESHOLD_CV_INPUT].getVoltage();
+            float thresholdCV = params[THRESHOLD_CV_ATTN_PARAM].getValue() * inputs[THRESHOLD_CV_INPUT].getVoltage();
             float threshold = clamp(params[THRESHOLD_PARAM].getValue() + thresholdCV, 1.f, 9.f);
 
             // 1. Read button states
@@ -372,44 +356,45 @@ struct CognitiveShift : Module {
             lights[STEP_LIGHTS + i].setBrightness(bits[i] ? 1.0f : 0.0f);
         }
 
-        // --- Calculate and Output R2R ---
-        float r2r1_raw = calculateR2R(0, 4);
-        float r2r2_raw = calculateR2R(2, 4);
-        float r2r3_raw = calculateR2R(4, 4);
-        float r2r1_final = r2r1_raw * params[R2R_1_ATTN_PARAM].getValue();
-        float r2r2_final = r2r2_raw * params[R2R_2_ATTN_PARAM].getValue();
-        float r2r3_final = r2r3_raw * params[R2R_3_ATTN_PARAM].getValue();
-        outputs[R2R_1_OUTPUT].setVoltage(r2r1_final);
-        outputs[R2R_2_OUTPUT].setVoltage(r2r2_final);
-        outputs[R2R_3_OUTPUT].setVoltage(r2r3_final);
+        // --- Calculate and Output DAC ---
+        float dac4bitScale = 10.f / 15.0f;
+        float dac1raw = calculateDACvalue(0, 4) * dac4bitScale;
+        float dac2raw = calculateDACvalue(2, 4) * dac4bitScale;
+        float dac3raw = calculateDACvalue(4, 4) * dac4bitScale;
+        float dac1final = dac1raw * params[DAC_1_ATTN_PARAM].getValue();
+        float dac2final = dac2raw * params[DAC_2_ATTN_PARAM].getValue();
+        float dac3final = dac3raw * params[DAC_3_ATTN_PARAM].getValue();
+        outputs[DAC_1_OUTPUT].setVoltage(dac1final);
+        outputs[DAC_2_OUTPUT].setVoltage(dac2final);
+        outputs[DAC_3_OUTPUT].setVoltage(dac3final);
 
-        lights[R2R_LIGHTS + 0].setBrightness(fmaxf(0.0f, r2r1_final / 10.f));
-        lights[R2R_LIGHTS + 1].setBrightness(fmaxf(0.0f, -r2r1_final / 10.f));
+        lights[DAC_LIGHTS + 0].setBrightness(fmaxf(0.0f, dac1final / 10.f));
+        lights[DAC_LIGHTS + 1].setBrightness(fmaxf(0.0f, -dac1final / 10.f));
 
-        lights[R2R_LIGHTS + 2].setBrightness(fmaxf(0.0f, r2r2_final / 10.f));
-        lights[R2R_LIGHTS + 3].setBrightness(fmaxf(0.0f, -r2r2_final / 10.f));
+        lights[DAC_LIGHTS + 2].setBrightness(fmaxf(0.0f, dac2final / 10.f));
+        lights[DAC_LIGHTS + 3].setBrightness(fmaxf(0.0f, -dac2final / 10.f));
 
-        lights[R2R_LIGHTS + 4].setBrightness(fmaxf(0.0f, r2r3_final / 10.f));
-        lights[R2R_LIGHTS + 5].setBrightness(fmaxf(0.0f, -r2r3_final / 10.f));
+        lights[DAC_LIGHTS + 4].setBrightness(fmaxf(0.0f, dac3final / 10.f));
+        lights[DAC_LIGHTS + 5].setBrightness(fmaxf(0.0f, -dac3final / 10.f));
 
         // --- Calculate and Output 8-Bit DAC ---
-        float dacRawValue = calculate8BitDACRaw();
-        float dacBipolarValue = dacRawValue / 255.0f;
+        float dacRawValue = calculateDACvalue(0, 8);
+        float dacScaledValue = dacRawValue / 255.0f;
         if (dacOutputType == AllBitDACOutputType::BIPOLAR) {
-            dacBipolarValue = dacBipolarValue * 10.0f - 5.f;  // Convert to bipolar range
+            dacScaledValue = dacScaledValue * 10.0f - 5.f;  // Convert to bipolar range
         } else {
-            dacBipolarValue = dacBipolarValue * 10.f;  // Convert to unipolar range
+            dacScaledValue = dacScaledValue * 10.f;  // Convert to unipolar range
         }
 
-        float dacAttn = params[DAC_ATTENUVERTER_PARAM].getValue();
-        float finalDacOutput = dacBipolarValue * dacAttn;
+        float dacAttn = params[DAC_4_ATTN_PARAM].getValue();
+        float finalDacOutput = dacScaledValue * dacAttn;
         outputs[DAC_OUTPUT].setVoltage(finalDacOutput);
 
         float lightScale = (dacOutputType == AllBitDACOutputType::BIPOLAR) ? 5.f : 10.f;
 
-        lights[R2R_LIGHTS + 6]
+        lights[DAC_LIGHTS + 6]
             .setBrightness(fmaxf(0.0f, finalDacOutput / lightScale));
-        lights[R2R_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / lightScale));
+        lights[DAC_LIGHTS + 7].setBrightness(fmaxf(0.0f, -finalDacOutput / lightScale));
 
         // --- Update Button Press Light ---
         bool writePressed = params[WRITE_BUTTON_PARAM].getValue() > 0.f;
@@ -431,7 +416,7 @@ struct CognitiveShift : Module {
         json_object_set_new(rootJ, "inputOverridesEverything", json_boolean(inputOverridesEverything));
         json_object_set_new(rootJ, "allBitDACOutputType", json_integer(dacOutputType));
         json_object_set_new(rootJ, "showBitLights", json_boolean(showBitLights));
-        json_object_set_new(rootJ, "showR2RLights", json_boolean(showR2RLights));
+        json_object_set_new(rootJ, "showDACLights", json_boolean(showDACLights));
         return rootJ;
     }
 
@@ -466,9 +451,9 @@ struct CognitiveShift : Module {
         if (showBitLightsJ)
             showBitLights = json_boolean_value(showBitLightsJ);
 
-        json_t* showR2RLightsJ = json_object_get(rootJ, "showR2RLights");
-        if (showR2RLightsJ)
-            showR2RLights = json_boolean_value(showR2RLightsJ);
+        json_t* showDACLightsJ = json_object_get(rootJ, "showDACLights");
+        if (showDACLightsJ)
+            showDACLights = json_boolean_value(showDACLightsJ);
     }
 };
 
@@ -556,7 +541,7 @@ struct LogicThemedPJ301MPort : ThemedPJ301MPort {
 
 struct CognitiveShiftWidget : ModuleWidget {
     rack::widget::Widget* stepLightWidgets[NUM_STEPS];
-    rack::widget::Widget* r2rDacLightWidgets[NUM_R2R_DAC];
+    rack::widget::Widget* dacLightWidgets[NUM_DAC];
 
     CognitiveShiftWidget(CognitiveShift* module) {
         setModule(module);
@@ -588,7 +573,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         // Params
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, 103.5f), module, CognitiveShift::CLEAR_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(col2, 103.5f), module, CognitiveShift::THRESHOLD_CV_INPUT));
-        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTENUVERTER_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col3, 103.5f), module, CognitiveShift::THRESHOLD_CV_ATTN_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(col4, 103.5f), module, CognitiveShift::THRESHOLD_PARAM));
 
         // Step and DAC Lights
@@ -609,27 +594,27 @@ struct CognitiveShiftWidget : ModuleWidget {
             stepLightWidgets[4 + i] = light;
         }
 
-        float light_row_r2r_y = 219.58;
-        for (int i = 0; i < NUM_R2R_DAC; i++) {
+        float light_row_dac_y = 219.58;
+        for (int i = 0; i < NUM_DAC; i++) {
             float lightX = light_start_x + i * light_spacing_x;
-            auto* light = createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_r2r_y), module, CognitiveShift::R2R_LIGHTS + 2 * i);
-            r2rDacLightWidgets[i] = light;
+            auto* light = createLightCentered<TinyLight<GreenRedLight>>(Vec(lightX, light_row_dac_y), module, CognitiveShift::DAC_LIGHTS + 2 * i);
+            dacLightWidgets[i] = light;
             addChild(light);
         }
 
-        // R2R and DAC Outputs
-        float r2r_out_y = 231.29;
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col1, r2r_out_y), module, CognitiveShift::R2R_1_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, r2r_out_y), module, CognitiveShift::R2R_2_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col3, r2r_out_y), module, CognitiveShift::R2R_3_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, r2r_out_y), module, CognitiveShift::DAC_OUTPUT));
+        // DAC Outputs
+        float dac_out_y = 231.29;
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col1, dac_out_y), module, CognitiveShift::DAC_1_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, dac_out_y), module, CognitiveShift::DAC_2_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col3, dac_out_y), module, CognitiveShift::DAC_3_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col4, dac_out_y), module, CognitiveShift::DAC_OUTPUT));
 
-        // R2R and DAC Attenuators
-        float r2r_attn_y = 203.81;
-        addParam(createParamCentered<Trimpot>(Vec(col1, r2r_attn_y), module, CognitiveShift::R2R_1_ATTN_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col2, r2r_attn_y), module, CognitiveShift::R2R_2_ATTN_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col3, r2r_attn_y), module, CognitiveShift::R2R_3_ATTN_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col4, r2r_attn_y), module, CognitiveShift::DAC_ATTENUVERTER_PARAM));
+        // DAC Attenuators
+        float dac_attn_y = 203.81;
+        addParam(createParamCentered<Trimpot>(Vec(col1, dac_attn_y), module, CognitiveShift::DAC_1_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, dac_attn_y), module, CognitiveShift::DAC_2_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col3, dac_attn_y), module, CognitiveShift::DAC_3_ATTN_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col4, dac_attn_y), module, CognitiveShift::DAC_4_ATTN_PARAM));
 
         // Individual Bit Outputs
         float bit_out_start_x = 22.5f;
@@ -656,7 +641,7 @@ struct CognitiveShiftWidget : ModuleWidget {
 
             // Get desired visibility states from the module
             bool bitLightsVisible = csModule->showBitLights;
-            bool r2rLightsVisible = csModule->showR2RLights;
+            bool dacLightsVisible = csModule->showDACLights;
 
             // Update visibility of Step (Bit) light widgets
             for (int i = 0; i < NUM_STEPS; ++i) {
@@ -665,9 +650,9 @@ struct CognitiveShiftWidget : ModuleWidget {
                 }
             }
 
-            for (int i = 0; i < NUM_R2R_DAC; i++) {
-                if (r2rDacLightWidgets[i]) {
-                    r2rDacLightWidgets[i]->visible = r2rLightsVisible;
+            for (int i = 0; i < NUM_DAC; i++) {
+                if (dacLightWidgets[i]) {
+                    dacLightWidgets[i]->visible = dacLightsVisible;
                 }
             }
         }
@@ -691,7 +676,7 @@ struct CognitiveShiftWidget : ModuleWidget {
                                                  {"Bipolar", "Unipolar"},
                                                  &module->dacOutputType));
         menu->addChild(createMenuLabel("UI"));
-        menu->addChild(createBoolPtrMenuItem("Show R2R lights", "", &module->showR2RLights));
+        menu->addChild(createBoolPtrMenuItem("Show DAC lights", "", &module->showDACLights));
         menu->addChild(createBoolPtrMenuItem("Show bit lights", "", &module->showBitLights));
     }
 };
