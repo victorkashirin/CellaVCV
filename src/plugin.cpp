@@ -11,4 +11,5 @@ void init(Plugin *p) {
     p->addModel(modelTwinPeaks);
     p->addModel(modelResonators);
     p->addModel(modelBytebeat);
+    p->addModel(modelCognitiveShift);
 }
