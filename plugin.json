@@ -84,14 +84,13 @@
     {
       "slug": "CognitiveShift",
       "name": "Cognitive Shift",
-      "description": "Overengineered 8-bit digital shift register with 4 DAC outputs and various self-patching capabilities",
+      "description": "Advanced 8-bit digital shift register with clock, gates or trigger outputs, 4 DAC-based CV generators and various self-patching capabilities",
       "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#cognitive-shift",
-      "keywords": "lfsr feedback r2r dac",
+      "keywords": "lfsr nlfsr feedback r2r dac",
       "tags": [
-        "Sample and hold",
         "Sequencer",
-        "Clock modulator",
-        "LFO"
+        "Sample and hold",
+        "Clock modulator"
       ]
     }
   ]

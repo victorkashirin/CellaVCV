@@ -579,7 +579,7 @@ struct CognitiveShiftWidget : ModuleWidget {
         // Step and DAC Lights
         float light_start_x = 34.84f;
         float light_spacing_x = 45.f;
-        float light_row1_y = 268.03f;
+        float light_row1_y = 269.43f;
         for (int i = 0; i < 4; ++i) {
             float lightX = light_start_x + i * light_spacing_x;
             auto* light = createLightCentered<TinyLight<GreenLight>>(Vec(lightX, light_row1_y), module, CognitiveShift::STEP_LIGHTS + i);

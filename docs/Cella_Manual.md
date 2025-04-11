@@ -8,7 +8,7 @@ Source code for this plugin can be found on GitHub: [https://github.com/victorka
 
 Code is licensed under GPL v3.0.
 
-All graphics are copyright 2024 Victor Kashirin and licensed under CC BY-SA 4.0.
+All graphics are copyright 2024-2025 Victor Kashirin and licensed under CC BY-SA 4.0.
 
 
 # **Rich**
@@ -166,6 +166,8 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 [**Resonators Demo (YouTube)**](https://www.youtube.com/watch?v=gn_RQxh0R7A)
 
+[**Resonators demo by Omri Cohen (YouTube)**](https://www.youtube.com/watch?v=IwO37pXGd5A)
+
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in the popular DAW.
 
 #### **Key Features / Controls**
@@ -249,9 +251,9 @@ Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 
 <img src="images/CognitiveShift.png" alt="Cella - Cognitive Shift" style="height: 380px;">
 
-Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, three overlapping unipolar 3-bit DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
+Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, data edit mode, three overlapping unipolar 4-bit DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
 
-Main differentiator from other implementations is the ability to output triggers or gates per each step without merging consecutive gates together, and yet allow for self-patching. This was inspised by shift register behaviour of "Double Knot" instrument by Lorre Mill.
+Main differentiator from other implementations is the ability to output clocks, triggers or gates per each step without merging consecutive values together, and yet allow for self-patching. This was inspised by shift register behaviour of "Double Knot" instrument by Lorre Mill.
 
 ## Core Concept: The Shift Register
 
@@ -260,7 +262,7 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
 1.  **Clocking:** When a trigger or gate signal arrives at the **CLOCK** input (specifically, on its rising edge), the module performs a "shift" operation.
 2.  **Input:** Before shifting, the module determines the value (1 or 0, High or Low) of the *next bit* to be introduced into the register. This is based on the **DATA**, **XOR**, and **LOGIC** inputs, **THRESHOLD** parameter, as well as the **WRITE** and **ERASE** buttons.
 3.  **Shifting:** The determined input bit becomes the new state of Bit 1. The previous state of Bit 1 moves to Bit 2, Bit 2 moves to Bit 3, and so on, up to Bit 7 moving to Bit 8. The previous state of Bit 8 is discarded.
-4.  **Output:** The state of each of the 8 bits (0 or 1) is available at the individual **BIT 1-8** outputs and is used to generate the various DAC outputs.
+4.  **Output:** The state of each of the 8 bits (0 or 1) is available at the individual **BIT 1-8** outputs and is used to generate the various DAC-based CV outputs.
 
 ## Features
 
@@ -273,6 +275,7 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
     *   **ERASE** button (manually force input bit to 0).
     *   **LOGIC** input (combines with the DATA/Buttons result using a selectable logic function).
     *   **XOR** input (XORs with the DATA/Buttons/LOGIC value).
+*   Manual input mode enabled by **EDIT** button.
 *   Manual **CLEAR** button and CV input to set all bits to 0 instantly.
 *   8 individual bit outputs (**BIT 1** to **BIT 8**) with selectable behavior (Clock, Gate, Trigger) via the context menu.
 *   Multiple Digital-to-Analog Converter (DAC) outputs:
@@ -317,7 +320,7 @@ The logic type determines how the **LOGIC** input combines with the DATA input b
 - **AND:** Outputs `1` only if both DATA and LOGIC bits are `1`; otherwise, outputs `0`.
 - **NOR:** Outputs `1` only if both DATA and LOGIC bits are `0`; otherwise, outputs `0`.
 
-Selecting different logic types allows the creation of diverse and complex patterns, especially when combined with manual inputs or self-patching techniques.
+Selecting different logic types allows the creation of diverse and complex patterns, especially when combined with manual inputs or self-(cross-)patching techniques.
 
 **Tip**: you can see currently selected logic type in the tooltip if you hover mouse over LOGIC port.
 
@@ -340,17 +343,18 @@ Cognitive Shift is designed to handle self-patching gracefully. This means you c
 **Why use self-patching?**
 Self-patching allows Cognitive Shift to generate complex, evolving, and often pseudo-random sequences based on its own internal state. For example:
 *   Patching **BIT 8** to **DATA** creates a simple feedback loop.
-*   Patching **BIT 5** to **XOR** and **BIT 8** to **DATA** creates patterns similar to a Linear Feedback Shift Register (LFSR), often used for pseudo-random sequence generation.
+*   Patching **BIT 5** to **XOR** and **BIT 8** to **DATA** creates patterns similar to a Linear Feedback Shift Register (LFSR), often used for pseudo-random sequence generation. Programing **LOGIC** to **NAND** and patching another bit into it gives NLFSR.
 *   Experimenting with different bit outputs patched into **DATA**, **XOR**, and **LOGIC** inputs, potentially combined with different **Logic Types**, can yield a vast range of complex rhythmic and melodic patterns.
+* Combining few **Cognitive Shift** modules allow to create long evolving yet deterministic sequences.
 
 **Important disclaimer**
-Due to complex logic of handling self-patching, stacked cables on DATA, XOR and LOGIC won't be handled properly. If you need to merge few sources of data, program LOGIC input to `AND` mode.
+Due to complex logic of handling self-patching, stacked cables on DATA, XOR and LOGIC won't be handled properly. If you need to merge few sources of data, program LOGIC input to `OR` mode.
 
 ## Patch Ideas
 
 *   **Basic Sequencer:** Use **BIT 1-8** outputs (in Gate mode) to trigger drum sounds or envelopes for an 8-step sequence. Manually enter patterns with **WRITE**/**ERASE**, or feed a gate pattern into **DATA**.
 *   **CV Sequencer:** Use the **DAC** outputs to generate stepped CV sequences for pitch or modulation.
 *   **Clock Divider/Multiplier:** Use **BIT** outputs in Clock mode with specific patterns loaded.
-*   **Rhythmic Complexity:** Patch outputs back into **DATA**, **XOR**, or **LOGIC** inputs. Use external random sources or LFOs into these inputs as well. Experiment with different Logic Types.
+*   **Rhythmic Complexity:** Patch outputs back into **DATA**, **XOR**, or **LOGIC** inputs. Use external random sources or LFOs into these inputs as well. Experiment with different Logic Types. Cross-patch few **Cognitive Shift** modules for longer and more complex sequences.
 *   **Complex Modulation:** Use the **DAC** outputs, potentially with slow clock rates, to generate evolving CV signals.
 *   **Generative Melodies:** Use pseudo-random patterns generated via self-patching into the **DAC** output, quantize the result, and use it for pitch sequencing.
