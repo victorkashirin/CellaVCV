@@ -1,6 +1,6 @@
 # Cella modules changelog
 
-### 2.0.7 (2025-04-06)
+### 2.0.7 (2025-04-12)
 
 New modules:
 * Cognitive Shift - advanced digital shift register
