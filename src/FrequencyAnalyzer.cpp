@@ -1,18 +1,4 @@
-#include <algorithm>  // for std::copy, std::fill, std::max, std::min
-#include <array>
-#include <cmath>
-#include <complex>  // Though not directly used, good practice when dealing with FFT concepts
-#include <cstddef>  // for std::size_t
-#include <cstring>  // for std::memcpy if needed, though std::copy is often better
-#include <string>
-#include <vector>
-
 #include "plugin.hpp"
-
-// Helper function to check alignment (optional but good for debugging)
-static bool isAligned(void* ptr, std::size_t alignment) {
-    return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
-}
 
 struct VFDFreqAnalyzer : Module {
     enum ParamIds {
@@ -302,10 +288,6 @@ struct VFDFreqAnalyzer : Module {
         }
 
         // --- Perform FFT using dsp::RealFFT ---
-        // Check alignment before calling (optional debug)
-        // if (!isAligned(fftInput, 16) || !isAligned(fftOutput, 16)) {
-        //     rack::WARN("FFT buffers not aligned!");
-        // }
         fft->rfft(fftInput, fftOutput);  // Real FFT (in-place for real part, complex output)
 
         // --- Magnitude Calculation (Adapted for dsp::RealFFT output format) ---
