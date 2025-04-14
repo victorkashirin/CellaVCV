@@ -1,6 +1,18 @@
-#include <ffft/FFTReal.h>  // Include the FFTReal library header
+#include <algorithm>  // for std::copy, std::fill, std::max, std::min
+#include <array>
+#include <cmath>
+#include <complex>  // Though not directly used, good practice when dealing with FFT concepts
+#include <cstddef>  // for std::size_t
+#include <cstring>  // for std::memcpy if needed, though std::copy is often better
+#include <string>
+#include <vector>
 
 #include "plugin.hpp"
+
+// Helper function to check alignment (optional but good for debugging)
+static bool isAligned(void* ptr, std::size_t alignment) {
+    return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
+}
 
 struct VFDFreqAnalyzer : Module {
     enum ParamIds {
@@ -25,21 +37,23 @@ struct VFDFreqAnalyzer : Module {
 
     const std::vector<size_t> WINDOW_SIZES = {256, 512, 1024, 2048, 4096, 8192};
 
-    std::vector<float> sampleBuffer;  // Will act as a circular buffer
+    std::vector<float> sampleBuffer;  // Circular buffer for incoming audio
     size_t windowSize = 1024;
-    size_t hopSize = 512;                  // --- New: Hop size (windowSize / 2)
-    size_t bufferWritePos = 0;             // --- New: Current writing position in the circular buffer
-    size_t samplesSinceLastFFT = 0;        // --- New: Counter for triggering FFT based on hop size
-    bool isBufferInitiallyFilled = false;  // --- New: Tracks if buffer has enough data for first FFT
+    size_t hopSize = 512;
+    size_t bufferWritePos = 0;
+    size_t samplesSinceLastFFT = 0;
+    bool isBufferInitiallyFilled = false;
 
-    std::vector<float> fftInput;  // Linear buffer for FFT library input
-    std::vector<float> fftOutput;
-    ffft::FFTReal<float>* fft = nullptr;  // Initialize to nullptr
+    // --- FFT related buffers (using aligned memory) ---
+    dsp::RealFFT* fft = nullptr;  // Pointer to the FFT object
+    float* fftInput = nullptr;    // Aligned buffer for windowed input samples
+    float* fftOutput = nullptr;   // Aligned buffer for FFT results
+
+    // --- Band analysis ---
     std::vector<float> bandLevels;
     std::vector<float> bandPeaks;
     float sampleRate = 44100.f;
     bool logarithmicBins = false;
-    // dsp::SchmittTrigger logBinTrigger; // Removed as unused
 
     VFDFreqAnalyzer() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -47,68 +61,131 @@ struct VFDFreqAnalyzer : Module {
         configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
         configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
         configParam(GAIN_PARAM, 0.f, 2.f, 1.f, "Gain");
-        configParam(RESPONSIVENESS_PARAM, 0.f, 5.f, 2.f, "FFT Window Size", "", 0.f, 1.f, WINDOW_SIZES.size() - 1);
+        // Ensure default responsiveness index is valid
+        int defaultResponsivenessIndex = 2;  // Corresponds to 1024
+        if (defaultResponsivenessIndex >= (int)WINDOW_SIZES.size()) {
+            defaultResponsivenessIndex = WINDOW_SIZES.size() - 1;
+        }
+        configParam(RESPONSIVENESS_PARAM, 0.f, (float)WINDOW_SIZES.size() - 1, (float)defaultResponsivenessIndex, "FFT Window Size", "", 0.f, 1.f);
+
         configParam(LOG_BINS_PARAM, 0.f, 1.f, 0.f, "Bins", {"Linear", "Logarithmic"});
         configInput(AUDIO_INPUT, "Audio");
 
-        // Initialize with default window size (will call helper function)
-        updateWindowSize(WINDOW_SIZES[2]);  // Default to 1024
-        updateNumBands(16);                 // Default bands
+        // Initial setup using helper functions
+        updateWindowSize(WINDOW_SIZES[defaultResponsivenessIndex]);  // Default to 1024
+        updateNumBands(16);                                          // Default bands
     }
 
     ~VFDFreqAnalyzer() {
+        // --- Free aligned memory ---
+        if (fftInput) {
+            pffft_aligned_free(fftInput);
+            fftInput = nullptr;
+        }
+        if (fftOutput) {
+            pffft_aligned_free(fftOutput);
+            fftOutput = nullptr;
+        }
+        // --- Delete the FFT object ---
         if (fft) {
             delete fft;
             fft = nullptr;
         }
     }
 
-    // --- New helper function to handle window size changes ---
+    // --- Helper function to handle window size changes ---
     void updateWindowSize(size_t newWindowSize) {
-        if (windowSize == newWindowSize && fft != nullptr) return;  // No change needed
+        // Only update if the size actually changes or if FFT object is not yet created
+        if (windowSize == newWindowSize && fft != nullptr) return;
 
         windowSize = newWindowSize;
         hopSize = windowSize / 2;
 
-        // Resize buffers
-        sampleBuffer.resize(windowSize, 0.f);  // Initialize with zeros
-        fftInput.resize(windowSize);
-        fftOutput.resize(windowSize);
+        // --- Resize circular buffer (can remain std::vector) ---
+        sampleBuffer.resize(windowSize, 0.f);
+        std::fill(sampleBuffer.begin(), sampleBuffer.end(), 0.f);  // Clear buffer
 
-        // Reset buffer state
+        // --- Free existing aligned buffers ---
+        if (fftInput) pffft_aligned_free(fftInput);
+        if (fftOutput) pffft_aligned_free(fftOutput);
+
+        // --- Allocate new aligned buffers ---
+        // Use pffft_aligned_malloc as required/recommended by dsp::RealFFT
+        fftInput = static_cast<float*>(pffft_aligned_malloc(windowSize * sizeof(float)));
+        fftOutput = static_cast<float*>(pffft_aligned_malloc(windowSize * sizeof(float)));
+
+        // Basic check for allocation success
+        if (!fftInput || !fftOutput) {
+            WARN("Failed to allocate aligned memory for FFT buffers. Size: %zu", windowSize);
+            // Handle error appropriately, maybe disable processing?
+            if (fftInput) pffft_aligned_free(fftInput);
+            if (fftOutput) pffft_aligned_free(fftOutput);
+            fftInput = nullptr;
+            fftOutput = nullptr;
+            if (fft) delete fft;
+            fft = nullptr;
+            windowSize = 0;  // Indicate an invalid state
+            return;
+        }
+
+        // Clear new buffers (optional but good practice)
+        std::memset(fftInput, 0, windowSize * sizeof(float));
+        std::memset(fftOutput, 0, windowSize * sizeof(float));
+
+        // --- Recreate FFT object ---
+        if (fft) delete fft;
+        fft = new dsp::RealFFT(windowSize);
+
+        // --- Reset buffer state ---
         bufferWritePos = 0;
         samplesSinceLastFFT = 0;
         isBufferInitiallyFilled = false;
-        std::fill(sampleBuffer.begin(), sampleBuffer.end(), 0.f);  // Clear buffer explicitly
 
-        // Recreate FFT object
-        if (fft) delete fft;
-        fft = new ffft::FFTReal<float>(windowSize);
         // rack::INFO("FFT Analyzer: Window Size set to %zu, Hop Size %zu", windowSize, hopSize);
     }
 
-    // --- New helper function to handle band changes ---
+    // --- Helper function to handle band changes ---
     void updateNumBands(size_t newBands) {
-        if (bandLevels.size() == newBands) return;  // No change needed
+        if (bandLevels.size() == newBands) return;
         bandLevels.resize(newBands, 0.f);
         bandPeaks.resize(newBands, 0.f);
         // rack::INFO("FFT Analyzer: Number of bands set to %zu", newBands);
     }
 
+    void onSampleRateChange() override {
+        // Recalculate sampleRate dependent things if needed,
+        // Here, sampleRate is used within processFFT, so just updating the member is sufficient.
+        sampleRate = APP->engine->getSampleRate();
+    }
+
     void process(const ProcessArgs& args) override {
-        // --- Update sample rate ---
+        // Ensure sample rate is up-to-date (can change without calling onSampleRateChange sometimes)
         if (sampleRate != args.sampleRate) {
             sampleRate = args.sampleRate;
-            // No buffer reset needed just for sample rate change, decay times will adjust implicitly
         }
 
         // --- Handle Parameter Changes ---
         logarithmicBins = (bool)params[LOG_BINS_PARAM].getValue();
         size_t newBands = static_cast<size_t>(std::max(1, (int)params[NUM_BANDS_PARAM].getValue()));
-        updateNumBands(newBands);  // Use helper
+        updateNumBands(newBands);
 
-        size_t newWindowSize = WINDOW_SIZES[static_cast<int>(params[RESPONSIVENESS_PARAM].getValue())];
-        updateWindowSize(newWindowSize);  // Use helper
+        // --- Handle Responsiveness (Window Size) Parameter Change ---
+        size_t responsivenessIndex = static_cast<size_t>(params[RESPONSIVENESS_PARAM].getValue());
+        if (responsivenessIndex < WINDOW_SIZES.size()) {
+            size_t newWindowSize = WINDOW_SIZES[responsivenessIndex];
+            updateWindowSize(newWindowSize);  // Call helper which handles reallocation etc.
+        } else {
+            // Handle potential invalid index if slider range/step changes?
+            WARN("Invalid responsiveness index: %zu", responsivenessIndex);
+        }
+
+        // --- Check if FFT is valid before proceeding ---
+        if (!fft || !fftInput || !fftOutput || windowSize == 0) {
+            // Clear levels if FFT isn't ready
+            std::fill(bandLevels.begin(), bandLevels.end(), 0.f);
+            std::fill(bandPeaks.begin(), bandPeaks.end(), 0.f);
+            return;  // Cannot process
+        }
 
         // --- Process Audio Input ---
         if (inputs[AUDIO_INPUT].isConnected()) {
@@ -116,130 +193,160 @@ struct VFDFreqAnalyzer : Module {
             float summedInput = 0.f;
             int channels = inputs[AUDIO_INPUT].getChannels();
 
-            // --- Input Handling: Average stereo, take mono as is ---
-            // --- Removed the division by 10.f ---
+            // Input Handling: Average multi-channel, take mono as is
             if (channels == 1) {
                 summedInput = inputs[AUDIO_INPUT].getVoltage(0) * gain;
-            } else {
+            } else if (channels > 1) {
                 for (int c = 0; c < channels; c++) {
                     summedInput += inputs[AUDIO_INPUT].getVoltage(c);
                 }
                 summedInput = (summedInput / channels) * gain;  // Average channels
             }
+            // else: channels = 0, summedInput remains 0.f
 
             // --- Store sample in circular buffer ---
             sampleBuffer[bufferWritePos] = summedInput;
-            bufferWritePos = (bufferWritePos + 1) % windowSize;  // Wrap around
+            bufferWritePos = (bufferWritePos + 1) % windowSize;
             samplesSinceLastFFT++;
 
             // --- Track initial fill ---
             if (!isBufferInitiallyFilled && samplesSinceLastFFT >= windowSize) {
                 isBufferInitiallyFilled = true;
-                samplesSinceLastFFT = 0;  // Reset counter to start counting for the *first* hop
-                                          // rack::INFO("Buffer initially filled.");
+                samplesSinceLastFFT = 0;  // Ready for the first hop
             }
 
             // --- Trigger FFT processing on hop ---
             if (isBufferInitiallyFilled && samplesSinceLastFFT >= hopSize) {
-                prepareFFTInput();        // Copy from circular buffer to linear FFT input
-                processFFT();             // Perform FFT and update bands
+                prepareFFTInput();        // Copy from circular buffer to linear aligned fftInput
+                processFFT();             // Perform FFT and update bands using fftInput/fftOutput
                 samplesSinceLastFFT = 0;  // Reset hop counter
             }
 
         } else {
-            // Optional: If no input, maybe slowly decay levels?
-            // Or just do nothing, levels will hold/decay based on last FFT.
-            // Let's add a slow decay if input disconnects:
-            float deltaTime = args.sampleTime;  // Use Rack's provided delta time for this case
-            float fallDecay = std::exp(-deltaTime / params[FALL_DELAY_PARAM].getValue());
-            float peakDecay = std::exp(-deltaTime / params[PEAK_FALL_DELAY_PARAM].getValue());
+            // --- Input disconnected: Slowly decay levels ---
+            float deltaTime = args.sampleTime;  // Use Rack's delta time
+                                                // Prevent division by zero for delay times
+            float fallDelay = std::max(0.001f, params[FALL_DELAY_PARAM].getValue());
+            float peakFallDelay = std::max(0.001f, params[PEAK_FALL_DELAY_PARAM].getValue());
+            float fallDecay = std::exp(-deltaTime / fallDelay);
+            float peakDecay = std::exp(-deltaTime / peakFallDelay);
+
             for (size_t b = 0; b < bandLevels.size(); b++) {
                 bandLevels[b] *= fallDecay;
                 bandPeaks[b] *= peakDecay;
+                // Ensure levels don't go negative due to float inaccuracy
+                bandLevels[b] = std::max(0.f, bandLevels[b]);
+                bandPeaks[b] = std::max(0.f, bandPeaks[b]);
             }
-            isBufferInitiallyFilled = false;  // Reset fill state if input disconnects
+            // Reset buffer state if input disconnects
+            isBufferInitiallyFilled = false;
             samplesSinceLastFFT = 0;
-            bufferWritePos = 0;  // Reset position too
+            bufferWritePos = 0;
+            // Optionally clear the circular buffer
+            // std::fill(sampleBuffer.begin(), sampleBuffer.end(), 0.f);
         }
     }
 
-    // --- New helper to copy data from circular buffer to linear FFT input ---
+    // --- Helper to copy data from circular buffer to linear aligned FFT input ---
     void prepareFFTInput() {
-        // The `windowSize` samples we need end just BEFORE the current `bufferWritePos`.
-        // The starting position of the segment in the circular buffer:
-        size_t readStartPos = (bufferWritePos + windowSize) % windowSize;  // + windowSize handles wrap-around correctly
+        if (!fftInput || windowSize == 0) return;  // Safety check
+
+        // Calculate the start position in the circular buffer for the segment
+        size_t readStartPos = (bufferWritePos + windowSize) % windowSize;  // Correct wrap-around logic
 
         if (readStartPos + windowSize <= sampleBuffer.size()) {
             // No wrap-around needed for the read segment
+            // Use std::copy for potentially better performance than memcpy with floats?
             std::copy(sampleBuffer.begin() + readStartPos,
                       sampleBuffer.begin() + readStartPos + windowSize,
-                      fftInput.begin());
+                      fftInput);  // Copy directly to the aligned buffer fftInput
         } else {
             // Read wraps around the end of the circular buffer
             size_t firstChunkSize = sampleBuffer.size() - readStartPos;
             size_t secondChunkSize = windowSize - firstChunkSize;
 
+            // Use std::copy
             std::copy(sampleBuffer.begin() + readStartPos,
                       sampleBuffer.end(),
-                      fftInput.begin());
+                      fftInput);
             std::copy(sampleBuffer.begin(),
                       sampleBuffer.begin() + secondChunkSize,
-                      fftInput.begin() + firstChunkSize);
+                      fftInput + firstChunkSize);  // Offset destination pointer
         }
     }
 
     void processFFT() {
-        if (!fft) return;  // Safety check
+        // Safety checks
+        if (!fft || !fftInput || !fftOutput || windowSize == 0 || sampleRate <= 0) return;
 
         // --- Apply Blackman window function and remove DC offset ---
-        // Note: Operate on fftInput which now holds the correct time-domain window
+        // Operate directly on the prepared fftInput buffer
         float sum = 0.0f;
         for (size_t i = 0; i < windowSize; i++) {
             sum += fftInput[i];
         }
-        float dcOffset = sum / windowSize;
+        float dcOffset = (windowSize > 0) ? (sum / windowSize) : 0.f;
 
-        // --- Blackman Window Calculation ---
+        // Blackman Window Calculation
         const float a0 = 0.42f;
         const float a1 = 0.50f;
         const float a2 = 0.08f;
-        // Pre-calculate the factor for efficiency
-        const float factor = 2.f * M_PI / (windowSize > 1 ? (windowSize - 1) : 1);  // Avoid division by zero if windowSize=1
+        const float factor = 2.f * M_PI / (windowSize > 1 ? (windowSize - 1) : 1);
 
         for (size_t i = 0; i < windowSize; i++) {
             float term1 = std::cos(factor * i);
             float term2 = std::cos(2.f * factor * i);
             float window = a0 - a1 * term1 + a2 * term2;
-            // Apply window and remove DC offset *from the prepared fftInput*
+            // Apply window and remove DC offset
             fftInput[i] = (fftInput[i] - dcOffset) * window;
         }
-        // --- End Blackman Window ---
 
-        // Perform FFT using FFTReal
-        fft->do_fft(fftOutput.data(), fftInput.data());
+        // --- Perform FFT using dsp::RealFFT ---
+        // Check alignment before calling (optional debug)
+        // if (!isAligned(fftInput, 16) || !isAligned(fftOutput, 16)) {
+        //     rack::WARN("FFT buffers not aligned!");
+        // }
+        fft->rfft(fftInput, fftOutput);  // Real FFT (in-place for real part, complex output)
 
-        // --- Magnitude Calculation (Mostly Unchanged Logic) ---
+        // --- Magnitude Calculation (Adapted for dsp::RealFFT output format) ---
         const size_t N = windowSize;
-        const size_t numBins = N / 2 + 1;
+        const size_t numBins = N / 2 + 1;  // Number of unique frequency bins
         const float binWidth = sampleRate / N;
 
-        // minBin calculation ensures we skip DC bin 0 later
-        const size_t minBin = std::max<size_t>(1, std::ceil(20.0f / binWidth));
-        const size_t maxBin = std::min<size_t>(std::floor(20000.0f / binWidth), numBins - 1);
+        // Define audible frequency range limits in terms of bins
+        // Bin 0 is DC, bin N/2 is Nyquist
+        const size_t minBin = std::max<size_t>(1, static_cast<size_t>(std::ceil(20.0f / binWidth)));          // Skip DC
+        const size_t maxBin = std::min<size_t>(static_cast<size_t>(std::floor(20000.0f / binWidth)), N / 2);  // Up to Nyquist
 
-        // Using a temporary vector for magnitudes (Power = Mag^2)
-        std::vector<float> magnitudes(numBins, 0.f);
+        // Vector to store power (magnitude squared) for each bin
+        std::vector<float> power(numBins, 0.f);
         const size_t N_half = N / 2;
 
-        // Calculate Magnitudes (Power) - Assuming validated FFTReal indexing
-        magnitudes[0] = fftOutput[0] * fftOutput[0];  // DC power (usually ignored later)
-        if (N % 2 == 0) {                             // Nyquist
-            magnitudes[N_half] = fftOutput[N_half] * fftOutput[N_half];
-        }
-        for (size_t k = 1; k < N_half; k++) {  // Bins 1 to N/2 - 1
-            float re = fftOutput[k];
-            float im = fftOutput[N_half + k];   // Verified index for FFTReal
-            magnitudes[k] = re * re + im * im;  // Power
+        // Calculate Power from dsp::RealFFT output (interleaved format)
+        // Output Format: [Re(0), Re(N/2), Re(1), Im(1), Re(2), Im(2), ..., Re(N/2-1), Im(N/2-1)]
+        if (N > 0) {
+            // DC component (Bin 0) - Real part is fftOutput[0]
+            power[0] = fftOutput[0] * fftOutput[0];
+
+            // Nyquist component (Bin N/2) - Real part is fftOutput[1] (pffft convention)
+            if (N_half > 0 && N_half < numBins) {  // Check index validity
+                power[N_half] = fftOutput[1] * fftOutput[1];
+            }
+
+            // Other bins (k = 1 to N/2 - 1)
+            for (size_t k = 1; k < N_half; k++) {
+                size_t indexReal = 2 * k;
+                size_t indexImag = 2 * k + 1;
+                // Check index bounds before accessing
+                if (indexImag < N) {  // fftOutput has size N
+                    float re = fftOutput[indexReal];
+                    float im = fftOutput[indexImag];
+                    power[k] = re * re + im * im;  // Power = Re^2 + Im^2
+                } else {
+                    // Should not happen if loop condition is correct, but safety first
+                    power[k] = 0.f;
+                }
+            }
         }
 
         // --- Bin Grouping (Logarithmic/Linear) using PEAK dB ---
@@ -247,106 +354,139 @@ struct VFDFreqAnalyzer : Module {
         std::vector<float> newLevels(numBands, 0.f);  // Store new levels temporarily
         const float epsilon = 1e-12f;                 // To prevent log10(0)
 
+        // Check if valid range exists
+        if (maxBin < minBin || numBands == 0) {
+            // If no valid bins or no bands, clear levels and return
+            std::fill(bandLevels.begin(), bandLevels.end(), 0.f);
+            std::fill(bandPeaks.begin(), bandPeaks.end(), 0.f);
+            return;
+        }
+
         if (logarithmicBins) {
-            const float minFreq = 20.0f;  // Use actual min frequency for range calculation
+            const float minFreq = 20.0f;
             const float maxFreq = std::min(20000.0f, sampleRate / 2.0f);
+            // Ensure minFreq < maxFreq to avoid issues with pow or log
+            if (minFreq >= maxFreq) {
+                std::fill(bandLevels.begin(), bandLevels.end(), 0.f);
+                std::fill(bandPeaks.begin(), bandPeaks.end(), 0.f);
+                return;
+            }
             const float freqRatio = maxFreq / minFreq;
+            const float logFreqRatio = std::log(freqRatio);  // Use log for potentially better precision
 
             for (size_t b = 0; b < numBands; b++) {
                 float relStart = static_cast<float>(b) / numBands;
                 float relEnd = static_cast<float>(b + 1) / numBands;
-                float bandStartFreq = minFreq * std::pow(freqRatio, relStart);
-                float bandEndFreq = minFreq * std::pow(freqRatio, relEnd);
+                // More numerically stable way for log scale?
+                // float bandStartFreq = minFreq * std::pow(freqRatio, relStart);
+                // float bandEndFreq = minFreq * std::pow(freqRatio, relEnd);
+                float bandStartFreq = minFreq * std::exp(relStart * logFreqRatio);
+                float bandEndFreq = minFreq * std::exp(relEnd * logFreqRatio);
 
                 // Convert frequency edges to bin indices
                 size_t startBin = static_cast<size_t>(bandStartFreq / binWidth);
                 size_t endBin = static_cast<size_t>(bandEndFreq / binWidth);
 
-                // Clamp bins to valid/audible range (minBin already excludes DC)
+                // Clamp bins to valid/audible range [minBin, maxBin]
                 startBin = clamp((float)startBin, minBin, maxBin);
-                endBin = clamp((float)endBin, minBin, maxBin + 1);  // Allow endBin to reach maxBin+1 for loop condition
-                endBin = std::max(endBin, startBin + 1);            // Ensure at least one bin potential
+                // endBin needs careful clamping: It's the exclusive end, so clamp to maxBin+1
+                endBin = clamp((float)endBin, minBin, maxBin + 1);
+                // Ensure at least one potential bin in the range, and start <= end
+                endBin = std::max(endBin, startBin + 1);
 
-                float maxDbInBand = -200.0f;  // Initialize to a very low dB value
+                float maxDbInBand = -200.0f;  // Initialize low
                 bool bandHasData = false;
 
                 // Find the maximum dB value within this band's bins
                 for (size_t i = startBin; i < endBin && i < numBins; i++) {  // Iterate bins in the band
-                    float currentDb = 10.0f * std::log10(magnitudes[i] + epsilon);
+                                                                             // Use the calculated power vector
+                    float currentDb = 10.0f * std::log10(power[i] + epsilon);
                     maxDbInBand = std::max(maxDbInBand, currentDb);
-                    bandHasData = true;  // Mark that we processed at least one bin
+                    bandHasData = true;
                 }
 
                 if (bandHasData) {
                     // Normalize the MAXIMUM dB value found in the band to [0, 1]
-                    // Using -60dB to 0dB range for normalization
-                    newLevels[b] = clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
+                    // Using -60dB to 0dB range for normalization (can be adjusted)
+                    newLevels[b] = rack::math::clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
                 } else {
                     newLevels[b] = 0.f;  // Band had no valid bins
                 }
             }
-        } else {                          // Linear Bins
-                                          // Ensure we only consider bins within the audible range
-            if (maxBin < minBin) return;  // Avoid issues if range is invalid
+        } else {  // Linear Bins
             const size_t audibleBins = maxBin - minBin + 1;
-            if (audibleBins < 1 || numBands < 1) {
-                return;
-            }
-
             // Calculate bins per band, ensuring at least 1
-            size_t binsPerBand = std::max<size_t>(1, audibleBins / numBands);
+            // Use floating point division for potentially more even distribution
+            float binsPerBandFloat = static_cast<float>(audibleBins) / numBands;
 
+            size_t currentBin = minBin;
             for (size_t b = 0; b < numBands; b++) {
-                size_t start = minBin + b * binsPerBand;
-                // Ensure the last band goes all the way to maxBin
-                size_t end = (b == numBands - 1) ? (maxBin + 1) : std::min(start + binsPerBand, maxBin + 1);
-                start = std::min(start, maxBin);  // Clamp start just in case
+                size_t start = currentBin;
+                // Calculate end bin index for this band
+                size_t end = (b == numBands - 1)
+                                 ? (maxBin + 1)  // Last band takes all remaining bins up to maxBin
+                                 : minBin + static_cast<size_t>(std::round((b + 1) * binsPerBandFloat));
 
-                float maxDbInBand = -200.0f;  // Initialize to a very low dB value
+                // Clamp bins to valid range [minBin, maxBin+1] and ensure progress
+                start = clamp((float)start, minBin, maxBin);
+                end = clamp((float)end, minBin, maxBin + 1);
+                end = std::max(end, start);  // Ensure end >= start
+
+                float maxDbInBand = -200.0f;  // Initialize low
                 bool bandHasData = false;
 
                 // Find the maximum dB value within this band's bins
                 for (size_t i = start; i < end && i < numBins; i++) {  // Iterate bins in the band
-                    float currentDb = 10.0f * std::log10(magnitudes[i] + epsilon);
+                                                                       // Use the calculated power vector
+                    float currentDb = 10.0f * std::log10(power[i] + epsilon);
                     maxDbInBand = std::max(maxDbInBand, currentDb);
-                    bandHasData = true;  // Mark that we processed at least one bin
+                    bandHasData = true;
                 }
 
                 if (bandHasData) {
                     // Normalize the MAXIMUM dB value found in the band to [0, 1]
-                    // Using -60dB to 0dB range for normalization
-                    newLevels[b] = clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
+                    newLevels[b] = rack::math::clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
                 } else {
                     newLevels[b] = 0.f;  // Band had no valid bins
                 }
+                // Prepare start bin for the next band
+                currentBin = end;
+                // Safety break if currentBin gets stuck (shouldn't happen with std::max(end, start+1))
+                if (currentBin > maxBin && b < numBands - 1) break;
             }
         }
 
-        // --- Update Band Levels & Peaks (Unchanged Logic, uses newLevels) ---
-        float deltaTime = (float)hopSize / sampleRate;  // Still based on hop rate
-        float fallDecay = std::exp(-deltaTime / params[FALL_DELAY_PARAM].getValue());
-        float peakDecay = std::exp(-deltaTime / params[PEAK_FALL_DELAY_PARAM].getValue());
+        // --- Update Band Levels & Peaks (using calculated newLevels) ---
+        float deltaTime = (float)hopSize / sampleRate;  // Time between FFT calculations
+        // Ensure delays are positive to avoid issues with std::exp
+        float fallDelay = std::max(0.001f, params[FALL_DELAY_PARAM].getValue());
+        float peakFallDelay = std::max(0.001f, params[PEAK_FALL_DELAY_PARAM].getValue());
+        float fallDecay = std::exp(-deltaTime / fallDelay);
+        float peakDecay = std::exp(-deltaTime / peakFallDelay);
 
         for (size_t b = 0; b < numBands; b++) {
-            // Using the temporary newLevels vector calculated based on peak dB
             float newLevel = newLevels[b];
 
-            // Update main level (fast attack, slow decay)
+            // Update main level (fast attack, exponential decay)
             if (newLevel >= bandLevels[b]) {
                 bandLevels[b] = newLevel;
             } else {
                 bandLevels[b] *= fallDecay;
+                // Prevent denormals or excessive decay
+                if (bandLevels[b] < 1e-6f) bandLevels[b] = 0.f;
             }
 
-            // Update peak level (fast attack, slower decay)
+            // Update peak level (fast attack, slower exponential decay)
             if (newLevel >= bandPeaks[b]) {
                 bandPeaks[b] = newLevel;
             } else {
                 bandPeaks[b] *= peakDecay;
+                if (bandPeaks[b] < 1e-6f) bandPeaks[b] = 0.f;
             }
-            // Clamp levels just in case (floating point inaccuracies)
-            bandLevels[b] = clamp(bandLevels[b], 0.f, 1.f);
-            bandPeaks[b] = clamp(bandPeaks[b], 0.f, 1.f);
+
+            // Clamp levels just in case (though normalization should handle it)
+            bandLevels[b] = rack::math::clamp(bandLevels[b], 0.f, 1.f);
+            bandPeaks[b] = rack::math::clamp(bandPeaks[b], 0.f, 1.f);
         }
     }  // End processFFT
 };
