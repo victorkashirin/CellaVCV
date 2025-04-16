@@ -31,12 +31,12 @@ struct LufsMeter : engine::Module {
     // --- Configuration ---
     // Process samples in blocks of this size before feeding to libebur128
     // Powers of 2 are often efficient. 256 samples at 48kHz is ~5.3ms.
-    static const size_t PROCESSING_BLOCK_FRAMES = 256;
+    static const size_t PROCESSING_BLOCK_FRAMES = 2048;
 
     // How often to update the display (reduces GUI overhead)
     // Update roughly 15 times per second (e.g., 48000Hz / 15Hz ≈ 3200 samples)
     // Make it a multiple of PROCESSING_BLOCK_FRAMES if possible
-    static const int DISPLAY_UPDATE_INTERVAL_FRAMES = 3072;  // 12 * 256
+    static const int DISPLAY_UPDATE_INTERVAL_FRAMES = 4096;  // 12 * 256
 
     // --- libebur128 State ---
     ebur128_state* ebur128_handle = nullptr;
@@ -333,11 +333,10 @@ static std::string formatValue(float value, const char* unit = "") {
 
 // Custom display widget (reusable)
 struct ValueDisplayWidget : TransparentWidget {
-    // ... (Keep the previous ValueDisplayWidget implementation) ...
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
     NVGcolor textColor = nvgRGB(0xdf, 0xdf, 0xdf);   // Light text
-    NVGcolor labelColor = nvgRGB(0x90, 0x90, 0x90);  // Dimmer label
+    NVGcolor labelColor = nvgRGB(0x00, 0x00, 0x00);  // Dimmer label
     std::string label;
     float* valuePtr = nullptr;  // Pointer to M, S, I, LRA, PSR value in the module
     std::string unit = "";      // Unit string (e.g., " LU", " dB")
@@ -363,7 +362,7 @@ struct ValueDisplayWidget : TransparentWidget {
         nvgText(args.vg, box.size.x - 3, middleY, text.c_str(), NULL);
 
         // Draw Label (Left-aligned)
-        nvgFontSize(args.vg, 10);  // Smaller size for label
+        nvgFontSize(args.vg, 16);  // Smaller size for label
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgText(args.vg, 3, middleY, label.c_str(), NULL);
@@ -385,7 +384,7 @@ struct LufsMeterWidget : ModuleWidget {
         // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 16.f;
         float displayMarginYPx = 2.f;
-        float displayY_M_Px = 10.f;
+        float displayY_M_Px = 30.f;
         float displayY_S_Px = displayY_M_Px + displayHeightPx + displayMarginYPx;
         float displayY_I_Px = displayY_S_Px + displayHeightPx + displayMarginYPx;
         float displayY_LRA_Px = displayY_I_Px + displayHeightPx + displayMarginYPx;
@@ -394,14 +393,13 @@ struct LufsMeterWidget : ModuleWidget {
         // displayWidthPx uses box.size.x which is already in pixels
         float displayWidthPx = box.size.x - (2 * displayX_Px);  // Use displayX_Px for margin on both sides
 
-        float inputYPx = 112.f;
-        float resetYPx = 95.f;
+        float inputYPx = 329.25;
 
         // Use pixel coordinates directly in Vec()
         // box.size.x is already in pixels
         addInput(createInputCentered<PJ301MPort>(Vec(box.size.x * 0.25f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
         addInput(createInputCentered<PJ301MPort>(Vec(box.size.x * 0.75f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
-        addParam(createParamCentered<VCVButton>(Vec(box.size.x / 2.f, resetYPx), module, LufsMeter::RESET_PARAM));
+        addParam(createParamCentered<VCVButton>(Vec(box.size.x / 2.f, inputYPx), module, LufsMeter::RESET_PARAM));
 
         // Use the calculated pixel values for position and size
         if (module) {
@@ -409,7 +407,7 @@ struct LufsMeterWidget : ModuleWidget {
             momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             momentaryDisplay->module = module;
             momentaryDisplay->valuePtr = &module->momentaryLufs;
-            momentaryDisplay->label = "M";
+            momentaryDisplay->label = "Momentary";
             momentaryDisplay->unit = " LUFS";
             addChild(momentaryDisplay);
 
@@ -417,7 +415,7 @@ struct LufsMeterWidget : ModuleWidget {
             shortTermDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             shortTermDisplay->module = module;
             shortTermDisplay->valuePtr = &module->shortTermLufs;
-            shortTermDisplay->label = "S";
+            shortTermDisplay->label = "SHORT TERM";
             shortTermDisplay->unit = " LUFS";
             addChild(shortTermDisplay);
 
@@ -425,7 +423,7 @@ struct LufsMeterWidget : ModuleWidget {
             integratedDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             integratedDisplay->module = module;
             integratedDisplay->valuePtr = &module->integratedLufs;
-            integratedDisplay->label = "I";
+            integratedDisplay->label = "INTEGRATED";
             integratedDisplay->unit = " LUFS";
             addChild(integratedDisplay);
 
@@ -433,7 +431,7 @@ struct LufsMeterWidget : ModuleWidget {
             lraDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             lraDisplay->module = module;
             lraDisplay->valuePtr = &module->loudnessRange;
-            lraDisplay->label = "LRA";
+            lraDisplay->label = "LOUDNESS RANGE";
             lraDisplay->unit = " LU";
             addChild(lraDisplay);
 
