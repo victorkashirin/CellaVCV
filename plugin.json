@@ -93,6 +93,16 @@
         "Clock modulator",
         "Logic"
       ]
+    },
+    {
+      "slug": "LufsMeter",
+      "name": "LUFS Meter",
+      "description": "Advanced 8-bit digital shift register with clock, gates or trigger outputs, 4 DAC-based CV generators and various self-patching capabilities",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#cognitive-shift",
+      "keywords": "lfsr nlfsr feedback r2r dac",
+      "tags": [
+        "Utility"
+      ]
     }
   ]
 }

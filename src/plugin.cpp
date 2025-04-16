@@ -12,4 +12,5 @@ void init(Plugin *p) {
     p->addModel(modelResonators);
     p->addModel(modelBytebeat);
     p->addModel(modelCognitiveShift);
+    p->addModel(modelLufsMeter);
 }
