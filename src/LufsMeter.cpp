@@ -493,15 +493,17 @@ struct LufsMeterWidget : ModuleWidget {
         // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 16.f;
         float displayMarginYPx = 2.f;
-        float displayY_M_Px = 35.f;
-        float displayY_S = displayY_M_Px + displayHeightPx + displayMarginYPx;
-        float displayY_I = displayY_S + displayHeightPx + displayMarginYPx;
-        float displayY_LRA = displayY_I + displayHeightPx + displayMarginYPx;
-        float displayY_PSR = displayY_LRA + displayHeightPx + displayMarginYPx;
-        float displayY_PLR = displayY_PSR + displayHeightPx + displayMarginYPx;
-        float displayY_MMAX = displayY_PLR + displayHeightPx + displayMarginYPx;
-        float displayY_SMAX = displayY_MMAX + displayHeightPx + displayMarginYPx;
-        float displayY_TPM = displayY_SMAX + displayHeightPx + displayMarginYPx;
+        float yStep = displayHeightPx + displayMarginYPx;
+        float yStart = 35.f;
+        float displayY_M_Px = yStart;
+        float displayY_S = yStart + 1 * yStep;
+        float displayY_I = yStart + 2 * yStep;
+        float displayY_LRA = yStart + 3 * yStep;
+        float displayY_PSR = yStart + 4 * yStep;
+        float displayY_PLR = yStart + 5 * yStep;
+        float displayY_MMAX = yStart + 6 * yStep;
+        float displayY_SMAX = yStart + 7 * yStep;
+        float displayY_TPM = yStart + 8 * yStep;
         float displayX_Px = 3.f;
         // displayWidthPx uses box.size.x which is already in pixels
         float displayWidthPx = box.size.x - (2 * displayX_Px);  // Use displayX_Px for margin on both sides
@@ -520,7 +522,7 @@ struct LufsMeterWidget : ModuleWidget {
             momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             momentaryDisplay->module = module;
             momentaryDisplay->valuePtr = &module->momentaryLufs;
-            momentaryDisplay->label = "Momentary";
+            momentaryDisplay->label = "MOMENTARY";
             momentaryDisplay->unit = " LUFS";
             addChild(momentaryDisplay);
 
@@ -584,7 +586,7 @@ struct LufsMeterWidget : ModuleWidget {
             tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             tpmDisplay->module = module;
             tpmDisplay->valuePtr = &module->truePeakMax;
-            tpmDisplay->label = "True Peak MAX";
+            tpmDisplay->label = "TRUE PEAK MAX";
             tpmDisplay->unit = " dB";
             addChild(tpmDisplay);
         }
