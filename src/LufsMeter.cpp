@@ -61,6 +61,13 @@ struct LufsMeter : engine::Module {
     float maxTruePeakL = -INFINITY;
     float maxTruePeakR = -INFINITY;
 
+    // Settings for peak history
+    const float PEAK_HISTORY_SECONDS = 3.0f;
+    size_t peak_history_size_chunks = 0;  // Calculate in constructor or onSampleRateChange
+
+    // History buffer for chunk peaks (in dBTP)
+    std::deque<float> chunk_peak_history_db;
+
     // --- Control & Timing ---
     dsp::SchmittTrigger resetTrigger;
     dsp::ClockDivider displayUpdateDivider;
@@ -78,6 +85,7 @@ struct LufsMeter : engine::Module {
 
         // Initialize state
         resetMeter();
+        calculate_history_size();
     }
 
     ~LufsMeter() override {
@@ -86,6 +94,41 @@ struct LufsMeter : engine::Module {
             // processBlockBuffer();
             ebur128_destroy(&ebur128_handle);
         }
+    }
+
+    void calculate_history_size() {
+        // Assuming 'chunk_size_frames' is the number of frames you process in each call
+        int chunk_size_frames = PROCESSING_BLOCK_FRAMES;  // Or get this from your engine
+        // to ebur128_add_frames_*
+        float sampleRate = APP->engine->getSampleRate();
+        if (sampleRate > 0 && chunk_size_frames > 0) {
+            peak_history_size_chunks = static_cast<size_t>(
+                std::ceil(PEAK_HISTORY_SECONDS * sampleRate / (float)chunk_size_frames));
+            // Ensure a minimum history size if calculation is very small
+            if (peak_history_size_chunks < 5) peak_history_size_chunks = 5;
+        } else {
+            peak_history_size_chunks = 100;  // Default if sample rate/chunk size invalid
+        }
+        // Optional: Trim deque if history size changed significantly
+        while (chunk_peak_history_db.size() > peak_history_size_chunks) {
+            chunk_peak_history_db.pop_front();
+        }
+    }
+
+    float get_max_from_deque(const std::deque<float>& dq) {
+        if (dq.empty()) {
+            return -INFINITY;
+        }
+        float max_val = -INFINITY;
+        bool found_valid = false;
+        for (float val : dq) {
+            if (val > max_val) {
+                max_val = val;
+                found_valid = true;
+            }
+        }
+        // If only -inf values were present, return -inf
+        return found_valid ? max_val : -INFINITY;
     }
 
     // Function to process the accumulated buffer
@@ -114,7 +157,7 @@ struct LufsMeter : engine::Module {
 
     // Function to query libebur128 and update internal state variables
     void updateLoudnessValues() {
-        if (!ebur128_handle) return;
+        if (!ebur128_handle || peak_history_size_chunks == 0) return;
 
         int err;
         double loudness_value;
@@ -182,17 +225,26 @@ struct LufsMeter : engine::Module {
         // --- Correctly Calculate PSR ---
         // Use the maximum of the CURRENT peaks from this update cycle
         float currentMaxTruePeak = std::fmax(currentPeakL, currentPeakR);
+        chunk_peak_history_db.push_back(currentMaxTruePeak);
+
+        // Remove oldest entry if history buffer is full
+        while (chunk_peak_history_db.size() > peak_history_size_chunks) {
+            chunk_peak_history_db.pop_front();
+        }
+
+        // --- Find Max Peak over the History Window ---
+        float peak_over_window_dB = get_max_from_deque(chunk_peak_history_db);
 
         // Check if both current short-term and current max peak are valid
-        if (currentMaxTruePeak > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+        if (peak_over_window_dB > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
             // PSR = Current Max True Peak - Current Short Term Loudness
-            psrValue = currentMaxTruePeak - shortTermLufs;
+            psrValue = peak_over_window_dB - shortTermLufs;
         } else {
             psrValue = -INFINITY;  // Not enough valid data for current PSR
         }
 
         truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
-        momentaryMax = currentMaxTruePeak;
+        momentaryMax = peak_over_window_dB;
 
         // Note: You still have maxTruePeakL, maxTruePeakR, and maxShortTermLufs if you
         // want to display those historical maximums separately elsewhere.
@@ -232,6 +284,7 @@ struct LufsMeter : engine::Module {
         // Clear internal buffer state
         bufferPosition = 0;
         // std::fill(processingBuffer.begin(), processingBuffer.end(), 0.f); // Optional: zero out buffer
+        chunk_peak_history_db.clear();
 
         // Reset ALL displayed values and tracked maximums
         momentaryLufs = -INFINITY;
@@ -253,6 +306,7 @@ struct LufsMeter : engine::Module {
 
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
         Module::onSampleRateChange(e);
+        calculate_history_size();
         resetMeter();  // Re-initialize ebur128 and reset state
     }
 
