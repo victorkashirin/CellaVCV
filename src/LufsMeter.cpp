@@ -15,6 +15,7 @@ struct LufsMeterWidget;  // Forward declaration
 
 const float ALMOST_NEGATIVE_INFINITY = -99.0f;
 const float VOLTAGE_SCALE = 0.1f;  // Scale +/-10V to +/-1.0f
+const float LOG_EPSILON = 1e-10f;  // Or adjust as needed
 
 //-----------------------------------------------------------------------------
 // Module Logic: LufsMeter (Corrected with Buffering)
@@ -52,6 +53,8 @@ struct LufsMeter : engine::Module {
     float integratedLufs = -INFINITY;
     float loudnessRange = -INFINITY;
     float psrValue = -INFINITY;
+    float truePeakMax = -INFINITY;
+    float momentaryMax = -INFINITY;
 
     // --- Values tracked manually for PSR calculation ---
     float maxShortTermLufs = -INFINITY;
@@ -122,11 +125,10 @@ struct LufsMeter : engine::Module {
 
         err = ebur128_loudness_shortterm(ebur128_handle, &loudness_value);
         if (err == EBUR128_SUCCESS) {
-            float currentShortTerm = (float)loudness_value;
-            shortTermLufs = currentShortTerm;
-            // Update Max Short Term LUFS
-            if (currentShortTerm > maxShortTermLufs && currentShortTerm > ALMOST_NEGATIVE_INFINITY) {
-                maxShortTermLufs = currentShortTerm;
+            shortTermLufs = (float)loudness_value;  // Store CURRENT short-term LUFS
+            // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
+            if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+                maxShortTermLufs = shortTermLufs;
             }
         } else {
             shortTermLufs = -INFINITY;
@@ -142,33 +144,58 @@ struct LufsMeter : engine::Module {
             loudnessRange = (float)loudness_value;
         }  // Else: Keep old value
 
-        // --- Update True Peak and Max Peaks ---
+        // --- Get Current True Peak Values ---
+        float currentPeakL = -INFINITY;
+        float currentPeakR = -INFINITY;  // Initialize for the current update cycle
+
         if (currentInputChannels >= 1) {
-            err = ebur128_true_peak(ebur128_handle, 0, &peak_value);
+            err = ebur128_prev_true_peak(ebur128_handle, 0, &peak_value);
             if (err == EBUR128_SUCCESS) {
-                float currentPeakL = (float)peak_value;
+                float linear_amp = (float)peak_value;  // Store CURRENT peak L
+                if (linear_amp > LOG_EPSILON) {
+                    currentPeakL = 20.0f * std::log10(linear_amp);
+                }
+
+                // Update Max True Peak L (Keep this for display if you want a separate max value)
                 if (currentPeakL > maxTruePeakL && currentPeakL > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakL = currentPeakL;
                 }
             }
         }
         if (currentInputChannels == 2) {
-            err = ebur128_true_peak(ebur128_handle, 1, &peak_value);
+            err = ebur128_prev_true_peak(ebur128_handle, 1, &peak_value);
             if (err == EBUR128_SUCCESS) {
-                float currentPeakR = (float)peak_value;
+                float linear_amp = (float)peak_value;  // Store CURRENT peak L
+                if (linear_amp > LOG_EPSILON) {
+                    currentPeakR = 20.0f * std::log10(linear_amp);
+                }
+                // Update Max True Peak R (Keep this for display if you want a separate max value)
                 if (currentPeakR > maxTruePeakR && currentPeakR > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakR = currentPeakR;
                 }
             }
+        } else {
+            // If mono, use Left peak for Right peak as well for max calculation
+            currentPeakR = currentPeakL;
         }
 
-        // --- Calculate PSR ---
-        float overallMaxTruePeak = std::fmax(maxTruePeakL, maxTruePeakR);
-        if (overallMaxTruePeak > ALMOST_NEGATIVE_INFINITY && maxShortTermLufs > ALMOST_NEGATIVE_INFINITY) {
-            psrValue = overallMaxTruePeak - maxShortTermLufs;
+        // --- Correctly Calculate PSR ---
+        // Use the maximum of the CURRENT peaks from this update cycle
+        float currentMaxTruePeak = std::fmax(currentPeakL, currentPeakR);
+
+        // Check if both current short-term and current max peak are valid
+        if (currentMaxTruePeak > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+            // PSR = Current Max True Peak - Current Short Term Loudness
+            psrValue = currentMaxTruePeak - shortTermLufs;
         } else {
-            psrValue = -INFINITY;  // Not enough data
+            psrValue = -INFINITY;  // Not enough valid data for current PSR
         }
+
+        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
+        momentaryMax = currentMaxTruePeak;
+
+        // Note: You still have maxTruePeakL, maxTruePeakR, and maxShortTermLufs if you
+        // want to display those historical maximums separately elsewhere.
     }
 
     // Reset meter state completely
@@ -189,7 +216,7 @@ struct LufsMeter : engine::Module {
                 channels,
                 (size_t)sampleRate,
                 EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I |
-                    EBUR128_MODE_LRA | EBUR128_MODE_TRUE_PEAK);
+                    EBUR128_MODE_LRA | EBUR128_MODE_SAMPLE_PEAK | EBUR128_MODE_TRUE_PEAK);
 
             if (!ebur128_handle) {
                 std::cerr << "LufsMeter: Failed to re-initialize ebur128\n";
@@ -215,6 +242,8 @@ struct LufsMeter : engine::Module {
         maxShortTermLufs = -INFINITY;
         maxTruePeakL = -INFINITY;
         maxTruePeakR = -INFINITY;
+        truePeakMax = -INFINITY;
+        momentaryMax = -INFINITY;
     }
 
     void onReset(const ResetEvent& e) override {
@@ -389,6 +418,8 @@ struct LufsMeterWidget : ModuleWidget {
         float displayY_I_Px = displayY_S_Px + displayHeightPx + displayMarginYPx;
         float displayY_LRA_Px = displayY_I_Px + displayHeightPx + displayMarginYPx;
         float displayY_PSR_Px = displayY_LRA_Px + displayHeightPx + displayMarginYPx;
+        float displayY_TPM_Px = displayY_PSR_Px + displayHeightPx + displayMarginYPx;
+        float displayY_MOMAX_Px = displayY_TPM_Px + displayHeightPx + displayMarginYPx;
         float displayX_Px = 3.f;
         // displayWidthPx uses box.size.x which is already in pixels
         float displayWidthPx = box.size.x - (2 * displayX_Px);  // Use displayX_Px for margin on both sides
@@ -439,9 +470,25 @@ struct LufsMeterWidget : ModuleWidget {
             psrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             psrDisplay->module = module;
             psrDisplay->valuePtr = &module->psrValue;
-            psrDisplay->label = "PSR";
+            psrDisplay->label = "DYNAMICS PSR";
             psrDisplay->unit = " dB";
             addChild(psrDisplay);
+
+            ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_TPM_Px));
+            tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            tpmDisplay->module = module;
+            tpmDisplay->valuePtr = &module->truePeakMax;
+            tpmDisplay->label = "True Peak MAX";
+            tpmDisplay->unit = " dB";
+            addChild(tpmDisplay);
+
+            ValueDisplayWidget* momaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_MOMAX_Px));
+            momaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            momaxDisplay->module = module;
+            momaxDisplay->valuePtr = &module->momentaryMax;
+            momaxDisplay->label = "Momentary MAX";
+            momaxDisplay->unit = " dB";
+            addChild(momaxDisplay);
         }
     }
 };
