@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "components.hpp"
 #include "plugin.hpp"
 
 // Include the dependency header
@@ -53,20 +54,22 @@ struct LufsMeter : engine::Module {
     float integratedLufs = -INFINITY;
     float loudnessRange = -INFINITY;
     float psrValue = -INFINITY;
+    float plrValue = -INFINITY;
     float truePeakMax = -INFINITY;
-    float momentaryMax = -INFINITY;
+    float truePeakSlidingMax = -INFINITY;
 
     // --- Values tracked manually for PSR calculation ---
     float maxShortTermLufs = -INFINITY;
+    float maxMomentaryLufs = -INFINITY;
     float maxTruePeakL = -INFINITY;
     float maxTruePeakR = -INFINITY;
 
     // Settings for peak history
-    const float PEAK_HISTORY_SECONDS = 3.0f;
-    size_t peak_history_size_chunks = 0;  // Calculate in constructor or onSampleRateChange
+    const float PEAK_HISTORY_SECONDS = 2.5f;
+    size_t peakHistorySizeChunks = 0;
 
     // History buffer for chunk peaks (in dBTP)
-    std::deque<float> chunk_peak_history_db;
+    std::deque<float> chunkPeakHistoryDB;
 
     // --- Control & Timing ---
     dsp::SchmittTrigger resetTrigger;
@@ -102,16 +105,16 @@ struct LufsMeter : engine::Module {
         // to ebur128_add_frames_*
         float sampleRate = APP->engine->getSampleRate();
         if (sampleRate > 0 && chunk_size_frames > 0) {
-            peak_history_size_chunks = static_cast<size_t>(
+            peakHistorySizeChunks = static_cast<size_t>(
                 std::ceil(PEAK_HISTORY_SECONDS * sampleRate / (float)chunk_size_frames));
             // Ensure a minimum history size if calculation is very small
-            if (peak_history_size_chunks < 5) peak_history_size_chunks = 5;
+            if (peakHistorySizeChunks < 5) peakHistorySizeChunks = 5;
         } else {
-            peak_history_size_chunks = 100;  // Default if sample rate/chunk size invalid
+            peakHistorySizeChunks = 100;  // Default if sample rate/chunk size invalid
         }
         // Optional: Trim deque if history size changed significantly
-        while (chunk_peak_history_db.size() > peak_history_size_chunks) {
-            chunk_peak_history_db.pop_front();
+        while (chunkPeakHistoryDB.size() > peakHistorySizeChunks) {
+            chunkPeakHistoryDB.pop_front();
         }
     }
 
@@ -157,18 +160,26 @@ struct LufsMeter : engine::Module {
 
     // Function to query libebur128 and update internal state variables
     void updateLoudnessValues() {
-        if (!ebur128_handle || peak_history_size_chunks == 0) return;
+        if (!ebur128_handle || peakHistorySizeChunks == 0) return;
 
         int err;
-        double loudness_value;
-        double peak_value;
+        double loudnessValue;
+        double peakValue;
 
-        err = ebur128_loudness_momentary(ebur128_handle, &loudness_value);
-        momentaryLufs = (err == EBUR128_SUCCESS) ? (float)loudness_value : -INFINITY;
-
-        err = ebur128_loudness_shortterm(ebur128_handle, &loudness_value);
+        err = ebur128_loudness_momentary(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
-            shortTermLufs = (float)loudness_value;  // Store CURRENT short-term LUFS
+            momentaryLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
+            // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
+            if (momentaryLufs > maxMomentaryLufs && momentaryLufs > ALMOST_NEGATIVE_INFINITY) {
+                maxMomentaryLufs = momentaryLufs;
+            }
+        } else {
+            momentaryLufs = -INFINITY;
+        }
+
+        err = ebur128_loudness_shortterm(ebur128_handle, &loudnessValue);
+        if (err == EBUR128_SUCCESS) {
+            shortTermLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
             // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
             if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
                 maxShortTermLufs = shortTermLufs;
@@ -177,14 +188,14 @@ struct LufsMeter : engine::Module {
             shortTermLufs = -INFINITY;
         }
 
-        err = ebur128_loudness_global(ebur128_handle, &loudness_value);
+        err = ebur128_loudness_global(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
-            integratedLufs = (float)loudness_value;
+            integratedLufs = (float)loudnessValue;
         }  // Else: Keep old value
 
-        err = ebur128_loudness_range(ebur128_handle, &loudness_value);
+        err = ebur128_loudness_range(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
-            loudnessRange = (float)loudness_value;
+            loudnessRange = (float)loudnessValue;
         }  // Else: Keep old value
 
         // --- Get Current True Peak Values ---
@@ -192,9 +203,9 @@ struct LufsMeter : engine::Module {
         float currentPeakR = -INFINITY;  // Initialize for the current update cycle
 
         if (currentInputChannels >= 1) {
-            err = ebur128_prev_true_peak(ebur128_handle, 0, &peak_value);
+            err = ebur128_prev_true_peak(ebur128_handle, 0, &peakValue);
             if (err == EBUR128_SUCCESS) {
-                float linear_amp = (float)peak_value;  // Store CURRENT peak L
+                float linear_amp = (float)peakValue;  // Store CURRENT peak L
                 if (linear_amp > LOG_EPSILON) {
                     currentPeakL = 20.0f * std::log10(linear_amp);
                 }
@@ -206,9 +217,9 @@ struct LufsMeter : engine::Module {
             }
         }
         if (currentInputChannels == 2) {
-            err = ebur128_prev_true_peak(ebur128_handle, 1, &peak_value);
+            err = ebur128_prev_true_peak(ebur128_handle, 1, &peakValue);
             if (err == EBUR128_SUCCESS) {
-                float linear_amp = (float)peak_value;  // Store CURRENT peak L
+                float linear_amp = (float)peakValue;  // Store CURRENT peak L
                 if (linear_amp > LOG_EPSILON) {
                     currentPeakR = 20.0f * std::log10(linear_amp);
                 }
@@ -225,27 +236,33 @@ struct LufsMeter : engine::Module {
         // --- Correctly Calculate PSR ---
         // Use the maximum of the CURRENT peaks from this update cycle
         float currentMaxTruePeak = std::fmax(currentPeakL, currentPeakR);
-        chunk_peak_history_db.push_back(currentMaxTruePeak);
+        chunkPeakHistoryDB.push_back(currentMaxTruePeak);
 
         // Remove oldest entry if history buffer is full
-        while (chunk_peak_history_db.size() > peak_history_size_chunks) {
-            chunk_peak_history_db.pop_front();
+        while (chunkPeakHistoryDB.size() > peakHistorySizeChunks) {
+            chunkPeakHistoryDB.pop_front();
         }
 
         // --- Find Max Peak over the History Window ---
-        float peak_over_window_dB = get_max_from_deque(chunk_peak_history_db);
+        float peakOverWindowDB = get_max_from_deque(chunkPeakHistoryDB);
 
         // Check if both current short-term and current max peak are valid
-        if (peak_over_window_dB > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+        if (peakOverWindowDB > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
             // PSR = Current Max True Peak - Current Short Term Loudness
-            psrValue = peak_over_window_dB - shortTermLufs;
+            psrValue = peakOverWindowDB - shortTermLufs;
         } else {
             psrValue = -INFINITY;  // Not enough valid data for current PSR
         }
 
-        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
-        momentaryMax = peak_over_window_dB;
+        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR) + 0.4f;
+        truePeakSlidingMax = peakOverWindowDB;
 
+        if (truePeakMax > ALMOST_NEGATIVE_INFINITY && integratedLufs > ALMOST_NEGATIVE_INFINITY) {
+            // Calculate PLR (Peak to Loudness Ratio)
+            plrValue = truePeakMax - integratedLufs;
+        } else {
+            plrValue = -INFINITY;  // Not enough valid data for current PLR
+        }
         // Note: You still have maxTruePeakL, maxTruePeakR, and maxShortTermLufs if you
         // want to display those historical maximums separately elsewhere.
     }
@@ -284,7 +301,7 @@ struct LufsMeter : engine::Module {
         // Clear internal buffer state
         bufferPosition = 0;
         // std::fill(processingBuffer.begin(), processingBuffer.end(), 0.f); // Optional: zero out buffer
-        chunk_peak_history_db.clear();
+        chunkPeakHistoryDB.clear();
 
         // Reset ALL displayed values and tracked maximums
         momentaryLufs = -INFINITY;
@@ -292,11 +309,13 @@ struct LufsMeter : engine::Module {
         integratedLufs = -INFINITY;
         loudnessRange = -INFINITY;
         psrValue = -INFINITY;
+        plrValue = -INFINITY;
         maxShortTermLufs = -INFINITY;
+        maxMomentaryLufs = -INFINITY;
         maxTruePeakL = -INFINITY;
         maxTruePeakR = -INFINITY;
         truePeakMax = -INFINITY;
-        momentaryMax = -INFINITY;
+        truePeakSlidingMax = -INFINITY;
     }
 
     void onReset(const ResetEvent& e) override {
@@ -333,6 +352,10 @@ struct LufsMeter : engine::Module {
                 // Keep integrated unless reset
                 loudnessRange = -INFINITY;
                 psrValue = -INFINITY;
+                plrValue = -INFINITY;
+                truePeakMax = -INFINITY;
+                truePeakSlidingMax = -INFINITY;
+                maxShortTermLufs = -INFINITY;
             }
             return;
         }
@@ -393,7 +416,9 @@ struct LufsMeter : engine::Module {
         shortTermLufs = -INFINITY;
         loudnessRange = -INFINITY;
         psrValue = -INFINITY;
+        plrValue = -INFINITY;
         maxShortTermLufs = -INFINITY;
+        maxMomentaryLufs = -INFINITY;
         maxTruePeakL = -INFINITY;
         maxTruePeakR = -INFINITY;
         // libebur128 state is reset via onSampleRateChange/constructor during load.
@@ -418,8 +443,8 @@ static std::string formatValue(float value, const char* unit = "") {
 struct ValueDisplayWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
-    NVGcolor textColor = nvgRGB(0xdf, 0xdf, 0xdf);   // Light text
-    NVGcolor labelColor = nvgRGB(0x00, 0x00, 0x00);  // Dimmer label
+    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
+    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
     std::string label;
     float* valuePtr = nullptr;  // Pointer to M, S, I, LRA, PSR value in the module
     std::string unit = "";      // Unit string (e.g., " LU", " dB")
@@ -455,25 +480,28 @@ struct ValueDisplayWidget : TransparentWidget {
 struct LufsMeterWidget : ModuleWidget {
     LufsMeterWidget(LufsMeter* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/LufsMeterPanel.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/LufsMeter.svg"), asset::plugin(pluginInstance, "res/LufsMeter-dark.svg")));
 
-        // Screws remain the same, using Rack constants (which are in pixels)
-        addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, 0)));
-        addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, 0)));
-        addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
-        addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        addChild(createWidget<ScrewGrey>(Vec(0, 0)));
+        addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+
+        LedDisplay* ledDisplay = createWidget<LedDisplay>(Vec(0, 26));
+        ledDisplay->box.size = Vec(225, 180);
+        addChild(ledDisplay);
 
         // Define positions and sizes directly in pixels
         // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 16.f;
         float displayMarginYPx = 2.f;
-        float displayY_M_Px = 30.f;
-        float displayY_S_Px = displayY_M_Px + displayHeightPx + displayMarginYPx;
-        float displayY_I_Px = displayY_S_Px + displayHeightPx + displayMarginYPx;
-        float displayY_LRA_Px = displayY_I_Px + displayHeightPx + displayMarginYPx;
-        float displayY_PSR_Px = displayY_LRA_Px + displayHeightPx + displayMarginYPx;
-        float displayY_TPM_Px = displayY_PSR_Px + displayHeightPx + displayMarginYPx;
-        float displayY_MOMAX_Px = displayY_TPM_Px + displayHeightPx + displayMarginYPx;
+        float displayY_M_Px = 35.f;
+        float displayY_S = displayY_M_Px + displayHeightPx + displayMarginYPx;
+        float displayY_I = displayY_S + displayHeightPx + displayMarginYPx;
+        float displayY_LRA = displayY_I + displayHeightPx + displayMarginYPx;
+        float displayY_PSR = displayY_LRA + displayHeightPx + displayMarginYPx;
+        float displayY_PLR = displayY_PSR + displayHeightPx + displayMarginYPx;
+        float displayY_MMAX = displayY_PLR + displayHeightPx + displayMarginYPx;
+        float displayY_SMAX = displayY_MMAX + displayHeightPx + displayMarginYPx;
+        float displayY_TPM = displayY_SMAX + displayHeightPx + displayMarginYPx;
         float displayX_Px = 3.f;
         // displayWidthPx uses box.size.x which is already in pixels
         float displayWidthPx = box.size.x - (2 * displayX_Px);  // Use displayX_Px for margin on both sides
@@ -482,9 +510,9 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Use pixel coordinates directly in Vec()
         // box.size.x is already in pixels
-        addInput(createInputCentered<PJ301MPort>(Vec(box.size.x * 0.25f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
-        addInput(createInputCentered<PJ301MPort>(Vec(box.size.x * 0.75f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
-        addParam(createParamCentered<VCVButton>(Vec(box.size.x / 2.f, inputYPx), module, LufsMeter::RESET_PARAM));
+        addInput(createInputCentered<PJ301MPort>(Vec(22.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
+        addInput(createInputCentered<PJ301MPort>(Vec(67.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
+        addParam(createParamCentered<VCVButton>(Vec(112.5f, inputYPx), module, LufsMeter::RESET_PARAM));
 
         // Use the calculated pixel values for position and size
         if (module) {
@@ -496,7 +524,7 @@ struct LufsMeterWidget : ModuleWidget {
             momentaryDisplay->unit = " LUFS";
             addChild(momentaryDisplay);
 
-            ValueDisplayWidget* shortTermDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_S_Px));
+            ValueDisplayWidget* shortTermDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_S));
             shortTermDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             shortTermDisplay->module = module;
             shortTermDisplay->valuePtr = &module->shortTermLufs;
@@ -504,7 +532,7 @@ struct LufsMeterWidget : ModuleWidget {
             shortTermDisplay->unit = " LUFS";
             addChild(shortTermDisplay);
 
-            ValueDisplayWidget* integratedDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_I_Px));
+            ValueDisplayWidget* integratedDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_I));
             integratedDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             integratedDisplay->module = module;
             integratedDisplay->valuePtr = &module->integratedLufs;
@@ -512,7 +540,7 @@ struct LufsMeterWidget : ModuleWidget {
             integratedDisplay->unit = " LUFS";
             addChild(integratedDisplay);
 
-            ValueDisplayWidget* lraDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_LRA_Px));
+            ValueDisplayWidget* lraDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_LRA));
             lraDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             lraDisplay->module = module;
             lraDisplay->valuePtr = &module->loudnessRange;
@@ -520,29 +548,45 @@ struct LufsMeterWidget : ModuleWidget {
             lraDisplay->unit = " LU";
             addChild(lraDisplay);
 
-            ValueDisplayWidget* psrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_PSR_Px));
+            ValueDisplayWidget* psrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_PSR));
             psrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             psrDisplay->module = module;
             psrDisplay->valuePtr = &module->psrValue;
-            psrDisplay->label = "DYNAMICS PSR";
-            psrDisplay->unit = " dB";
+            psrDisplay->label = "DYNAMICS (PSR)";
+            psrDisplay->unit = " LU";
             addChild(psrDisplay);
 
-            ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_TPM_Px));
+            ValueDisplayWidget* plrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_PLR));
+            plrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            plrDisplay->module = module;
+            plrDisplay->valuePtr = &module->plrValue;
+            plrDisplay->label = "AVG. DYNAMICS (PLR)";
+            plrDisplay->unit = " LU";
+            addChild(plrDisplay);
+
+            ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_MMAX));
+            mMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            mMaxDisplay->module = module;
+            mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
+            mMaxDisplay->label = "MOMENTARY MAX";
+            mMaxDisplay->unit = " LUFS";
+            addChild(mMaxDisplay);
+
+            ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_SMAX));
+            sMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            sMaxDisplay->module = module;
+            sMaxDisplay->valuePtr = &module->maxShortTermLufs;
+            sMaxDisplay->label = "SHORT TERM MAX";
+            sMaxDisplay->unit = " LUFS";
+            addChild(sMaxDisplay);
+
+            ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_TPM));
             tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             tpmDisplay->module = module;
             tpmDisplay->valuePtr = &module->truePeakMax;
             tpmDisplay->label = "True Peak MAX";
             tpmDisplay->unit = " dB";
             addChild(tpmDisplay);
-
-            ValueDisplayWidget* momaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_MOMAX_Px));
-            momaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
-            momaxDisplay->module = module;
-            momaxDisplay->valuePtr = &module->momentaryMax;
-            momaxDisplay->label = "Momentary MAX";
-            momaxDisplay->unit = " dB";
-            addChild(momaxDisplay);
         }
     }
 };
