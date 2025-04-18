@@ -451,7 +451,8 @@ struct ValueDisplayWidget : TransparentWidget {
     std::string unit = "";      // Unit string (e.g., " LU", " dB")
 
     ValueDisplayWidget() {
-        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/Iosevka-Regular.ttf"));
+        // font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/Iosevka-Regular.ttf"));
+        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
         if (!font) {
             font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));  // Fallback font
         }
@@ -461,27 +462,39 @@ struct ValueDisplayWidget : TransparentWidget {
         if (!module || !valuePtr || !font) return;
 
         nvgFontFaceId(args.vg, font->handle);
-        float middleY = box.size.y * 0.9f;
+        float middleY = box.size.y * 0.5f;
 
-        // Draw Label (Left-aligned)
-        nvgFontSize(args.vg, 16);  // Smaller size for label
-        nvgFillColor(args.vg, labelColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-        nvgText(args.vg, 3, middleY, label.c_str(), NULL);
+        // nvgStrokeColor(args.vg, valueColor);
+        // nvgStrokeWidth(args.vg, 0.2f);
+        // nvgBeginPath(args.vg);
+        // nvgMoveTo(args.vg, 0, 0);
+        // nvgLineTo(args.vg, box.size.x, 0);
+        // nvgLineTo(args.vg, box.size.x, box.size.y);
+        // nvgLineTo(args.vg, 0, box.size.y);
+        // nvgLineTo(args.vg, 0, 0);
+
+        // nvgMoveTo(args.vg, 0, box.size.y * 0.5);
+        // nvgLineTo(args.vg, box.size.x, box.size.y * 0.5);
+
+        // nvgStroke(args.vg);
 
         // Draw Value (Right-aligned)
-        nvgFontSize(args.vg, 24);  // Adjusted size to fit more displays
+        nvgFontSize(args.vg, 21);  // Adjusted size to fit more displays
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
         std::string text = formatValue(*valuePtr);
-        nvgText(args.vg, box.size.x - 35, middleY + 1.5f, text.c_str(), NULL);
-        // nvgText(args.vg, 5, middleY + 1.5f, text.c_str(), NULL);
+        nvgText(args.vg, box.size.x - 40, middleY, text.c_str(), NULL);
 
-        nvgFontSize(args.vg, 16);  // Adjusted size to fit more displays
+        nvgFontSize(args.vg, 14);  // Adjusted size to fit more displays
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-        nvgText(args.vg, box.size.x - 38, middleY, unit.c_str(), NULL);
-        // nvgText(args.vg, 4, middleY - 0.5f, unit.c_str(), NULL);
+        nvgText(args.vg, box.size.x - 43, middleY - 1.5, unit.c_str(), NULL);
+
+        // Draw Label (Left-aligned)
+        nvgFontSize(args.vg, 13);  // Smaller size for label
+        nvgFillColor(args.vg, labelColor);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_CENTER);
+        nvgText(args.vg, 0.5 * box.size.x, 0.7 * box.size.y - 2, label.c_str(), NULL);
 
         // float lineY = middleY - 2;  // Adjust this offset as needed
 
@@ -508,10 +521,10 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Define positions and sizes directly in pixels
         // Assuming these were the intended pixel values previously passed to mm2px
-        float displayHeightPx = 16.f;
+        float displayHeightPx = 70.f;
         float displayMarginYPx = 15.f;
-        float yStep = displayHeightPx + displayMarginYPx;
-        float yStart = 38.f;
+        float yStep = displayHeightPx;
+        float yStart = 26.f;
         float displayY_M_Px = yStart;
         float displayY_S = yStart + 1 * yStep;
         float displayY_I = yStart + 2 * yStep;
@@ -521,9 +534,9 @@ struct LufsMeterWidget : ModuleWidget {
         float displayY_MMAX = yStart + 6 * yStep;
         float displayY_SMAX = yStart + 7 * yStep;
         float displayY_TPM = yStart + 8 * yStep;
-        float displayX_Px = 3.f;
+        float displayX_Px = 25.f;
         // displayWidthPx uses box.size.x which is already in pixels
-        float displayWidthPx = box.size.x - (2 * displayX_Px);  // Use displayX_Px for margin on both sides
+        float displayWidthPx = 100;  // Use displayX_Px for margin on both sides
 
         float inputYPx = 329.25;
 
@@ -535,15 +548,15 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Use the calculated pixel values for position and size
         if (module) {
-            ValueDisplayWidget* momentaryDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_M_Px));
-            momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
-            momentaryDisplay->module = module;
-            momentaryDisplay->valuePtr = &module->momentaryLufs;
-            momentaryDisplay->label = "MOMENTARY";
-            momentaryDisplay->unit = " LUFS";
-            addChild(momentaryDisplay);
+            // ValueDisplayWidget* momentaryDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_M_Px));
+            // momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
+            // momentaryDisplay->module = module;
+            // momentaryDisplay->valuePtr = &module->momentaryLufs;
+            // momentaryDisplay->label = "MOMENTARY";
+            // momentaryDisplay->unit = " LUFS";
+            // addChild(momentaryDisplay);
 
-            ValueDisplayWidget* shortTermDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_S));
+            ValueDisplayWidget* shortTermDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart));
             shortTermDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             shortTermDisplay->module = module;
             shortTermDisplay->valuePtr = &module->shortTermLufs;
@@ -551,7 +564,7 @@ struct LufsMeterWidget : ModuleWidget {
             shortTermDisplay->unit = " LUFS";
             addChild(shortTermDisplay);
 
-            ValueDisplayWidget* integratedDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_I));
+            ValueDisplayWidget* integratedDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart));
             integratedDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             integratedDisplay->module = module;
             integratedDisplay->valuePtr = &module->integratedLufs;
@@ -559,7 +572,7 @@ struct LufsMeterWidget : ModuleWidget {
             integratedDisplay->unit = " LUFS";
             addChild(integratedDisplay);
 
-            ValueDisplayWidget* lraDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_LRA));
+            ValueDisplayWidget* lraDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 2 * yStep));
             lraDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             lraDisplay->module = module;
             lraDisplay->valuePtr = &module->loudnessRange;
@@ -567,7 +580,7 @@ struct LufsMeterWidget : ModuleWidget {
             lraDisplay->unit = " LU";
             addChild(lraDisplay);
 
-            ValueDisplayWidget* psrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_PSR));
+            ValueDisplayWidget* psrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 1 * yStep));
             psrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             psrDisplay->module = module;
             psrDisplay->valuePtr = &module->psrValue;
@@ -575,7 +588,7 @@ struct LufsMeterWidget : ModuleWidget {
             psrDisplay->unit = " LU";
             addChild(psrDisplay);
 
-            ValueDisplayWidget* plrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_PLR));
+            ValueDisplayWidget* plrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 1 * yStep));
             plrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             plrDisplay->module = module;
             plrDisplay->valuePtr = &module->plrValue;
@@ -583,7 +596,7 @@ struct LufsMeterWidget : ModuleWidget {
             plrDisplay->unit = " LU";
             addChild(plrDisplay);
 
-            ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_MMAX));
+            ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 2 * yStep));
             mMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             mMaxDisplay->module = module;
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
@@ -591,7 +604,7 @@ struct LufsMeterWidget : ModuleWidget {
             mMaxDisplay->unit = " LUFS";
             addChild(mMaxDisplay);
 
-            ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_SMAX));
+            ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 3 * yStep));
             sMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             sMaxDisplay->module = module;
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
@@ -599,7 +612,7 @@ struct LufsMeterWidget : ModuleWidget {
             sMaxDisplay->unit = " LUFS";
             addChild(sMaxDisplay);
 
-            ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_TPM));
+            ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 3 * yStep));
             tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             tpmDisplay->module = module;
             tpmDisplay->valuePtr = &module->truePeakMax;
