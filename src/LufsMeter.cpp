@@ -430,12 +430,12 @@ struct LufsMeter : engine::Module {
 //-----------------------------------------------------------------------------
 
 // Generic number formatter (handles LUFS, LU, dB)
-static std::string formatValue(float value, const char* unit = "") {
+static std::string formatValue(float value) {
     if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
         return "-inf";
     }
     char buf[25];
-    snprintf(buf, sizeof(buf), "%.1f%s", value, unit);
+    snprintf(buf, sizeof(buf), "%.1f", value);
     return std::string(buf);
 }
 
@@ -444,13 +444,14 @@ struct ValueDisplayWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
     NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
+    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
     NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
     std::string label;
     float* valuePtr = nullptr;  // Pointer to M, S, I, LRA, PSR value in the module
     std::string unit = "";      // Unit string (e.g., " LU", " dB")
 
     ValueDisplayWidget() {
-        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/Segment7.ttf"));  // Make sure you have this font
+        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/Iosevka-Regular.ttf"));
         if (!font) {
             font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));  // Fallback font
         }
@@ -460,20 +461,36 @@ struct ValueDisplayWidget : TransparentWidget {
         if (!module || !valuePtr || !font) return;
 
         nvgFontFaceId(args.vg, font->handle);
-        float middleY = box.size.y * 0.5f;
-
-        // Draw Value (Right-aligned)
-        nvgFontSize(args.vg, 16);  // Adjusted size to fit more displays
-        nvgFillColor(args.vg, textColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        std::string text = formatValue(*valuePtr, unit.c_str());
-        nvgText(args.vg, box.size.x - 3, middleY, text.c_str(), NULL);
+        float middleY = box.size.y * 0.9f;
 
         // Draw Label (Left-aligned)
         nvgFontSize(args.vg, 16);  // Smaller size for label
         nvgFillColor(args.vg, labelColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
         nvgText(args.vg, 3, middleY, label.c_str(), NULL);
+
+        // Draw Value (Right-aligned)
+        nvgFontSize(args.vg, 24);  // Adjusted size to fit more displays
+        nvgFillColor(args.vg, valueColor);
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        std::string text = formatValue(*valuePtr);
+        nvgText(args.vg, box.size.x - 35, middleY + 1.5f, text.c_str(), NULL);
+        // nvgText(args.vg, 5, middleY + 1.5f, text.c_str(), NULL);
+
+        nvgFontSize(args.vg, 16);  // Adjusted size to fit more displays
+        nvgFillColor(args.vg, valueColor);
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+        nvgText(args.vg, box.size.x - 38, middleY, unit.c_str(), NULL);
+        // nvgText(args.vg, 4, middleY - 0.5f, unit.c_str(), NULL);
+
+        // float lineY = middleY - 2;  // Adjust this offset as needed
+
+        // nvgStrokeColor(args.vg, valueColor);  // Use a desired color for the line
+        // nvgStrokeWidth(args.vg, 0.5f);
+        // nvgBeginPath(args.vg);
+        // nvgMoveTo(args.vg, 0, lineY);           // Start at left edge, at lineY
+        // nvgLineTo(args.vg, box.size.x, lineY);  // Go to right edge, at lineY
+        // nvgStroke(args.vg);
     }
 };
 
@@ -486,15 +503,15 @@ struct LufsMeterWidget : ModuleWidget {
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         LedDisplay* ledDisplay = createWidget<LedDisplay>(Vec(0, 26));
-        ledDisplay->box.size = Vec(225, 180);
+        ledDisplay->box.size = Vec(225, 280);
         addChild(ledDisplay);
 
         // Define positions and sizes directly in pixels
         // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 16.f;
-        float displayMarginYPx = 2.f;
+        float displayMarginYPx = 15.f;
         float yStep = displayHeightPx + displayMarginYPx;
-        float yStart = 35.f;
+        float yStart = 38.f;
         float displayY_M_Px = yStart;
         float displayY_S = yStart + 1 * yStep;
         float displayY_I = yStart + 2 * yStep;
@@ -562,7 +579,7 @@ struct LufsMeterWidget : ModuleWidget {
             plrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
             plrDisplay->module = module;
             plrDisplay->valuePtr = &module->plrValue;
-            plrDisplay->label = "AVG. DYNAMICS (PLR)";
+            plrDisplay->label = "AVG. DYN. (PLR)";
             plrDisplay->unit = " LU";
             addChild(plrDisplay);
 
