@@ -3,7 +3,7 @@ RACK_DIR ?= ../..
 
 # FLAGS will be passed to both the C and C++ compiler
 FLAGS += -I./deps/ebur128
-FLAGS += -msse2 -mfpmath=sse
+FLAGS += -Ideps/ebur128/queue
 
 CFLAGS +=
 CXXFLAGS +=
