@@ -457,6 +457,7 @@ void drawDebugFrame(NVGcontext* vg, Rect box) {
 struct LoudnessBarWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
+    std::shared_ptr<Font> font2;
     NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
     NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
     NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
@@ -466,45 +467,74 @@ struct LoudnessBarWidget : TransparentWidget {
 
     LoudnessBarWidget() {
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
-        if (!font) {
-            font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));  // Fallback font
-        }
+        font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
+    }
+
+    void drawLevelMarks(NVGcontext* vg, float x, float y, std::string label) {
+        float markWidth = 4.f;
+        float margin = 8.f;
+        nvgStrokeColor(vg, nvgRGB(0xff, 0xff, 0xff));
+        nvgStrokeWidth(vg, 0.4f);
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, x - margin, y);
+        nvgLineTo(vg, x - margin - markWidth, y);
+        nvgMoveTo(vg, x + margin, y);
+        nvgLineTo(vg, x + margin + markWidth, y);
+        nvgStroke(vg);
+        nvgFontFaceId(vg, font->handle);
+        nvgFontSize(vg, 9);  // Adjusted size to fit more displays
+        nvgFillColor(vg, valueColor);
+        nvgTextAlign(vg, NVG_ALIGN_MIDDLE | NVG_ALIGN_RIGHT);
+        nvgText(vg, x - margin - markWidth - 3, y, label.c_str(), NULL);
     }
 
     void draw(const DrawArgs& args) override {
         if (!module || !valuePtr || !font) return;
 
+        float marksStep = 3.8f;
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12, "0");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 3 * marksStep, "-3");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 6 * marksStep, "-6");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 9 * marksStep, "-9");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 18 * marksStep, "-18");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 27 * marksStep, "-27");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 36 * marksStep, "-36");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 45 * marksStep, "-45");
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 54 * marksStep, "-54");
+
         nvgFontFaceId(args.vg, font->handle);
 
-        drawDebugFrame(args.vg, box);
+        // drawDebugFrame(args.vg, box);
 
         float value = *valuePtr;
 
         if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
             value = -60;
         }
-        value = 0.f;
         float marginBottom = 40.f;
-        float room = 60 + value;                               // Adjusted for LUFS range
-        float barHeight = room / 60.0f * box.size.y * 0.815f;  // Adjusted for LUFS range
+        float room = 60 + value;                 // Adjusted for LUFS range
+        float barHeight = room / 60.0f * 228.f;  // Adjusted for LUFS range
         float yOffset = box.size.y - barHeight;
 
         float barWidth = 12.f;
 
-        if (barHeight > 0.0) {
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset - marginBottom, barWidth, barHeight);
-            nvgFillColor(args.vg, valueColor);
-            nvgFill(args.vg);
-            nvgClosePath(args.vg);
+        if (barHeight <= 0.0) {
+            barHeight = 1.f;
         }
+
+        nvgBeginPath(args.vg);
+        nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset - marginBottom, barWidth, barHeight);
+        nvgFillColor(args.vg, valueColor);
+        nvgFill(args.vg);
+        nvgClosePath(args.vg);
 
         nvgFontSize(args.vg, 14);  // Adjusted size to fit more displays
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_TOP | NVG_ALIGN_CENTER);
         nvgText(args.vg, box.size.x * 0.5, box.size.y - 35, unit.c_str(), NULL);
 
-        nvgFontSize(args.vg, 11);  // Smaller size for label
+        nvgFontFaceId(args.vg, font2->handle);
+        nvgFontSize(args.vg, 14);  // Smaller size for label
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_CENTER);
         nvgText(args.vg, box.size.x * 0.5, box.size.y - 11, label.c_str(), NULL);
@@ -515,6 +545,7 @@ struct LoudnessBarWidget : TransparentWidget {
 struct ValueDisplayWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
+    std::shared_ptr<Font> font2;
     NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
     NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
     NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
@@ -523,27 +554,35 @@ struct ValueDisplayWidget : TransparentWidget {
     std::string unit = "";      // Unit string (e.g., " LU", " dB")
 
     ValueDisplayWidget() {
-        // font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/Iosevka-Regular.ttf"));
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
-        if (!font) {
-            font = APP->window->loadFont(asset::system("res/fonts/ShareTechMono-Regular.ttf"));  // Fallback font
-        }
+        font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
     }
 
     void draw(const DrawArgs& args) override {
-        if (!module || !valuePtr || !font) return;
+        if (!module || !valuePtr || !font || !font2) return;
 
         nvgFontFaceId(args.vg, font->handle);
         float middleY = box.size.y * 0.5f;
 
-        drawDebugFrame(args.vg, box);
+        // drawDebugFrame(args.vg, box);
 
         // Draw Value (Right-aligned)
-        nvgFontSize(args.vg, 32);  // Adjusted size to fit more displays
-        nvgFillColor(args.vg, valueColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-        std::string text = formatValue(*valuePtr);
-        nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, text.c_str(), NULL);
+        bool cond1 = *valuePtr <= ALMOST_NEGATIVE_INFINITY || std::isinf(*valuePtr) || std::isnan(*valuePtr);
+        bool cond2 = (label == "LOUDNESS RANGE") && *valuePtr <= 0.0f;
+        if (cond1 || cond2) {
+            nvgStrokeColor(args.vg, nvgRGB(0xff, 0xff, 0xff));
+            nvgStrokeWidth(args.vg, 2.5f);
+            nvgBeginPath(args.vg);
+            nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 14.0);
+            nvgLineTo(args.vg, box.size.x - 29.5, middleY - 14.0);
+            nvgStroke(args.vg);
+        } else {
+            nvgFontSize(args.vg, 32);  // Adjusted size to fit more displays
+            nvgFillColor(args.vg, valueColor);
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+            std::string text = formatValue(*valuePtr);
+            nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, text.c_str(), NULL);
+        }
 
         nvgFontSize(args.vg, 14);  // Adjusted size to fit more displays
         nvgFillColor(args.vg, valueColor);
@@ -551,19 +590,11 @@ struct ValueDisplayWidget : TransparentWidget {
         nvgText(args.vg, box.size.x - 9.5, middleY, unit.c_str(), NULL);
 
         // Draw Label (Left-aligned)
-        nvgFontSize(args.vg, 11);  // Smaller size for label
+        nvgFontFaceId(args.vg, font2->handle);
+        nvgFontSize(args.vg, 14);  // Smaller size for label
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_RIGHT);
         nvgText(args.vg, box.size.x - 9.5, box.size.y - 11, label.c_str(), NULL);
-
-        // float lineY = middleY - 2;  // Adjust this offset as needed
-
-        // nvgStrokeColor(args.vg, valueColor);  // Use a desired color for the line
-        // nvgStrokeWidth(args.vg, 0.5f);
-        // nvgBeginPath(args.vg);
-        // nvgMoveTo(args.vg, 0, lineY);           // Start at left edge, at lineY
-        // nvgLineTo(args.vg, box.size.x, lineY);  // Go to right edge, at lineY
-        // nvgStroke(args.vg);
     }
 };
 
@@ -582,18 +613,8 @@ struct LufsMeterWidget : ModuleWidget {
         // Define positions and sizes directly in pixels
         // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 70.f;
-        float displayMarginYPx = 15.f;
         float yStep = displayHeightPx;
         float yStart = 26.f;
-        float displayY_M_Px = yStart;
-        float displayY_S = yStart + 1 * yStep;
-        float displayY_I = yStart + 2 * yStep;
-        float displayY_LRA = yStart + 3 * yStep;
-        float displayY_PSR = yStart + 4 * yStep;
-        float displayY_PLR = yStart + 5 * yStep;
-        float displayY_MMAX = yStart + 6 * yStep;
-        float displayY_SMAX = yStart + 7 * yStep;
-        float displayY_TPM = yStart + 8 * yStep;
         float displayX_Px = 45.f;
         // displayWidthPx uses box.size.x which is already in pixels
         float displayWidthPx = 90;  // Use displayX_Px for margin on both sides
@@ -608,15 +629,7 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Use the calculated pixel values for position and size
         if (module) {
-            // ValueDisplayWidget* momentaryDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, displayY_M_Px));
-            // momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
-            // momentaryDisplay->module = module;
-            // momentaryDisplay->valuePtr = &module->momentaryLufs;
-            // momentaryDisplay->label = "MOMENTARY";
-            // momentaryDisplay->unit = " LUFS";
-            // addChild(momentaryDisplay);
-
-            LoudnessBarWidget* momentaryDisplay = createWidget<LoudnessBarWidget>(Vec(0, yStart));
+            LoudnessBarWidget* momentaryDisplay = createWidget<LoudnessBarWidget>(Vec(10, yStart));
             momentaryDisplay->box.size = Vec(45, 280);
             momentaryDisplay->module = module;
             momentaryDisplay->label = "M";
@@ -629,7 +642,7 @@ struct LufsMeterWidget : ModuleWidget {
             shortTermDisplay->module = module;
             shortTermDisplay->valuePtr = &module->shortTermLufs;
             shortTermDisplay->label = "SHORT TERM";
-            shortTermDisplay->unit = " LUFS";
+            shortTermDisplay->unit = "LUFS";
             addChild(shortTermDisplay);
 
             ValueDisplayWidget* integratedDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart));
@@ -637,7 +650,7 @@ struct LufsMeterWidget : ModuleWidget {
             integratedDisplay->module = module;
             integratedDisplay->valuePtr = &module->integratedLufs;
             integratedDisplay->label = "INTEGRATED";
-            integratedDisplay->unit = " LUFS";
+            integratedDisplay->unit = "LUFS";
             addChild(integratedDisplay);
 
             ValueDisplayWidget* lraDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 2 * yStep));
@@ -645,7 +658,7 @@ struct LufsMeterWidget : ModuleWidget {
             lraDisplay->module = module;
             lraDisplay->valuePtr = &module->loudnessRange;
             lraDisplay->label = "LOUDNESS RANGE";
-            lraDisplay->unit = " LU";
+            lraDisplay->unit = "LU";
             addChild(lraDisplay);
 
             ValueDisplayWidget* psrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 1 * yStep));
@@ -653,7 +666,7 @@ struct LufsMeterWidget : ModuleWidget {
             psrDisplay->module = module;
             psrDisplay->valuePtr = &module->psrValue;
             psrDisplay->label = "DYNAMICS (PSR)";
-            psrDisplay->unit = " LU";
+            psrDisplay->unit = "LU";
             addChild(psrDisplay);
 
             ValueDisplayWidget* plrDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 1 * yStep));
@@ -661,7 +674,7 @@ struct LufsMeterWidget : ModuleWidget {
             plrDisplay->module = module;
             plrDisplay->valuePtr = &module->plrValue;
             plrDisplay->label = "AVG DYN (PLR)";
-            plrDisplay->unit = " LU";
+            plrDisplay->unit = "LU";
             addChild(plrDisplay);
 
             ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 2 * yStep));
@@ -669,7 +682,7 @@ struct LufsMeterWidget : ModuleWidget {
             mMaxDisplay->module = module;
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
             mMaxDisplay->label = "MOMENTARY MAX";
-            mMaxDisplay->unit = " LUFS";
+            mMaxDisplay->unit = "LUFS";
             addChild(mMaxDisplay);
 
             ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 3 * yStep));
@@ -677,7 +690,7 @@ struct LufsMeterWidget : ModuleWidget {
             sMaxDisplay->module = module;
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
             sMaxDisplay->label = "SHORT TERM MAX";
-            sMaxDisplay->unit = " LUFS";
+            sMaxDisplay->unit = "LUFS";
             addChild(sMaxDisplay);
 
             ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 3 * yStep));
@@ -685,7 +698,7 @@ struct LufsMeterWidget : ModuleWidget {
             tpmDisplay->module = module;
             tpmDisplay->valuePtr = &module->truePeakMax;
             tpmDisplay->label = "TRUE PEAK MAX";
-            tpmDisplay->unit = " dB";
+            tpmDisplay->unit = "dB";
             addChild(tpmDisplay);
         }
     }
