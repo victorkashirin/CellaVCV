@@ -22,13 +22,17 @@ const float LOG_EPSILON = 1e-10f;  // Or adjust as needed
 // Module Logic: LufsMeter (Corrected with Buffering)
 //-----------------------------------------------------------------------------
 struct LufsMeter : engine::Module {
-    enum ParamIds { RESET_PARAM,
-                    TARGET_PARAM,
-                    NUM_PARAMS };
-    enum InputIds { AUDIO_INPUT_L,
-                    AUDIO_INPUT_R,
-                    RESET_INPUT,
-                    NUM_INPUTS };
+    enum ParamIds {
+        RESET_PARAM,
+        TARGET_PARAM,
+        NUM_PARAMS
+    };
+    enum InputIds {
+        AUDIO_INPUT_L,
+        AUDIO_INPUT_R,
+        RESET_INPUT,
+        NUM_INPUTS
+    };
     enum OutputIds { NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
 
@@ -276,8 +280,6 @@ struct LufsMeter : engine::Module {
         } else {
             plrValue = -INFINITY;  // Not enough valid data for current PLR
         }
-        // Note: You still have maxTruePeakL, maxTruePeakR, and maxShortTermLufs if you
-        // want to display those historical maximums separately elsewhere.
     }
 
     // Reset meter state completely
@@ -311,12 +313,9 @@ struct LufsMeter : engine::Module {
             ebur128_handle = nullptr;
         }
 
-        // Clear internal buffer state
         bufferPosition = 0;
-        // std::fill(processingBuffer.begin(), processingBuffer.end(), 0.f); // Optional: zero out buffer
         chunkPeakHistoryDB.clear();
 
-        // Reset ALL displayed values and tracked maximums
         momentaryLufs = -INFINITY;
         shortTermLufs = -INFINITY;
         integratedLufs = -INFINITY;
@@ -344,12 +343,9 @@ struct LufsMeter : engine::Module {
         resetMeter();  // Re-initialize ebur128 and reset state
     }
 
-    // **Corrected Process Method (Sample-by-Sample)**
     void process(const ProcessArgs& args) override {
-        // --- 1. Check for Manual Reset ---
         if (resetTrigger.process(params[RESET_PARAM].getValue()) || resetPortTrigger.process(inputs[RESET_INPUT].getVoltage())) {
             resetMeter();
-            // No return here, allow processing to continue from fresh state if needed
         }
 
         targetLoudness = params[TARGET_PARAM].getValue();
@@ -393,10 +389,8 @@ struct LufsMeter : engine::Module {
             bufferPosition++;
         }
 
-        // --- 4. Process Buffer When Full ---
         if (bufferPosition >= PROCESSING_BLOCK_FRAMES) {
             processBlockBuffer();
-            // Note: updateLoudnessValues() is called inside processBlockBuffer
         }
 
         // --- 5. Update Display Periodically ---
@@ -440,13 +434,8 @@ struct LufsMeter : engine::Module {
         maxMomentaryLufs = -INFINITY;
         maxTruePeakL = -INFINITY;
         maxTruePeakR = -INFINITY;
-        // libebur128 state is reset via onSampleRateChange/constructor during load.
     }
 };
-
-//-----------------------------------------------------------------------------
-// Helper Functions and Widgets for UI (Mostly Unchanged)
-//-----------------------------------------------------------------------------
 
 // Generic number formatter (handles LUFS, LU, dB)
 static std::string formatValue(float value) {
@@ -477,16 +466,16 @@ struct LoudnessBarWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
-    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
-    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
-    NVGcolor redColor = nvgRGB(0xff, 0x00, 0x00);    // Light text
-    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
+    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);
+    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);
+    NVGcolor redColor = nvgRGB(0xff, 0x00, 0x00);
+    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);
     std::string label;
     float* momentaryValuePtr = nullptr;
     float* lowerRangeValuePtr = nullptr;
     float* upperRangeValuePtr = nullptr;
     float* targetValuePtr = nullptr;
-    std::string unit = "";  // Unit string (e.g., " LU", " dB")
+    std::string unit = "";
 
     LoudnessBarWidget() {
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
@@ -505,7 +494,7 @@ struct LoudnessBarWidget : TransparentWidget {
         nvgLineTo(vg, x + margin + markWidth, y);
         nvgStroke(vg);
         nvgFontFaceId(vg, font->handle);
-        nvgFontSize(vg, 9);  // Adjusted size to fit more displays
+        nvgFontSize(vg, 9);
         nvgFillColor(vg, valueColor);
         nvgTextAlign(vg, NVG_ALIGN_MIDDLE | NVG_ALIGN_RIGHT);
         nvgText(vg, x - margin - markWidth - 3, y, label.c_str(), NULL);
@@ -593,13 +582,13 @@ struct LoudnessBarWidget : TransparentWidget {
             nvgClosePath(args.vg);
         }
 
-        nvgFontSize(args.vg, 14);  // Adjusted size to fit more displays
+        nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_TOP | NVG_ALIGN_CENTER);
         nvgText(args.vg, box.size.x * 0.5, box.size.y - 35, unit.c_str(), NULL);
 
         nvgFontFaceId(args.vg, font2->handle);
-        nvgFontSize(args.vg, 14);  // Smaller size for label
+        nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_CENTER);
         nvgText(args.vg, box.size.x * 0.5, box.size.y - 11, label.c_str(), NULL);
@@ -611,12 +600,12 @@ struct ValueDisplayWidget : TransparentWidget {
     LufsMeter* module = nullptr;
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
-    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
-    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
-    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
+    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);
+    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);
+    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);
     std::string label;
-    float* valuePtr = nullptr;  // Pointer to M, S, I, LRA, PSR value in the module
-    std::string unit = "";      // Unit string (e.g., " LU", " dB")
+    float* valuePtr = nullptr;
+    std::string unit = "";
 
     ValueDisplayWidget() {
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
@@ -654,7 +643,6 @@ struct ValueDisplayWidget : TransparentWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
         nvgText(args.vg, box.size.x - 9.5, middleY, unit.c_str(), NULL);
 
-        // Draw Label (Left-aligned)
         nvgFontFaceId(args.vg, font2->handle);
         nvgFontSize(args.vg, 14);  // Smaller size for label
         nvgFillColor(args.vg, labelColor);
@@ -675,14 +663,11 @@ struct LufsMeterWidget : ModuleWidget {
         ledDisplay->box.size = Vec(225, 280);
         addChild(ledDisplay);
 
-        // Define positions and sizes directly in pixels
-        // Assuming these were the intended pixel values previously passed to mm2px
         float displayHeightPx = 70.f;
         float yStep = displayHeightPx;
         float yStart = 26.f;
         float displayX_Px = 45.f;
-        // displayWidthPx uses box.size.x which is already in pixels
-        float displayWidthPx = 90;  // Use displayX_Px for margin on both sides
+        float displayWidthPx = 90;
 
         float inputYPx = 329.25;
 
@@ -694,7 +679,6 @@ struct LufsMeterWidget : ModuleWidget {
         addParam(createParamCentered<VCVButton>(Vec(157.5f, inputYPx), module, LufsMeter::RESET_PARAM));
         addParam(createParamCentered<RoundSmallBlackKnob>(Vec(202.5f, inputYPx), module, LufsMeter::TARGET_PARAM));
 
-        // Use the calculated pixel values for position and size
         if (module) {
             LoudnessBarWidget* momentaryDisplay = createWidget<LoudnessBarWidget>(Vec(10, yStart));
             momentaryDisplay->box.size = Vec(45, 280);
@@ -773,7 +757,5 @@ struct LufsMeterWidget : ModuleWidget {
         }
     }
 };
-//-----------------------------------------------------------------------------
-// Plugin Registration (in YourPlugin.cpp)
-//-----------------------------------------------------------------------------
+
 Model* modelLufsMeter = createModel<LufsMeter, LufsMeterWidget>("LufsMeter");
