@@ -1412,6 +1412,177 @@ int ebur128_loudness_range(ebur128_state* st, double* out) {
   return ebur128_loudness_range_multiple(&st, 1, out);
 }
 
+int ebur128_loudness_range_multiple_ext(ebur128_state** sts,
+                                        size_t size,
+                                        double* out,
+                                        double* out_l,
+                                        double* out_h) {
+    size_t i, j;
+    struct ebur128_dq_entry* it;
+    double* stl_vector;
+    size_t stl_size;
+    double* stl_relgated;
+    size_t stl_relgated_size;
+    double stl_power, stl_integrated;
+    /* High and low percentile energy */
+    double h_en, l_en;
+    int use_histogram = 0;
+
+    for (i = 0; i < size; ++i) {
+        if (sts[i]) {
+            if ((sts[i]->mode & EBUR128_MODE_LRA) != EBUR128_MODE_LRA) {
+                return EBUR128_ERROR_INVALID_MODE;
+            }
+            if (i == 0 && sts[i]->mode & EBUR128_MODE_HISTOGRAM) {
+                use_histogram = 1;
+            } else if (use_histogram != !!(sts[i]->mode & EBUR128_MODE_HISTOGRAM)) {
+                return EBUR128_ERROR_INVALID_MODE;
+            }
+        }
+    }
+
+    if (use_histogram) {
+        unsigned long hist[1000] = {0};
+        size_t percentile_low, percentile_high;
+        size_t index;
+
+        stl_size = 0;
+        stl_power = 0.0;
+        for (i = 0; i < size; ++i) {
+            if (!sts[i]) {
+                continue;
+            }
+            for (j = 0; j < 1000; ++j) {
+                hist[j] += sts[i]->d->short_term_block_energy_histogram[j];
+                stl_size += sts[i]->d->short_term_block_energy_histogram[j];
+                stl_power += sts[i]->d->short_term_block_energy_histogram[j] *
+                             histogram_energies[j];
+            }
+        }
+        if (!stl_size) {
+            *out = 0.0;
+            *out_l = 0.0;
+            *out_h = 0.0;
+            return EBUR128_SUCCESS;
+        }
+
+        stl_power /= stl_size;
+        stl_integrated = minus_twenty_decibels * stl_power;
+
+        if (stl_integrated < histogram_energy_boundaries[0]) {
+            index = 0;
+        } else {
+            index = find_histogram_index(stl_integrated);
+            if (stl_integrated > histogram_energies[index]) {
+                ++index;
+            }
+        }
+        stl_size = 0;
+        for (j = index; j < 1000; ++j) {
+            stl_size += hist[j];
+        }
+        if (!stl_size) {
+            *out = 0.0;
+            *out_l = 0.0;
+            *out_h = 0.0;
+            return EBUR128_SUCCESS;
+        }
+
+        percentile_low = (size_t)((stl_size - 1) * 0.1 + 0.5);
+        percentile_high = (size_t)((stl_size - 1) * 0.95 + 0.5);
+
+        stl_size = 0;
+        j = index;
+        while (stl_size <= percentile_low) {
+            stl_size += hist[j++];
+        }
+        l_en = histogram_energies[j - 1];
+        while (stl_size <= percentile_high) {
+            stl_size += hist[j++];
+        }
+        h_en = histogram_energies[j - 1];
+
+        *out = ebur128_energy_to_loudness(h_en) - ebur128_energy_to_loudness(l_en);
+        *out_l = ebur128_energy_to_loudness(l_en);
+        *out_h = ebur128_energy_to_loudness(h_en);
+        return EBUR128_SUCCESS;
+    }
+
+    stl_size = 0;
+    for (i = 0; i < size; ++i) {
+        if (!sts[i]) {
+            continue;
+        }
+        STAILQ_FOREACH(it, &sts[i]->d->short_term_block_list, entries) {
+            ++stl_size;
+        }
+    }
+    if (!stl_size) {
+        *out = 0.0;
+        *out_l = 0.0;
+        *out_h = 0.0;
+        return EBUR128_SUCCESS;
+    }
+    stl_vector = (double*)malloc(stl_size * sizeof(double));
+    if (!stl_vector) {
+        return EBUR128_ERROR_NOMEM;
+    }
+
+    j = 0;
+    for (i = 0; i < size; ++i) {
+        if (!sts[i]) {
+            continue;
+        }
+        STAILQ_FOREACH(it, &sts[i]->d->short_term_block_list, entries) {
+            stl_vector[j] = it->z;
+            ++j;
+        }
+    }
+    qsort(stl_vector, stl_size, sizeof(double), ebur128_double_cmp);
+    stl_power = 0.0;
+    for (i = 0; i < stl_size; ++i) {
+        stl_power += stl_vector[i];
+    }
+    stl_power /= (double)stl_size;
+    stl_integrated = minus_twenty_decibels * stl_power;
+
+    stl_relgated = stl_vector;
+    stl_relgated_size = stl_size;
+    while (stl_relgated_size > 0 && *stl_relgated < stl_integrated) {
+        ++stl_relgated;
+        --stl_relgated_size;
+    }
+
+    if (stl_relgated_size) {
+        h_en = stl_relgated[(size_t)((stl_relgated_size - 1) * 0.95 + 0.5)];
+        l_en = stl_relgated[(size_t)((stl_relgated_size - 1) * 0.1 + 0.5)];
+        free(stl_vector);
+        *out = ebur128_energy_to_loudness(h_en) - ebur128_energy_to_loudness(l_en);
+        *out_l = ebur128_energy_to_loudness(l_en);
+        *out_h = ebur128_energy_to_loudness(h_en);
+    } else {
+        free(stl_vector);
+        *out = 0.0;
+        *out_l = 0.0;
+        *out_h = 0.0;
+    }
+
+    return EBUR128_SUCCESS;
+}
+
+int ebur128_loudness_range_ext(ebur128_state* st, double* out_lra, double* out_l, double* out_h) {
+    // Check if the state pointer is valid before passing it as an array
+    if (!st) {
+        // Handle NULL state pointer appropriately, e.g., return error or default values
+        *out_lra = 0.0;
+        *out_l = 0.0;
+        *out_h = 0.0;
+        // You might want a specific error code for NULL input state
+        return EBUR128_ERROR_INVALID_MODE;  // Or another suitable error
+    }
+    return ebur128_loudness_range_multiple_ext(&st, 1, out_lra, out_l, out_h);
+}
+
 int ebur128_sample_peak(ebur128_state* st,
                         unsigned int channel_number,
                         double* out) {

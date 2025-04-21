@@ -53,10 +53,14 @@ struct LufsMeter : engine::Module {
     float shortTermLufs = -INFINITY;
     float integratedLufs = -INFINITY;
     float loudnessRange = -INFINITY;
+    float loudnessRangeLow = -INFINITY;
+    float loudnessRangeHigh = -INFINITY;
     float psrValue = -INFINITY;
     float plrValue = -INFINITY;
     float truePeakMax = -INFINITY;
     float truePeakSlidingMax = -INFINITY;
+    // Param
+    float targetLoudness = -23.f;  // Target loudness for PSR calculation
 
     // --- Values tracked manually for PSR calculation ---
     float maxShortTermLufs = -INFINITY;
@@ -193,10 +197,14 @@ struct LufsMeter : engine::Module {
             integratedLufs = (float)loudnessValue;
         }  // Else: Keep old value
 
-        err = ebur128_loudness_range(ebur128_handle, &loudnessValue);
+        double low_en, high_en;
+        err = ebur128_loudness_range_ext(ebur128_handle, &loudnessValue, &low_en, &high_en);
+        // err = ebur128_loudness_range(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
             loudnessRange = (float)loudnessValue;
-        }  // Else: Keep old value
+            loudnessRangeLow = (float)low_en;
+            loudnessRangeHigh = (float)high_en;
+        }
 
         // --- Get Current True Peak Values ---
         float currentPeakL = -INFINITY;
@@ -285,10 +293,10 @@ struct LufsMeter : engine::Module {
                 channels,
                 (size_t)sampleRate,
                 EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I |
-                    EBUR128_MODE_LRA | EBUR128_MODE_SAMPLE_PEAK | EBUR128_MODE_TRUE_PEAK);
+                    EBUR128_MODE_LRA | EBUR128_MODE_HISTOGRAM | EBUR128_MODE_TRUE_PEAK);
 
             if (!ebur128_handle) {
-                std::cerr << "LufsMeter: Failed to re-initialize ebur128\n";
+                DEBUG("LufsMeter: Failed to re-initialize ebur128");
                 currentInputChannels = 0;
             } else {
                 currentInputChannels = channels;
@@ -308,6 +316,8 @@ struct LufsMeter : engine::Module {
         shortTermLufs = -INFINITY;
         integratedLufs = -INFINITY;
         loudnessRange = -INFINITY;
+        loudnessRangeLow = -INFINITY;
+        loudnessRangeHigh = -INFINITY;
         psrValue = -INFINITY;
         plrValue = -INFINITY;
         maxShortTermLufs = -INFINITY;
@@ -351,6 +361,8 @@ struct LufsMeter : engine::Module {
                 shortTermLufs = -INFINITY;
                 // Keep integrated unless reset
                 loudnessRange = -INFINITY;
+                loudnessRangeHigh = -INFINITY;
+                loudnessRangeLow = -INFINITY;
                 psrValue = -INFINITY;
                 plrValue = -INFINITY;
                 truePeakMax = -INFINITY;
@@ -460,10 +472,14 @@ struct LoudnessBarWidget : TransparentWidget {
     std::shared_ptr<Font> font2;
     NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);   // Light text
     NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);  // Light text
+    NVGcolor redColor = nvgRGB(0xff, 0x00, 0x00);    // Light text
     NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);  // Dimmer label
     std::string label;
-    float* valuePtr = nullptr;  // Pointer to M, S, I, LRA, PSR value in the module
-    std::string unit = "";      // Unit string (e.g., " LU", " dB")
+    float* momentaryValuePtr = nullptr;
+    float* lowerRangeValuePtr = nullptr;
+    float* upperRangeValuePtr = nullptr;
+    float* targetValuePtr = nullptr;
+    std::string unit = "";  // Unit string (e.g., " LU", " dB")
 
     LoudnessBarWidget() {
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
@@ -489,7 +505,7 @@ struct LoudnessBarWidget : TransparentWidget {
     }
 
     void draw(const DrawArgs& args) override {
-        if (!module || !valuePtr || !font) return;
+        if (!module || !momentaryValuePtr || !font) return;
 
         float marksStep = 3.8f;
         drawLevelMarks(args.vg, box.size.x * 0.5, 12, "0");
@@ -506,27 +522,55 @@ struct LoudnessBarWidget : TransparentWidget {
 
         // drawDebugFrame(args.vg, box);
 
-        float value = *valuePtr;
+        float value = *momentaryValuePtr;
+        float upperValue = *upperRangeValuePtr;
+        float lowerValue = *lowerRangeValuePtr;
+        float targetValue = *targetValuePtr;
 
         if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
             value = -60;
         }
+        if (std::isnan(upperValue)) {
+            upperValue = 0;
+        }
+        if (std::isnan(lowerValue)) {
+            lowerValue = 0;
+        }
+        if (std::isnan(targetValue)) {
+            targetValue = 0;
+        }
+
+        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + (-targetValue) * marksStep, "");
+
         float marginBottom = 40.f;
-        float room = 60 + value;                 // Adjusted for LUFS range
-        float barHeight = room / 60.0f * 228.f;  // Adjusted for LUFS range
+        // -16 vs -22
+        float overshoot = value - targetValue;
+
+        float room = (overshoot <= 0) ? 60 + value : 60 + targetValue;
+        float barHeight = room / 60.0f * 228.f;
         float yOffset = box.size.y - barHeight;
+
+        float overshootHeight = overshoot / 60.0f * 228.f;
+        float yOffsetOvershoot = box.size.y - barHeight - overshootHeight;
 
         float barWidth = 12.f;
 
         if (barHeight <= 0.0) {
             barHeight = 1.f;
         }
-
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset - marginBottom, barWidth, barHeight);
         nvgFillColor(args.vg, valueColor);
         nvgFill(args.vg);
         nvgClosePath(args.vg);
+
+        if (overshoot > 0.0) {
+            nvgBeginPath(args.vg);
+            nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffsetOvershoot - marginBottom, barWidth, overshootHeight);
+            nvgFillColor(args.vg, redColor);
+            nvgFill(args.vg);
+            nvgClosePath(args.vg);
+        }
 
         nvgFontSize(args.vg, 14);  // Adjusted size to fit more displays
         nvgFillColor(args.vg, valueColor);
@@ -634,7 +678,10 @@ struct LufsMeterWidget : ModuleWidget {
             momentaryDisplay->module = module;
             momentaryDisplay->label = "M";
             momentaryDisplay->unit = "LUFS";
-            momentaryDisplay->valuePtr = &module->momentaryLufs;
+            momentaryDisplay->momentaryValuePtr = &module->momentaryLufs;
+            momentaryDisplay->upperRangeValuePtr = &module->loudnessRangeHigh;
+            momentaryDisplay->lowerRangeValuePtr = &module->loudnessRangeLow;
+            momentaryDisplay->targetValuePtr = &module->targetLoudness;
             addChild(momentaryDisplay);
 
             ValueDisplayWidget* shortTermDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart));

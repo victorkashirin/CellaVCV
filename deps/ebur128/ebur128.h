@@ -320,6 +320,18 @@ int ebur128_loudness_range_multiple(ebur128_state** sts,
                                     size_t size,
                                     double* out);
 
+// Extended range metering with lower and upper loudness range
+int ebur128_loudness_range_multiple_ext(ebur128_state** sts,
+                                      size_t size,
+                                      double* out_lra,
+                                      double* out_l,
+                                      double* out_h);
+
+int ebur128_loudness_range_ext(ebur128_state* st,
+                                    double* out_lra,
+                                    double* out_l,
+                                    double* out_h);
+
 /** \brief Get maximum sample peak from all frames that have been processed.
  *
  *  The equation to convert to dBFS is: 20 * log10(out)
