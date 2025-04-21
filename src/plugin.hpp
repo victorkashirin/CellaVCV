@@ -12,4 +12,4 @@ extern Model *modelTwinPeaks;
 extern Model *modelResonators;
 extern Model *modelBytebeat;
 extern Model *modelCognitiveShift;
-extern Model *modelLufsMeter;
+extern Model *modelLoudnessMeter;

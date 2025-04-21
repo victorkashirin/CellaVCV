@@ -12,16 +12,16 @@
 
 using namespace rack;
 
-struct LufsMeterWidget;  // Forward declaration
+struct LoudnessMeterWidget;  // Forward declaration
 
 const float ALMOST_NEGATIVE_INFINITY = -99.0f;
 const float VOLTAGE_SCALE = 0.1f;  // Scale +/-10V to +/-1.0f
 const float LOG_EPSILON = 1e-10f;  // Or adjust as needed
 
 //-----------------------------------------------------------------------------
-// Module Logic: LufsMeter (Corrected with Buffering)
+// Module Logic: LoudnessMeter (Corrected with Buffering)
 //-----------------------------------------------------------------------------
-struct LufsMeter : engine::Module {
+struct LoudnessMeter : engine::Module {
     enum ParamIds {
         RESET_PARAM,
         TARGET_PARAM,
@@ -86,7 +86,7 @@ struct LufsMeter : engine::Module {
     dsp::SchmittTrigger resetPortTrigger;
     dsp::ClockDivider displayUpdateDivider;
 
-    LufsMeter() {
+    LoudnessMeter() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configInput(AUDIO_INPUT_L, "Audio L / Mono");
         configInput(AUDIO_INPUT_R, "Audio R");
@@ -104,7 +104,7 @@ struct LufsMeter : engine::Module {
         calculate_history_size();
     }
 
-    ~LufsMeter() override {
+    ~LoudnessMeter() override {
         if (ebur128_handle) {
             // Optionally process any remaining samples in the buffer before destroying
             // processBlockBuffer();
@@ -162,7 +162,7 @@ struct LufsMeter : engine::Module {
         bufferPosition = 0;  // Reset buffer position for next block
 
         if (err != EBUR128_SUCCESS) {
-            std::cerr << "LufsMeter: Error adding frames: " << err << std::endl;
+            std::cerr << "LoudnessMeter: Error adding frames: " << err << std::endl;
             resetMeter();  // Simple error handling: reset everything
             return;
         }
@@ -303,7 +303,7 @@ struct LufsMeter : engine::Module {
                     EBUR128_MODE_LRA | EBUR128_MODE_HISTOGRAM | EBUR128_MODE_TRUE_PEAK);
 
             if (!ebur128_handle) {
-                DEBUG("LufsMeter: Failed to re-initialize ebur128");
+                DEBUG("LoudnessMeter: Failed to re-initialize ebur128");
                 currentInputChannels = 0;
             } else {
                 currentInputChannels = channels;
@@ -696,10 +696,10 @@ struct ValueDisplayWidget : TransparentWidget {
     }
 };
 
-struct LufsMeterWidget : ModuleWidget {
-    LufsMeterWidget(LufsMeter* module) {
+struct LoudnessMeterWidget : ModuleWidget {
+    LoudnessMeterWidget(LoudnessMeter* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/LufsMeter.svg"), asset::plugin(pluginInstance, "res/LufsMeter-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/LoudnessMeter.svg"), asset::plugin(pluginInstance, "res/LoudnessMeter-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
@@ -718,11 +718,11 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Use pixel coordinates directly in Vec()
         // box.size.x is already in pixels
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LufsMeter::RESET_INPUT));
-        addParam(createParamCentered<VCVButton>(Vec(157.5f, inputYPx), module, LufsMeter::RESET_PARAM));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(202.5f, inputYPx), module, LufsMeter::TARGET_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_L));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_R));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LoudnessMeter::RESET_INPUT));
+        addParam(createParamCentered<VCVButton>(Vec(157.5f, inputYPx), module, LoudnessMeter::RESET_PARAM));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(202.5f, inputYPx), module, LoudnessMeter::TARGET_PARAM));
 
         LoudnessBarWidget* momentaryDisplay = createWidget<LoudnessBarWidget>(Vec(10, yStart));
         momentaryDisplay->box.size = Vec(45, 280);
@@ -810,4 +810,4 @@ struct LufsMeterWidget : ModuleWidget {
     }
 };
 
-Model* modelLufsMeter = createModel<LufsMeter, LufsMeterWidget>("LufsMeter");
+Model* modelLoudnessMeter = createModel<LoudnessMeter, LoudnessMeterWidget>("LoudnessMeter");
