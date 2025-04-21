@@ -23,9 +23,11 @@ const float LOG_EPSILON = 1e-10f;  // Or adjust as needed
 //-----------------------------------------------------------------------------
 struct LufsMeter : engine::Module {
     enum ParamIds { RESET_PARAM,
+                    TARGET_PARAM,
                     NUM_PARAMS };
     enum InputIds { AUDIO_INPUT_L,
                     AUDIO_INPUT_R,
+                    RESET_INPUT,
                     NUM_INPUTS };
     enum OutputIds { NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
@@ -77,13 +79,16 @@ struct LufsMeter : engine::Module {
 
     // --- Control & Timing ---
     dsp::SchmittTrigger resetTrigger;
+    dsp::SchmittTrigger resetPortTrigger;
     dsp::ClockDivider displayUpdateDivider;
 
     LufsMeter() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configInput(AUDIO_INPUT_L, "Audio L / Mono");
         configInput(AUDIO_INPUT_R, "Audio R");
-        configParam(RESET_PARAM, 0.f, 1.f, 0.f, "Reset Integrated, LRA, PSR");
+        configInput(RESET_INPUT, "Reset");
+        configParam(TARGET_PARAM, -36.f, 0.f, -23.f, "Target loudness", " LUFS");
+        configParam(RESET_PARAM, 0.f, 1.f, 0.f, "Reset");
 
         // Allocate buffer based on max channels (stereo)
         processingBuffer.resize(PROCESSING_BLOCK_FRAMES * 2);  // Max 2 channels
@@ -342,10 +347,12 @@ struct LufsMeter : engine::Module {
     // **Corrected Process Method (Sample-by-Sample)**
     void process(const ProcessArgs& args) override {
         // --- 1. Check for Manual Reset ---
-        if (resetTrigger.process(params[RESET_PARAM].getValue())) {
+        if (resetTrigger.process(params[RESET_PARAM].getValue()) || resetPortTrigger.process(inputs[RESET_INPUT].getVoltage())) {
             resetMeter();
             // No return here, allow processing to continue from fresh state if needed
         }
+
+        targetLoudness = params[TARGET_PARAM].getValue();
 
         // --- 2. Check Connections and Re-initialize if Needed ---
         size_t connectedChannels = inputs[AUDIO_INPUT_R].isConnected() ? 2 : (inputs[AUDIO_INPUT_L].isConnected() ? 1 : 0);
@@ -540,10 +547,11 @@ struct LoudnessBarWidget : TransparentWidget {
             targetValue = 0;
         }
 
+        value = clamp(value, -60.f, 0.f);
+
         drawLevelMarks(args.vg, box.size.x * 0.5, 12 + (-targetValue) * marksStep, "");
 
         float marginBottom = 40.f;
-        // -16 vs -22
         float overshoot = value - targetValue;
 
         float room = (overshoot <= 0) ? 60 + value : 60 + targetValue;
@@ -563,6 +571,19 @@ struct LoudnessBarWidget : TransparentWidget {
         nvgFillColor(args.vg, valueColor);
         nvgFill(args.vg);
         nvgClosePath(args.vg);
+
+        float upperY = (60 + upperValue) / 60.f * 228;
+        float lowerY = (60 + lowerValue) / 60.f * 228;
+        float y0 = box.size.y - upperY - marginBottom;
+        float y1 = box.size.y - lowerY - marginBottom;
+        nvgStrokeColor(args.vg, nvgRGB(0xdd, 0xdd, 0xdd));
+        nvgStrokeWidth(args.vg, 0.7f);
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, box.size.x * 0.5 + 14, y0);
+        nvgLineTo(args.vg, box.size.x * 0.5 + 16, y0);
+        nvgLineTo(args.vg, box.size.x * 0.5 + 16, y1);
+        nvgLineTo(args.vg, box.size.x * 0.5 + 14, y1);
+        nvgStroke(args.vg);
 
         if (overshoot > 0.0) {
             nvgBeginPath(args.vg);
@@ -615,10 +636,10 @@ struct ValueDisplayWidget : TransparentWidget {
         bool cond2 = (label == "LOUDNESS RANGE") && *valuePtr <= 0.0f;
         if (cond1 || cond2) {
             nvgStrokeColor(args.vg, nvgRGB(0xff, 0xff, 0xff));
-            nvgStrokeWidth(args.vg, 2.5f);
+            nvgStrokeWidth(args.vg, 2.1f);
             nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 14.0);
-            nvgLineTo(args.vg, box.size.x - 29.5, middleY - 14.0);
+            nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 13.0);
+            nvgLineTo(args.vg, box.size.x - 29.5, middleY - 13.0);
             nvgStroke(args.vg);
         } else {
             nvgFontSize(args.vg, 32);  // Adjusted size to fit more displays
@@ -667,9 +688,11 @@ struct LufsMeterWidget : ModuleWidget {
 
         // Use pixel coordinates directly in Vec()
         // box.size.x is already in pixels
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
-        addParam(createParamCentered<VCVButton>(Vec(112.5f, inputYPx), module, LufsMeter::RESET_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_L));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LufsMeter::AUDIO_INPUT_R));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LufsMeter::RESET_INPUT));
+        addParam(createParamCentered<VCVButton>(Vec(157.5f, inputYPx), module, LufsMeter::RESET_PARAM));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(202.5f, inputYPx), module, LufsMeter::TARGET_PARAM));
 
         // Use the calculated pixel values for position and size
         if (module) {
