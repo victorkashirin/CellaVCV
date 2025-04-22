@@ -63,7 +63,7 @@ struct LoudnessMeter : engine::Module {
     float truePeakMax = -INFINITY;
     float truePeakSlidingMax = -INFINITY;
     // Param
-    float targetLoudness = -23.f;  // Target loudness for PSR calculation
+    float targetLoudness = -23.f;
 
     // --- Values tracked manually for PSR calculation ---
     float maxShortTermLufs = -INFINITY;
