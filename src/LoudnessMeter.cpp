@@ -41,9 +41,6 @@ struct LoudnessMeter : engine::Module {
     // Powers of 2 are often efficient. 256 samples at 48kHz is ~5.3ms.
     static const size_t PROCESSING_BLOCK_FRAMES = 2048;
 
-    // How often to update the display (reduces GUI overhead)
-    // Update roughly 15 times per second (e.g., 48000Hz / 15Hz ≈ 3200 samples)
-    // Make it a multiple of PROCESSING_BLOCK_FRAMES if possible
     static const int DISPLAY_UPDATE_INTERVAL_FRAMES = 4096;  // 12 * 256
 
     // --- libebur128 State ---
@@ -85,6 +82,7 @@ struct LoudnessMeter : engine::Module {
     dsp::SchmittTrigger resetTrigger;
     dsp::SchmittTrigger resetPortTrigger;
     dsp::ClockDivider displayUpdateDivider;
+    bool shortTermEnabled = true;
 
     LoudnessMeter() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -94,7 +92,6 @@ struct LoudnessMeter : engine::Module {
         configParam(TARGET_PARAM, -36.f, 0.f, -23.f, "Target loudness", " LUFS");
         configParam(RESET_PARAM, 0.f, 1.f, 0.f, "Reset");
 
-        // Allocate buffer based on max channels (stereo)
         processingBuffer.resize(PROCESSING_BLOCK_FRAMES * 2);  // Max 2 channels
 
         displayUpdateDivider.setDivision(DISPLAY_UPDATE_INTERVAL_FRAMES);
@@ -162,7 +159,7 @@ struct LoudnessMeter : engine::Module {
         bufferPosition = 0;  // Reset buffer position for next block
 
         if (err != EBUR128_SUCCESS) {
-            std::cerr << "LoudnessMeter: Error adding frames: " << err << std::endl;
+            DEBUG("LoudnessMeter: Error adding frames to ebur128: %d", err);
             resetMeter();  // Simple error handling: reset everything
             return;
         }
@@ -171,7 +168,6 @@ struct LoudnessMeter : engine::Module {
         updateLoudnessValues();
     }
 
-    // Function to query libebur128 and update internal state variables
     void updateLoudnessValues() {
         if (!ebur128_handle || peakHistorySizeChunks == 0) return;
 
@@ -182,7 +178,6 @@ struct LoudnessMeter : engine::Module {
         err = ebur128_loudness_momentary(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
             momentaryLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
-            // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
             if (momentaryLufs > maxMomentaryLufs && momentaryLufs > ALMOST_NEGATIVE_INFINITY) {
                 maxMomentaryLufs = momentaryLufs;
             }
@@ -190,25 +185,29 @@ struct LoudnessMeter : engine::Module {
             momentaryLufs = -INFINITY;
         }
 
-        err = ebur128_loudness_shortterm(ebur128_handle, &loudnessValue);
-        if (err == EBUR128_SUCCESS) {
-            shortTermLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
-            // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
-            if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
-                maxShortTermLufs = shortTermLufs;
+        if (shortTermEnabled) {
+            err = ebur128_loudness_shortterm(ebur128_handle, &loudnessValue);
+            if (err == EBUR128_SUCCESS) {
+                shortTermLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
+                // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
+                if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+                    maxShortTermLufs = shortTermLufs;
+                }
+            } else {
+                shortTermLufs = -INFINITY;
             }
         } else {
             shortTermLufs = -INFINITY;
+            maxShortTermLufs = -INFINITY;
         }
 
         err = ebur128_loudness_global(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
             integratedLufs = (float)loudnessValue;
-        }  // Else: Keep old value
+        }
 
         double low_en, high_en;
         err = ebur128_loudness_range_ext(ebur128_handle, &loudnessValue, &low_en, &high_en);
-        // err = ebur128_loudness_range(ebur128_handle, &loudnessValue);
         if (err == EBUR128_SUCCESS) {
             loudnessRange = (float)loudnessValue;
             loudnessRangeLow = (float)low_en;
@@ -222,9 +221,9 @@ struct LoudnessMeter : engine::Module {
         if (currentInputChannels >= 1) {
             err = ebur128_prev_true_peak(ebur128_handle, 0, &peakValue);
             if (err == EBUR128_SUCCESS) {
-                float linear_amp = (float)peakValue;  // Store CURRENT peak L
-                if (linear_amp > LOG_EPSILON) {
-                    currentPeakL = 20.0f * std::log10(linear_amp);
+                float linearAmp = (float)peakValue;  // Store CURRENT peak L
+                if (linearAmp > LOG_EPSILON) {
+                    currentPeakL = 20.0f * std::log10(linearAmp);
                 }
 
                 // Update Max True Peak L (Keep this for display if you want a separate max value)
@@ -236,9 +235,9 @@ struct LoudnessMeter : engine::Module {
         if (currentInputChannels == 2) {
             err = ebur128_prev_true_peak(ebur128_handle, 1, &peakValue);
             if (err == EBUR128_SUCCESS) {
-                float linear_amp = (float)peakValue;  // Store CURRENT peak L
-                if (linear_amp > LOG_EPSILON) {
-                    currentPeakR = 20.0f * std::log10(linear_amp);
+                float linearAmp = (float)peakValue;  // Store CURRENT peak R
+                if (linearAmp > LOG_EPSILON) {
+                    currentPeakR = 20.0f * std::log10(linearAmp);
                 }
                 // Update Max True Peak R (Keep this for display if you want a separate max value)
                 if (currentPeakR > maxTruePeakR && currentPeakR > ALMOST_NEGATIVE_INFINITY) {
@@ -271,7 +270,7 @@ struct LoudnessMeter : engine::Module {
             psrValue = -INFINITY;  // Not enough valid data for current PSR
         }
 
-        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR) + 0.4f;
+        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
         truePeakSlidingMax = peakOverWindowDB;
 
         if (truePeakMax > ALMOST_NEGATIVE_INFINITY && integratedLufs > ALMOST_NEGATIVE_INFINITY) {
@@ -282,9 +281,7 @@ struct LoudnessMeter : engine::Module {
         }
     }
 
-    // Reset meter state completely
     void resetMeter() {
-        // Process any remaining samples before resetting state
         processBlockBuffer();
 
         if (ebur128_handle) {
@@ -340,7 +337,7 @@ struct LoudnessMeter : engine::Module {
     void onSampleRateChange(const SampleRateChangeEvent& e) override {
         Module::onSampleRateChange(e);
         calculate_history_size();
-        resetMeter();  // Re-initialize ebur128 and reset state
+        resetMeter();
     }
 
     void process(const ProcessArgs& args) override {
@@ -349,29 +346,25 @@ struct LoudnessMeter : engine::Module {
         }
 
         targetLoudness = params[TARGET_PARAM].getValue();
-
-        // --- 2. Check Connections and Re-initialize if Needed ---
         size_t connectedChannels = inputs[AUDIO_INPUT_R].isConnected() ? 2 : (inputs[AUDIO_INPUT_L].isConnected() ? 1 : 0);
         if (connectedChannels != currentInputChannels) {
-            resetMeter();  // Re-initialize if channel count changed
+            resetMeter();
         }
 
         // If no input or init failed, bail out for this sample
         if (!ebur128_handle || currentInputChannels == 0) {
-            // Ensure display updates eventually show inactive state if connection is lost
-            if (displayUpdateDivider.process()) {
-                momentaryLufs = -INFINITY;
-                shortTermLufs = -INFINITY;
-                // Keep integrated unless reset
-                loudnessRange = -INFINITY;
-                loudnessRangeHigh = -INFINITY;
-                loudnessRangeLow = -INFINITY;
-                psrValue = -INFINITY;
-                plrValue = -INFINITY;
-                truePeakMax = -INFINITY;
-                truePeakSlidingMax = -INFINITY;
-                maxShortTermLufs = -INFINITY;
-            }
+            momentaryLufs = -INFINITY;
+            shortTermLufs = -INFINITY;
+            // Keep integrated unless reset
+            loudnessRange = -INFINITY;
+            loudnessRangeHigh = -INFINITY;
+            loudnessRangeLow = -INFINITY;
+            psrValue = -INFINITY;
+            plrValue = -INFINITY;
+            truePeakMax = -INFINITY;
+            truePeakSlidingMax = -INFINITY;
+            maxShortTermLufs = -INFINITY;
+
             return;
         }
 
@@ -392,27 +385,13 @@ struct LoudnessMeter : engine::Module {
         if (bufferPosition >= PROCESSING_BLOCK_FRAMES) {
             processBlockBuffer();
         }
-
-        // --- 5. Update Display Periodically ---
-        // We update the display values less frequently than we process blocks
-        // to reduce GUI overhead. The *internal* LUFS state is updated
-        // every block, but the display reflects the state at these intervals.
-        // This means momentary might lag slightly, but S, I, LRA, PSR are longer-term
-        // and less affected by display update rate.
-        if (displayUpdateDivider.process()) {
-            // The actual displayed values are already updated within
-            // updateLoudnessValues() when a block is processed.
-            // This divider just controls how often the *widget* potentially redraws.
-            // No explicit action needed here unless we wanted separate display variables.
-        }
     }
 
     // --- 8. Data Persistence ---
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "integratedLufs", json_real(integratedLufs));
-        // Persisting LRA/PSR/max values is tricky as libebur128 state isn't saved.
-        // Integrated is the most standard value to persist display-wise.
+        json_object_set_new(rootJ, "shortTermEnabled", json_boolean(shortTermEnabled));
         return rootJ;
     }
 
@@ -423,6 +402,8 @@ struct LoudnessMeter : engine::Module {
         } else {
             integratedLufs = -INFINITY;
         }
+        json_t* shortTermEnabledJ = json_object_get(rootJ, "shortTermEnabled");
+        if (shortTermEnabledJ) shortTermEnabled = json_boolean_value(shortTermEnabledJ);
         // Ensure other derived values are reset on load, they will recalculate.
         bufferPosition = 0;  // Clear any partially filled buffer from save state
         momentaryLufs = -INFINITY;
@@ -551,9 +532,9 @@ struct LoudnessBarWidget : TransparentWidget {
             float overshoot = value - targetValue;
             float room = (overshoot <= 0) ? 60.f + value : 60.f + targetValue;
             float barHeight = room / 60.0f * 228.f;  // Max height corresponds to 60 LU range
-            float yOffset = box.size.y - barHeight - marginBottom;
 
             if (barHeight <= 0.0) barHeight = 1.f;  // Ensure minimum visible height
+            float yOffset = box.size.y - barHeight - marginBottom;
 
             // Draw main bar segment (up to target)
             nvgBeginPath(args.vg);
@@ -589,17 +570,13 @@ struct LoudnessBarWidget : TransparentWidget {
                 nvgStroke(args.vg);
             }
         } else {
-            // --- Draw Default State for Bar (when module/pointers are null) ---
-            // Option 1: Draw nothing dynamic (simplest)
-            // Option 2: Draw a minimal bar at the bottom (-60 LUFS)
             float defaultBarHeight = 1.f;
             float defaultYOffset = box.size.y - defaultBarHeight - marginBottom;
             nvgBeginPath(args.vg);
             nvgRect(args.vg, 0.5 * (box.size.x - barWidth), defaultYOffset, barWidth, defaultBarHeight);
-            nvgFillColor(args.vg, valueColor);  // Or a dimmed color like grey
+            nvgFillColor(args.vg, valueColor);
             nvgFill(args.vg);
             nvgClosePath(args.vg);
-            // Option 3: Draw a specific "inactive" symbol (more complex)
         }
 
         // --- Draw Unit and Label (Always) ---
@@ -617,7 +594,6 @@ struct LoudnessBarWidget : TransparentWidget {
     }
 };
 
-// Custom display widget (reusable)
 struct ValueDisplayWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
@@ -652,25 +628,20 @@ struct ValueDisplayWidget : TransparentWidget {
             bool cond2 = (label == "LOUDNESS RANGE") && currentValue <= 0.0f;
 
             if (cond1 || cond2) {
-                // Use the dash representation for these specific conditions
                 drawDash = true;
             } else {
                 // Format the valid number
                 valueText = formatValue(currentValue);
             }
         } else {
-            // Module or valuePtr is null, keep default "-inf" or decide on another default
-            // If you want 0.0 instead of -inf:
-            // valueText = formatValue(0.0f);
-            // If you specifically want the dash for null module:
-            drawDash = true;  // Or choose "-inf" text by not setting drawDash = true
-            valueText = "";   // Don't draw text if drawing dash
+            drawDash = true;
+            valueText = "";
         }
 
         // --- Draw Value ---
         nvgFontFaceId(args.vg, font->handle);
         if (drawDash) {
-            nvgStrokeColor(args.vg, nvgRGB(0xff, 0xff, 0xff));
+            nvgStrokeColor(args.vg, valueColor);
             nvgStrokeWidth(args.vg, 2.1f);
             nvgBeginPath(args.vg);
             nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 13.0);
@@ -780,7 +751,7 @@ struct LoudnessMeterWidget : ModuleWidget {
         plrDisplay->unit = "LU";
         addChild(plrDisplay);
 
-        ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 2 * yStep));
+        ValueDisplayWidget* mMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 3 * yStep));
         mMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
@@ -789,7 +760,7 @@ struct LoudnessMeterWidget : ModuleWidget {
         mMaxDisplay->unit = "LUFS";
         addChild(mMaxDisplay);
 
-        ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px, yStart + 3 * yStep));
+        ValueDisplayWidget* sMaxDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 3 * yStep));
         sMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
@@ -798,7 +769,7 @@ struct LoudnessMeterWidget : ModuleWidget {
         sMaxDisplay->unit = "LUFS";
         addChild(sMaxDisplay);
 
-        ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 3 * yStep));
+        ValueDisplayWidget* tpmDisplay = createWidget<ValueDisplayWidget>(Vec(displayX_Px + displayWidthPx, yStart + 2 * yStep));
         tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             tpmDisplay->valuePtr = &module->truePeakMax;
@@ -806,6 +777,17 @@ struct LoudnessMeterWidget : ModuleWidget {
         tpmDisplay->label = "TRUE PEAK MAX";
         tpmDisplay->unit = "dB";
         addChild(tpmDisplay);
+    }
+
+    void appendContextMenu(Menu* menu) override {
+        LoudnessMeter* module = dynamic_cast<LoudnessMeter*>(this->module);
+        assert(module);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Settings"));
+        menu->addChild(createIndexPtrSubmenuItem("Short-Term Loudness",
+                                                 {"Disabled",
+                                                  "Enabled"},
+                                                 &module->shortTermEnabled));
     }
 };
 
