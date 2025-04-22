@@ -465,10 +465,9 @@ void drawDebugFrame(NVGcontext* vg, Rect box) {
 struct LoudnessBarWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
-    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);
-    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);
-    NVGcolor redColor = nvgRGB(0xff, 0x00, 0x00);
-    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);
+    NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
+    NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
+    NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
     std::string label;
     float* momentaryValuePtr = nullptr;
     float* lowerRangeValuePtr = nullptr;
@@ -484,7 +483,7 @@ struct LoudnessBarWidget : TransparentWidget {
     void drawLevelMarks(NVGcontext* vg, float x, float y, std::string label) {
         float markWidth = 4.f;
         float margin = 8.f;
-        nvgStrokeColor(vg, nvgRGB(0xff, 0xff, 0xff));
+        nvgStrokeColor(vg, valueColor);
         nvgStrokeWidth(vg, 0.4f);
         nvgBeginPath(vg);
         nvgMoveTo(vg, x - margin, y);
@@ -499,7 +498,9 @@ struct LoudnessBarWidget : TransparentWidget {
         nvgText(vg, x - margin - markWidth - 3, y, label.c_str(), NULL);
     }
 
-    void draw(const DrawArgs& args) override {
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1)
+            return;
         // Check fonts first
         if (!font || !font2) return;
 
@@ -620,9 +621,8 @@ struct LoudnessBarWidget : TransparentWidget {
 struct ValueDisplayWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
-    NVGcolor textColor = nvgRGB(0x00, 0xbf, 0xff);
-    NVGcolor valueColor = nvgRGB(0xff, 0xff, 0xff);
-    NVGcolor labelColor = nvgRGB(0x00, 0xbf, 0xff);
+    NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
+    NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
     std::string label;
     float* valuePtr = nullptr;
     std::string unit = "";
@@ -632,7 +632,9 @@ struct ValueDisplayWidget : TransparentWidget {
         font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
     }
 
-    void draw(const DrawArgs& args) override {
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer != 1)
+            return;
         // Check fonts first, as they are needed for everything
         if (!font || !font2) return;  // Cannot draw text without fonts
 
@@ -713,11 +715,8 @@ struct LoudnessMeterWidget : ModuleWidget {
         float yStart = 26.f;
         float displayX_Px = 45.f;
         float displayWidthPx = 90;
-
         float inputYPx = 329.25;
 
-        // Use pixel coordinates directly in Vec()
-        // box.size.x is already in pixels
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_L));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_R));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LoudnessMeter::RESET_INPUT));
