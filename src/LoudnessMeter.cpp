@@ -748,7 +748,7 @@ struct LoudnessMeterWidget : ModuleWidget {
             tpmDisplay->valuePtr = &module->truePeakMax;
         }
         tpmDisplay->label = "TRUE PEAK MAX";
-        tpmDisplay->unit = "dB";
+        tpmDisplay->unit = "dBTP";
         addChild(tpmDisplay);
     }
 

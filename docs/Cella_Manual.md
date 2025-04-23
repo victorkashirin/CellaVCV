@@ -358,3 +358,51 @@ Due to complex logic of handling self-patching, stacked cables on DATA, XOR and 
 *   **Rhythmic Complexity:** Patch outputs back into **DATA**, **XOR**, or **LOGIC** inputs. Use external random sources or LFOs into these inputs as well. Experiment with different Logic Types. Cross-patch few **Cognitive Shift** modules for longer and more complex sequences.
 *   **Complex Modulation:** Use the **DAC** outputs, potentially with slow clock rates, to generate evolving CV signals.
 *   **Generative Melodies:** Use pseudo-random patterns generated via self-patching into the **DAC** output, quantize the result, and use it for pitch sequencing.
+
+
+# Loudness Meter
+
+<img src="images/LoudnessMeter.png" alt="Cella - Loudness Meter" style="height: 380px;">
+
+A comprehensive audio loudness meter based on the EBU R128 standard, utilizing the [libebur128](https://github.com/jiixyj/libebur128) library for accurate measurements.
+
+## Inputs
+
+*   **Audio L / Mono**: Left channel audio input. If the 'Audio R' input is disconnected, this input is used for mono analysis. Expects standard VCV Rack +/- 10V signals, scaled internally to +/- 1.0f for processing.
+*   **Audio R**: Right channel audio input. Connect this for stereo analysis. If connected, both L and R inputs are processed as a stereo pair.
+*   **Reset**: Resets all integrated, maximum, and historical measurements when a trigger signal (rising edge, typically > 1V) is received.
+
+## Controls
+
+*   **Reset Button**: Manually resets all integrated, maximum, and historical measurements when clicked.
+*   **Target Loudness Knob**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target.
+
+## Measurements & Displays
+
+The module features a large display area showing several loudness metrics:
+
+1.  **Momentary Loudness (M) Bar**: Displays the momentary loudness (measured over a 400ms window) as a vertical bar graph. The bar is white up to the **Target Loudness** value and turns red above it. Small bracket indicates the current **Loudness Range**.
+
+2.  **SHORT TERM**: Displays the short-term loudness (measured over a 3s window). Calculation can be disabled via the context menu.
+
+3.  **INTEGRATED**: Displays the integrated loudness (overall program loudness) calculated since the last reset. This value is saved and restored with the patch.
+
+4.  **DYNAMICS (PSR)**: Displays the Peak to Short-term Loudness Ratio (PSR). This is the difference between the *sliding maximum true peak* (measured over the last ~2.5 seconds) and the current *short-term loudness*. Provides an indication of recent dynamic range.
+
+5.  **AVG DYN (PLR)**: Displays the Peak to integrated Loudness Ratio (PLR). This is the difference between the *overall maximum true peak* recorded since the last reset and the current *integrated loudness*. Provides an indication of the overall dynamic range of the program material since the last reset.
+
+6.  **LOUDNESS RANGE (LRA)**: Displays the statistical loudness range, indicating the variation in loudness throughout the measurement period (since the last reset).
+
+7.  **MOMENTARY MAX**: Displays the maximum momentary loudness level recorded since the last reset.
+
+8.  **SHORT TERM MAX**: Displays the maximum short-term loudness level recorded since the last reset.
+
+9.  **TRUE PEAK MAX**: Displays the maximum true peak level (accounting for inter-sample peaks) recorded on either channel since the last reset. The value turns red if it exceeds -0.5 dBTP, indicating potential clipping after D/A conversion.
+
+## Context Menu
+
+Right-clicking the panel opens the context menu, which includes:
+
+*   **Short-Term Loudness**:
+    *   **Enabled (Default)**: Calculates and displays Short-Term Loudness and PSR.
+    *   **Disabled**: Disables Short-Term Loudness and PSR calculations and display. This can slightly reduce CPU usage if these metrics are not needed.
