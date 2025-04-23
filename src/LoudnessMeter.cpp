@@ -599,6 +599,7 @@ struct ValueDisplayWidget : TransparentWidget {
     std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
     NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
+    NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     std::string label;
     float* valuePtr = nullptr;
     std::string unit = "";
@@ -620,18 +621,23 @@ struct ValueDisplayWidget : TransparentWidget {
         // --- Determine Value String ---
         std::string valueText = "-inf";  // Default value string
         bool drawDash = false;           // Default state for drawing dash
+        bool clipping = false;
 
         // Only try to read value if module and pointer are valid
         if (valuePtr) {
             float currentValue = *valuePtr;
             bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
             bool cond2 = (label == "LOUDNESS RANGE") && currentValue <= 0.0f;
+            bool cond3 = (label == "TRUE PEAK MAX") && currentValue >= -0.5f;
 
             if (cond1 || cond2) {
                 drawDash = true;
             } else {
                 // Format the valid number
                 valueText = formatValue(currentValue);
+                if (cond3) {
+                    clipping = true;
+                }
             }
         } else {
             drawDash = true;
@@ -649,7 +655,7 @@ struct ValueDisplayWidget : TransparentWidget {
             nvgStroke(args.vg);
         } else {
             nvgFontSize(args.vg, 32);
-            nvgFillColor(args.vg, valueColor);
+            nvgFillColor(args.vg, clipping ? redColor : valueColor);
             nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
             nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, valueText.c_str(), NULL);
         }
