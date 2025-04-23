@@ -18,9 +18,6 @@ const float ALMOST_NEGATIVE_INFINITY = -99.0f;
 const float VOLTAGE_SCALE = 0.1f;  // Scale +/-10V to +/-1.0f
 const float LOG_EPSILON = 1e-10f;  // Or adjust as needed
 
-//-----------------------------------------------------------------------------
-// Module Logic: LoudnessMeter (Corrected with Buffering)
-//-----------------------------------------------------------------------------
 struct LoudnessMeter : engine::Module {
     enum ParamIds {
         RESET_PARAM,
@@ -40,8 +37,6 @@ struct LoudnessMeter : engine::Module {
     // Process samples in blocks of this size before feeding to libebur128
     // Powers of 2 are often efficient. 256 samples at 48kHz is ~5.3ms.
     static const size_t PROCESSING_BLOCK_FRAMES = 2048;
-
-    static const int DISPLAY_UPDATE_INTERVAL_FRAMES = 4096;  // 12 * 256
 
     // --- libebur128 State ---
     ebur128_state* ebur128_handle = nullptr;
@@ -81,7 +76,6 @@ struct LoudnessMeter : engine::Module {
     // --- Control & Timing ---
     dsp::SchmittTrigger resetTrigger;
     dsp::SchmittTrigger resetPortTrigger;
-    dsp::ClockDivider displayUpdateDivider;
     bool shortTermEnabled = true;
 
     LoudnessMeter() {
@@ -94,8 +88,6 @@ struct LoudnessMeter : engine::Module {
 
         processingBuffer.resize(PROCESSING_BLOCK_FRAMES * 2);  // Max 2 channels
 
-        displayUpdateDivider.setDivision(DISPLAY_UPDATE_INTERVAL_FRAMES);
-
         // Initialize state
         resetMeter();
         calculate_history_size();
@@ -103,20 +95,19 @@ struct LoudnessMeter : engine::Module {
 
     ~LoudnessMeter() override {
         if (ebur128_handle) {
-            // Optionally process any remaining samples in the buffer before destroying
-            // processBlockBuffer();
+            // Process any remaining samples in the buffer before destroying
+            processBlockBuffer();
             ebur128_destroy(&ebur128_handle);
         }
     }
 
     void calculate_history_size() {
-        // Assuming 'chunk_size_frames' is the number of frames you process in each call
-        int chunk_size_frames = PROCESSING_BLOCK_FRAMES;  // Or get this from your engine
+        int chunkSizeFrames = PROCESSING_BLOCK_FRAMES;
         // to ebur128_add_frames_*
         float sampleRate = APP->engine->getSampleRate();
-        if (sampleRate > 0 && chunk_size_frames > 0) {
+        if (sampleRate > 0 && chunkSizeFrames > 0) {
             peakHistorySizeChunks = static_cast<size_t>(
-                std::ceil(PEAK_HISTORY_SECONDS * sampleRate / (float)chunk_size_frames));
+                std::ceil(PEAK_HISTORY_SECONDS * sampleRate / (float)chunkSizeFrames));
             // Ensure a minimum history size if calculation is very small
             if (peakHistorySizeChunks < 5) peakHistorySizeChunks = 5;
         } else {
@@ -132,39 +123,39 @@ struct LoudnessMeter : engine::Module {
         if (dq.empty()) {
             return -INFINITY;
         }
-        float max_val = -INFINITY;
-        bool found_valid = false;
+        float maxVal = -INFINITY;
+        bool foundValid = false;
         for (float val : dq) {
-            if (val > max_val) {
-                max_val = val;
-                found_valid = true;
+            if (val > maxVal) {
+                maxVal = val;
+                foundValid = true;
             }
         }
         // If only -inf values were present, return -inf
-        return found_valid ? max_val : -INFINITY;
+        return foundValid ? maxVal : -INFINITY;
     }
 
     // Function to process the accumulated buffer
     void processBlockBuffer() {
         if (!ebur128_handle || bufferPosition == 0) {
-            return;  // Nothing to process or library not initialized
+            return;
         }
 
-        // Number of frames actually collected (might be less than full block if reset/stopped)
+        // Number of frames actually collected
         size_t framesToProcess = bufferPosition;
 
         // Pass the collected frames to libebur128
         int err = ebur128_add_frames_float(ebur128_handle, processingBuffer.data(), framesToProcess);
 
-        bufferPosition = 0;  // Reset buffer position for next block
+        bufferPosition = 0;
 
         if (err != EBUR128_SUCCESS) {
             DEBUG("LoudnessMeter: Error adding frames to ebur128: %d", err);
-            resetMeter();  // Simple error handling: reset everything
+            resetMeter();
             return;
         }
 
-        // --- Update Meter Readings (only after processing a block) ---
+        // --- Update Meter Readings ---
         updateLoudnessValues();
     }
 
@@ -189,7 +180,7 @@ struct LoudnessMeter : engine::Module {
             err = ebur128_loudness_shortterm(ebur128_handle, &loudnessValue);
             if (err == EBUR128_SUCCESS) {
                 shortTermLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
-                // Update Max Short Term LUFS (Keep this for display if you want a separate max value)
+                // Update Max Short Term LUFS
                 if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
                     maxShortTermLufs = shortTermLufs;
                 }
@@ -216,7 +207,7 @@ struct LoudnessMeter : engine::Module {
 
         // --- Get Current True Peak Values ---
         float currentPeakL = -INFINITY;
-        float currentPeakR = -INFINITY;  // Initialize for the current update cycle
+        float currentPeakR = -INFINITY;
 
         if (currentInputChannels >= 1) {
             err = ebur128_prev_true_peak(ebur128_handle, 0, &peakValue);
@@ -226,7 +217,7 @@ struct LoudnessMeter : engine::Module {
                     currentPeakL = 20.0f * std::log10(linearAmp);
                 }
 
-                // Update Max True Peak L (Keep this for display if you want a separate max value)
+                // Update Max True Peak L
                 if (currentPeakL > maxTruePeakL && currentPeakL > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakL = currentPeakL;
                 }
@@ -239,7 +230,7 @@ struct LoudnessMeter : engine::Module {
                 if (linearAmp > LOG_EPSILON) {
                     currentPeakR = 20.0f * std::log10(linearAmp);
                 }
-                // Update Max True Peak R (Keep this for display if you want a separate max value)
+                // Update Max True Peak R
                 if (currentPeakR > maxTruePeakR && currentPeakR > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakR = currentPeakR;
                 }
@@ -296,8 +287,9 @@ struct LoudnessMeter : engine::Module {
             ebur128_handle = ebur128_init(
                 channels,
                 (size_t)sampleRate,
-                EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I |
-                    EBUR128_MODE_LRA | EBUR128_MODE_HISTOGRAM | EBUR128_MODE_TRUE_PEAK);
+                EBUR128_MODE_M | EBUR128_MODE_S |
+                    EBUR128_MODE_I | EBUR128_MODE_LRA |
+                    EBUR128_MODE_HISTOGRAM | EBUR128_MODE_TRUE_PEAK);
 
             if (!ebur128_handle) {
                 DEBUG("LoudnessMeter: Failed to re-initialize ebur128");
@@ -428,21 +420,6 @@ static std::string formatValue(float value) {
     return std::string(buf);
 }
 
-void drawDebugFrame(NVGcontext* vg, Rect box) {
-    nvgStrokeColor(vg, nvgRGB(0xff, 0xff, 0xff));
-    nvgStrokeWidth(vg, 0.2f);
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, 0, 0);
-    nvgLineTo(vg, box.size.x, 0);
-    nvgLineTo(vg, box.size.x, box.size.y);
-    nvgLineTo(vg, 0, box.size.y);
-    nvgLineTo(vg, 0, 0);
-
-    nvgMoveTo(vg, 0, box.size.y * 0.5);
-    nvgLineTo(vg, box.size.x, box.size.y * 0.5);
-    nvgStroke(vg);
-}
-
 struct LoudnessBarWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
@@ -482,14 +459,13 @@ struct LoudnessBarWidget : TransparentWidget {
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1)
             return;
-        // Check fonts first
         if (!font || !font2) return;
 
         float marksStep = 3.8f;
         float marginBottom = 40.f;
         float barWidth = 12.f;
 
-        // --- Draw Static Level Marks (Always) ---
+        // --- Draw Static Level Marks ---
         drawLevelMarks(args.vg, box.size.x * 0.5, 12, "0");
         drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 3 * marksStep, "-3");
         drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 6 * marksStep, "-6");
@@ -500,8 +476,6 @@ struct LoudnessBarWidget : TransparentWidget {
         drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 45 * marksStep, "-45");
         drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 54 * marksStep, "-54");
 
-        // --- Draw Dynamic Bar and Range (Conditional) ---
-        // Check if module and all necessary pointers are valid
         bool canDrawDynamic = momentaryValuePtr && lowerRangeValuePtr && upperRangeValuePtr && targetValuePtr;
 
         if (canDrawDynamic) {
@@ -510,40 +484,37 @@ struct LoudnessBarWidget : TransparentWidget {
             float lowerValue = *lowerRangeValuePtr;
             float targetValue = *targetValuePtr;
 
-            // Handle NaN/inf values coming from the module
             if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
-                value = -60.f;  // Use minimum displayable value
+                value = -60.f;
             }
-            // Use sensible defaults or minimums if range/target are NaN
             if (std::isnan(upperValue)) upperValue = -60.f;
             if (std::isnan(lowerValue)) lowerValue = -60.f;
-            if (std::isnan(targetValue)) targetValue = 0.f;
+            if (std::isnan(targetValue)) targetValue = -23.f;
 
             // Clamp values to the displayable range [-60, 0]
             value = clamp(value, -60.f, 0.f);
             upperValue = clamp(upperValue, -60.f, 0.f);
             lowerValue = clamp(lowerValue, -60.f, 0.f);
-            targetValue = clamp(targetValue, -60.f, 0.f);  // Clamp target too for mark position
+            targetValue = clamp(targetValue, -60.f, 0.f);
 
-            // Draw target mark (even if value is low)
             drawLevelMarks(args.vg, box.size.x * 0.5, 12 + (-targetValue) * marksStep, "");
 
             // Calculate bar geometry based on value and target
             float overshoot = value - targetValue;
             float room = (overshoot <= 0) ? 60.f + value : 60.f + targetValue;
-            float barHeight = room / 60.0f * 228.f;  // Max height corresponds to 60 LU range
+            float barHeight = room / 60.0f * 228.f;
 
-            if (barHeight <= 0.0) barHeight = 1.f;  // Ensure minimum visible height
+            if (barHeight <= 0.0) barHeight = 1.f;
             float yOffset = box.size.y - barHeight - marginBottom;
 
-            // Draw main bar segment (up to target)
+            // Draw main bar segment
             nvgBeginPath(args.vg);
             nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset, barWidth, barHeight);
             nvgFillColor(args.vg, valueColor);
             nvgFill(args.vg);
             nvgClosePath(args.vg);
 
-            // Draw overshoot segment (if any)
+            // Draw overshoot segment
             if (overshoot > 0.0) {
                 float overshootHeight = overshoot / 60.0f * 228.f;
                 float yOffsetOvershoot = yOffset - overshootHeight;
@@ -555,9 +526,8 @@ struct LoudnessBarWidget : TransparentWidget {
             }
 
             // Draw Loudness Range indicators
-
-            float upperYPos = 12 + (-upperValue) * marksStep;  // Map LUFS to Y
-            float lowerYPos = 12 + (-lowerValue) * marksStep;  // Map LUFS to Y
+            float upperYPos = 12 + (-upperValue) * marksStep;
+            float lowerYPos = 12 + (-lowerValue) * marksStep;
 
             if (upperYPos != lowerYPos) {
                 nvgStrokeColor(args.vg, nvgRGB(0xdd, 0xdd, 0xdd));
@@ -579,14 +549,14 @@ struct LoudnessBarWidget : TransparentWidget {
             nvgClosePath(args.vg);
         }
 
-        // --- Draw Unit and Label (Always) ---
-        nvgFontFaceId(args.vg, font->handle);  // Use main font for unit
+        // --- Draw Unit and Label
+        nvgFontFaceId(args.vg, font->handle);
         nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_TOP | NVG_ALIGN_CENTER);
         nvgText(args.vg, box.size.x * 0.5, box.size.y - 35, unit.c_str(), NULL);
 
-        nvgFontFaceId(args.vg, font2->handle);  // Use secondary font for label
+        nvgFontFaceId(args.vg, font2->handle);
         nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_CENTER);
@@ -612,18 +582,15 @@ struct ValueDisplayWidget : TransparentWidget {
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1)
             return;
-        // Check fonts first, as they are needed for everything
-        if (!font || !font2) return;  // Cannot draw text without fonts
+        if (!font || !font2) return;
 
         float middleY = box.size.y * 0.5f;
-        // drawDebugFrame(args.vg, box);
 
         // --- Determine Value String ---
-        std::string valueText = "-inf";  // Default value string
-        bool drawDash = false;           // Default state for drawing dash
+        std::string valueText = "-inf";
+        bool drawDash = false;
         bool clipping = false;
 
-        // Only try to read value if module and pointer are valid
         if (valuePtr) {
             float currentValue = *valuePtr;
             bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
@@ -660,13 +627,13 @@ struct ValueDisplayWidget : TransparentWidget {
             nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, valueText.c_str(), NULL);
         }
 
-        // --- Draw Unit (Always) ---
+        // --- Draw Unit ---
         nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, valueColor);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
         nvgText(args.vg, box.size.x - 9.5, middleY, unit.c_str(), NULL);
 
-        // --- Draw Label (Always) ---
+        // --- Draw Label ---
         nvgFontFaceId(args.vg, font2->handle);
         nvgFontSize(args.vg, 14);
         nvgFillColor(args.vg, labelColor);
