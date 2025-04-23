@@ -13,4 +13,5 @@ void init(Plugin *p) {
     p->addModel(modelBytebeat);
     p->addModel(modelCognitiveShift);
     p->addModel(modelLoudnessMeter);
+    p->addModel(modelLoudness);
 }
