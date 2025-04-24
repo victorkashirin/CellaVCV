@@ -26,7 +26,9 @@ struct ValueDisplaySmallWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
-    NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
+    // NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
+    NVGcolor labelColor = nvgRGB(95, 190, 250);
+    // NVGcolor labelColor = nvgRGB(121, 202, 252);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     std::string label;
     float* valuePtr = nullptr;
@@ -99,6 +101,59 @@ struct ValueDisplaySmallWidget : TransparentWidget {
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
         nvgText(args.vg, 23, middleY, label.c_str(), NULL);
+    }
+};
+
+struct TargetQuantity : Quantity {
+    LoudnessMeter* _module;
+
+    TargetQuantity(LoudnessMeter* m) : _module(m) {}
+
+    void setValue(float value) override {
+        value = clamp(value, getMinValue(), getMaxValue());
+        if (_module) {
+            _module->params[1].setValue(std::ceil(value * 10.0) / 10.0);
+        }
+    }
+
+    float getValue() override {
+        if (_module) {
+            return _module->params[1].getValue();
+        }
+        return getDefaultValue();
+    }
+
+    float getMinValue() override { return -36.0f; }
+    float getMaxValue() override { return 0.0f; }
+    float getDefaultValue() override { return LoudnessMeter::defaultTarget; }
+    std::string getLabel() override { return "Target loudness"; }
+    std::string getUnit() override { return " LUFS"; }
+};
+
+template <class Q>
+struct LoudnessSlider : ui::Slider {
+    LoudnessSlider(LoudnessMeter* module) {
+        quantity = new Q(module);
+        box.size.x = 200.0f;
+    }
+    virtual ~LoudnessSlider() {
+        delete quantity;
+    }
+};
+
+template <class Q>
+struct LoudnessSliderMenuItem : MenuItem {
+    LoudnessMeter* _module;
+
+    LoudnessSliderMenuItem(LoudnessMeter* m, const char* label) : _module(m) {
+        this->text = label;
+        this->rightText = "▸";
+    }
+
+    Menu* createChildMenu() override {
+        Menu* menu = new Menu;
+        menu->addChild(new LoudnessSlider<Q>(_module));
+        return menu;
     }
 };
 
@@ -216,10 +271,11 @@ struct LoudnessWidget : ModuleWidget {
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Settings"));
-        menu->addChild(createIndexPtrSubmenuItem("Short-Term Loudness",
+        menu->addChild(createIndexPtrSubmenuItem("Short-Term loudness",
                                                  {"Disabled",
                                                   "Enabled"},
                                                  &module->shortTermEnabled));
+        menu->addChild(new LoudnessSliderMenuItem<TargetQuantity>(module, "Target loudness"));
     }
 };
 

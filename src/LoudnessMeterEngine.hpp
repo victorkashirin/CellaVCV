@@ -56,6 +56,7 @@ struct LoudnessMeter : engine::Module {
     float truePeakMax = -INFINITY;
     float truePeakSlidingMax = -INFINITY;
     // Param
+    static const float defaultTarget = -23.f;
     float targetLoudness = -23.f;
 
     // --- Values tracked manually for PSR calculation ---
@@ -334,7 +335,6 @@ struct LoudnessMeter : engine::Module {
         if (resetTrigger.process(params[RESET_PARAM].getValue()) || resetPortTrigger.process(inputs[RESET_INPUT].getVoltage())) {
             resetMeter();
         }
-
         targetLoudness = params[TARGET_PARAM].getValue();
         size_t connectedChannels = inputs[AUDIO_INPUT_R].isConnected() ? 2 : (inputs[AUDIO_INPUT_L].isConnected() ? 1 : 0);
         if (connectedChannels != currentInputChannels) {

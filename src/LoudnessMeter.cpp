@@ -27,7 +27,7 @@ struct LoudnessBarWidget : TransparentWidget {
     std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
-    NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
+    NVGcolor labelColor = nvgRGB(95, 190, 250);
     std::string label;
     float* momentaryValuePtr = nullptr;
     float* lowerRangeValuePtr = nullptr;
@@ -170,7 +170,7 @@ struct ValueDisplayWidget : TransparentWidget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
-    NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
+    NVGcolor labelColor = nvgRGB(95, 190, 250);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     std::string label;
     float* valuePtr = nullptr;
@@ -359,7 +359,7 @@ struct LoudnessMeterWidget : ModuleWidget {
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Settings"));
-        menu->addChild(createIndexPtrSubmenuItem("Short-Term Loudness",
+        menu->addChild(createIndexPtrSubmenuItem("Short-Term loudness",
                                                  {"Disabled",
                                                   "Enabled"},
                                                  &module->shortTermEnabled));
