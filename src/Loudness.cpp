@@ -124,6 +124,8 @@ struct LoudnessWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LoudnessMeter::RESET_INPUT));
         addParam(createParamCentered<VCVButton>(Vec(121.5f, 12.5f), module, LoudnessMeter::RESET_PARAM));
 
+        float off = 3.f;
+
         ValueDisplaySmallWidget* momentaryDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 9 * yStep));
         momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
@@ -134,7 +136,7 @@ struct LoudnessWidget : ModuleWidget {
         momentaryDisplay->unit = "LUFS";
         addChild(momentaryDisplay);
 
-        ValueDisplaySmallWidget* shortTermDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 8 * yStep));
+        ValueDisplaySmallWidget* shortTermDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 8 * yStep - off));
         shortTermDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             shortTermDisplay->valuePtr = &module->shortTermLufs;
@@ -143,7 +145,7 @@ struct LoudnessWidget : ModuleWidget {
         shortTermDisplay->unit = "LUFS";
         addChild(shortTermDisplay);
 
-        ValueDisplaySmallWidget* integratedDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 7 * yStep));
+        ValueDisplaySmallWidget* integratedDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 7 * yStep - 2 * off));
         integratedDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             integratedDisplay->valuePtr = &module->integratedLufs;
@@ -152,7 +154,7 @@ struct LoudnessWidget : ModuleWidget {
         integratedDisplay->unit = "LUFS";
         addChild(integratedDisplay);
 
-        ValueDisplaySmallWidget* lraDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 6 * yStep));
+        ValueDisplaySmallWidget* lraDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 6 * yStep + off));
         lraDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             lraDisplay->valuePtr = &module->loudnessRange;
@@ -170,7 +172,7 @@ struct LoudnessWidget : ModuleWidget {
         psrDisplay->unit = "LU";
         addChild(psrDisplay);
 
-        ValueDisplaySmallWidget* plrDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 4 * yStep));
+        ValueDisplaySmallWidget* plrDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 4 * yStep - off));
         plrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             plrDisplay->valuePtr = &module->plrValue;
@@ -179,7 +181,7 @@ struct LoudnessWidget : ModuleWidget {
         plrDisplay->unit = "LU";
         addChild(plrDisplay);
 
-        ValueDisplaySmallWidget* mMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 3 * yStep));
+        ValueDisplaySmallWidget* mMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 3 * yStep + 2 * off));
         mMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
@@ -188,7 +190,7 @@ struct LoudnessWidget : ModuleWidget {
         mMaxDisplay->unit = "LUFS";
         addChild(mMaxDisplay);
 
-        ValueDisplaySmallWidget* sMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 2 * yStep));
+        ValueDisplaySmallWidget* sMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 2 * yStep + off));
         sMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
