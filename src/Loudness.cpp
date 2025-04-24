@@ -30,6 +30,7 @@ struct ValueDisplaySmallWidget : TransparentWidget {
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     std::string label;
     float* valuePtr = nullptr;
+    float* maxValuePtr = nullptr;
     std::string unit = "";
 
     ValueDisplaySmallWidget() {
@@ -54,13 +55,14 @@ struct ValueDisplaySmallWidget : TransparentWidget {
             bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
             bool cond2 = (label == "LR") && currentValue <= 0.0f;
             bool cond3 = (label == "TPMAX") && currentValue >= -0.5f;
+            bool cond4 = maxValuePtr && !std::isnan(currentValue) && (label == "M") && currentValue >= *maxValuePtr;
 
             if (cond1 || cond2) {
                 drawDash = true;
             } else {
                 // Format the valid number
                 valueText = formatValue(currentValue);
-                if (cond3) {
+                if (cond3 | cond4) {
                     clipping = true;
                 }
             }
@@ -130,7 +132,7 @@ struct LoudnessWidget : ModuleWidget {
         momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             momentaryDisplay->valuePtr = &module->momentaryLufs;
-            // momentaryDisplay->targetValuePtr = &module->targetLoudness;
+            momentaryDisplay->maxValuePtr = &module->targetLoudness;
         }
         momentaryDisplay->label = "M";
         momentaryDisplay->unit = "LUFS";
