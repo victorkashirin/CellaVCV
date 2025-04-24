@@ -1,5 +1,11 @@
 # Cella modules changelog
 
+### 2.8.0 (2025-04-25)
+
+New modules:
+* Loudness and Loudness Meter - comprehensive loudness meters based on the EBU R128 standard
+
+
 ### 2.0.7 (2025-04-12)
 
 New modules:
