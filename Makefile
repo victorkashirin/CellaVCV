@@ -2,7 +2,9 @@
 RACK_DIR ?= ../..
 
 # FLAGS will be passed to both the C and C++ compiler
-FLAGS +=
+FLAGS += -I./deps/ebur128
+FLAGS += -Ideps/ebur128/queue
+
 CFLAGS +=
 CXXFLAGS +=
 
@@ -12,6 +14,7 @@ LDFLAGS +=
 
 # Add .cpp files to the build
 SOURCES += $(wildcard src/*.cpp)
+SOURCES += $(wildcard deps/ebur128/*.c)
 
 # Add files to the ZIP package when running `make dist`
 # The compiled plugin and "plugin.json" are automatically added.

@@ -12,3 +12,5 @@ extern Model *modelTwinPeaks;
 extern Model *modelResonators;
 extern Model *modelBytebeat;
 extern Model *modelCognitiveShift;
+extern Model *modelLoudnessMeter;
+extern Model *modelLoudness;
