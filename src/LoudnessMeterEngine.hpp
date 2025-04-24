@@ -1,5 +1,6 @@
 #pragma once  // Use include guards
 #include <cmath>
+#include <deque>  // Make sure deque is included
 #include <iostream>
 #include <limits>
 #include <string>
@@ -31,14 +32,19 @@ struct LoudnessMeter : engine::Module {
     enum OutputIds { NUM_OUTPUTS };
     enum LightIds { NUM_LIGHTS };
 
+    // Enum for processing modes
+    enum ProcessingMode {
+        TRUE_AUTO = 0,    // True Mono/Stereo based on connections
+        FORCE_MONO = 1,   // Always process as Mono (mix down if stereo input)
+        FORCE_STEREO = 2  // Always process as Stereo (duplicate if mono input)
+    };
+
     // --- Configuration ---
-    // Process samples in blocks of this size before feeding to libebur128
-    // Powers of 2 are often efficient. 256 samples at 48kHz is ~5.3ms.
     static const size_t PROCESSING_BLOCK_FRAMES = 2048;
 
     // --- libebur128 State ---
     ebur128_state* ebur128_handle = nullptr;
-    size_t currentInputChannels = 0;  // 0: inactive, 1: mono, 2: stereo
+    size_t currentInputChannels = 0;  // 0: inactive, 1: mono, 2: stereo (as initialized in ebur128)
 
     // --- Internal Buffering ---
     std::vector<float> processingBuffer;
@@ -56,7 +62,7 @@ struct LoudnessMeter : engine::Module {
     float truePeakMax = -INFINITY;
     float truePeakSlidingMax = -INFINITY;
     // Param
-    static const float defaultTarget = -23.f;
+    static constexpr float defaultTarget = -23.f;
     float targetLoudness = -23.f;
 
     // --- Values tracked manually for PSR calculation ---
@@ -77,6 +83,10 @@ struct LoudnessMeter : engine::Module {
     dsp::SchmittTrigger resetPortTrigger;
     bool shortTermEnabled = true;
 
+    // --- Mode State ---
+    int processingMode = TRUE_AUTO;
+    int previousProcessingMode = -1;  // Initialize to invalid state to force initial check
+
     LoudnessMeter() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
         configInput(AUDIO_INPUT_L, "Audio L / Mono");
@@ -85,34 +95,31 @@ struct LoudnessMeter : engine::Module {
         configParam(TARGET_PARAM, -36.f, 0.f, -23.f, "Target loudness", " LUFS");
         configParam(RESET_PARAM, 0.f, 1.f, 0.f, "Reset");
 
-        processingBuffer.resize(PROCESSING_BLOCK_FRAMES * 2);  // Max 2 channels
+        processingBuffer.resize(PROCESSING_BLOCK_FRAMES * 2);  // Max 2 channels needed for forced stereo
 
         // Initialize state
-        resetMeter();
         calculate_history_size();
+        resetMeter();
     }
 
     ~LoudnessMeter() override {
         if (ebur128_handle) {
             // Process any remaining samples in the buffer before destroying
-            processBlockBuffer();
+            // Don't process here, resetMeter already handles this if called before destruction
             ebur128_destroy(&ebur128_handle);
         }
     }
 
     void calculate_history_size() {
         int chunkSizeFrames = PROCESSING_BLOCK_FRAMES;
-        // to ebur128_add_frames_*
         float sampleRate = APP->engine->getSampleRate();
         if (sampleRate > 0 && chunkSizeFrames > 0) {
             peakHistorySizeChunks = static_cast<size_t>(
                 std::ceil(PEAK_HISTORY_SECONDS * sampleRate / (float)chunkSizeFrames));
-            // Ensure a minimum history size if calculation is very small
             if (peakHistorySizeChunks < 5) peakHistorySizeChunks = 5;
         } else {
             peakHistorySizeChunks = 100;  // Default if sample rate/chunk size invalid
         }
-        // Optional: Trim deque if history size changed significantly
         while (chunkPeakHistoryDB.size() > peakHistorySizeChunks) {
             chunkPeakHistoryDB.pop_front();
         }
@@ -130,22 +137,49 @@ struct LoudnessMeter : engine::Module {
                 foundValid = true;
             }
         }
-        // If only -inf values were present, return -inf
         return foundValid ? maxVal : -INFINITY;
     }
 
-    // Function to process the accumulated buffer
+    // Function to determine the number of channels ebur128 *should* be initialized with
+    // based on the current mode and physical input connections.
+    size_t calculateEffectiveChannels() {
+        bool leftConnected = inputs[AUDIO_INPUT_L].isConnected();
+        bool rightConnected = inputs[AUDIO_INPUT_R].isConnected();
+        size_t channels = 0;
+
+        switch (processingMode) {
+            case TRUE_AUTO:
+                if (leftConnected && rightConnected)
+                    channels = 2;
+                else if (leftConnected || rightConnected)
+                    channels = 1;
+                else
+                    channels = 0;
+                break;
+            case FORCE_MONO:
+                if (leftConnected || rightConnected)
+                    channels = 1;
+                else
+                    channels = 0;
+                break;
+            case FORCE_STEREO:
+                // Force stereo requires 2 channels if *any* input is connected
+                if (leftConnected || rightConnected)
+                    channels = 2;
+                else
+                    channels = 0;
+                break;
+        }
+        return channels;
+    }
+
     void processBlockBuffer() {
         if (!ebur128_handle || bufferPosition == 0) {
             return;
         }
 
-        // Number of frames actually collected
         size_t framesToProcess = bufferPosition;
-
-        // Pass the collected frames to libebur128
         int err = ebur128_add_frames_float(ebur128_handle, processingBuffer.data(), framesToProcess);
-
         bufferPosition = 0;
 
         if (err != EBUR128_SUCCESS) {
@@ -154,7 +188,6 @@ struct LoudnessMeter : engine::Module {
             return;
         }
 
-        // --- Update Meter Readings ---
         updateLoudnessValues();
     }
 
@@ -166,35 +199,24 @@ struct LoudnessMeter : engine::Module {
         double peakValue;
 
         err = ebur128_loudness_momentary(ebur128_handle, &loudnessValue);
-        if (err == EBUR128_SUCCESS) {
-            momentaryLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
-            if (momentaryLufs > maxMomentaryLufs && momentaryLufs > ALMOST_NEGATIVE_INFINITY) {
-                maxMomentaryLufs = momentaryLufs;
-            }
-        } else {
-            momentaryLufs = -INFINITY;
+        momentaryLufs = (err == EBUR128_SUCCESS && loudnessValue > -70.0) ? (float)loudnessValue : -INFINITY;  // Use lib threshold
+        if (momentaryLufs > maxMomentaryLufs && momentaryLufs > ALMOST_NEGATIVE_INFINITY) {
+            maxMomentaryLufs = momentaryLufs;
         }
 
         if (shortTermEnabled) {
             err = ebur128_loudness_shortterm(ebur128_handle, &loudnessValue);
-            if (err == EBUR128_SUCCESS) {
-                shortTermLufs = (float)loudnessValue;  // Store CURRENT short-term LUFS
-                // Update Max Short Term LUFS
-                if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
-                    maxShortTermLufs = shortTermLufs;
-                }
-            } else {
-                shortTermLufs = -INFINITY;
+            shortTermLufs = (err == EBUR128_SUCCESS && loudnessValue > -70.0) ? (float)loudnessValue : -INFINITY;
+            if (shortTermLufs > maxShortTermLufs && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+                maxShortTermLufs = shortTermLufs;
             }
         } else {
             shortTermLufs = -INFINITY;
-            maxShortTermLufs = -INFINITY;
+            maxShortTermLufs = -INFINITY;  // Also reset max if disabled
         }
 
         err = ebur128_loudness_global(ebur128_handle, &loudnessValue);
-        if (err == EBUR128_SUCCESS) {
-            integratedLufs = (float)loudnessValue;
-        }
+        integratedLufs = (err == EBUR128_SUCCESS && loudnessValue > -70.0) ? (float)loudnessValue : -INFINITY;
 
         double low_en, high_en;
         err = ebur128_loudness_range_ext(ebur128_handle, &loudnessValue, &low_en, &high_en);
@@ -202,89 +224,106 @@ struct LoudnessMeter : engine::Module {
             loudnessRange = (float)loudnessValue;
             loudnessRangeLow = (float)low_en;
             loudnessRangeHigh = (float)high_en;
+        } else {
+            loudnessRange = -INFINITY;
+            loudnessRangeLow = -INFINITY;
+            loudnessRangeHigh = -INFINITY;
         }
 
-        // --- Get Current True Peak Values ---
+        // --- Get Current True Peak Values (based on initialized channels) ---
         float currentPeakL = -INFINITY;
         float currentPeakR = -INFINITY;
 
-        if (currentInputChannels >= 1) {
-            err = ebur128_prev_true_peak(ebur128_handle, 0, &peakValue);
+        if (currentInputChannels >= 1) {                                  // Check if ebur128 is initialized for at least 1 channel
+            err = ebur128_prev_true_peak(ebur128_handle, 0, &peakValue);  // Channel 0 (Left or Mono)
             if (err == EBUR128_SUCCESS) {
-                float linearAmp = (float)peakValue;  // Store CURRENT peak L
+                float linearAmp = (float)peakValue;
                 if (linearAmp > LOG_EPSILON) {
                     currentPeakL = 20.0f * std::log10(linearAmp);
                 }
-
-                // Update Max True Peak L
                 if (currentPeakL > maxTruePeakL && currentPeakL > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakL = currentPeakL;
                 }
             }
         }
-        if (currentInputChannels == 2) {
-            err = ebur128_prev_true_peak(ebur128_handle, 1, &peakValue);
+        if (currentInputChannels == 2) {                                  // Check if ebur128 is initialized for 2 channels
+            err = ebur128_prev_true_peak(ebur128_handle, 1, &peakValue);  // Channel 1 (Right)
             if (err == EBUR128_SUCCESS) {
-                float linearAmp = (float)peakValue;  // Store CURRENT peak R
+                float linearAmp = (float)peakValue;
                 if (linearAmp > LOG_EPSILON) {
                     currentPeakR = 20.0f * std::log10(linearAmp);
                 }
-                // Update Max True Peak R
                 if (currentPeakR > maxTruePeakR && currentPeakR > ALMOST_NEGATIVE_INFINITY) {
                     maxTruePeakR = currentPeakR;
                 }
             }
-        } else {
-            // If mono, use Left peak for Right peak as well for max calculation
-            currentPeakR = currentPeakL;
+        } else if (currentInputChannels == 1) {
+            // If mono, the concept of a separate right peak doesn't exist in the analysis.
+            // Max True Peak should reflect the single channel's peak.
+            currentPeakR = currentPeakL;  // For calculating max below, but maxTruePeakR itself isn't directly relevant.
+            maxTruePeakR = -INFINITY;     // Reset max R peak if we switched to mono
         }
 
-        // --- Correctly Calculate PSR ---
-        // Use the maximum of the CURRENT peaks from this update cycle
-        float currentMaxTruePeak = std::fmax(currentPeakL, currentPeakR);
-        chunkPeakHistoryDB.push_back(currentMaxTruePeak);
+        // --- PSR Calculation ---
+        float currentMaxTruePeak = -INFINITY;
+        if (currentInputChannels == 1) {
+            currentMaxTruePeak = currentPeakL;
+        } else if (currentInputChannels == 2) {
+            currentMaxTruePeak = std::fmax(currentPeakL, currentPeakR);
+        }
 
-        // Remove oldest entry if history buffer is full
+        if (currentMaxTruePeak > ALMOST_NEGATIVE_INFINITY) {  // Only add valid peaks
+            chunkPeakHistoryDB.push_back(currentMaxTruePeak);
+        }
         while (chunkPeakHistoryDB.size() > peakHistorySizeChunks) {
             chunkPeakHistoryDB.pop_front();
         }
 
-        // --- Find Max Peak over the History Window ---
         float peakOverWindowDB = get_max_from_deque(chunkPeakHistoryDB);
-
-        // Check if both current short-term and current max peak are valid
-        if (peakOverWindowDB > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
-            // PSR = Current Max True Peak - Current Short Term Loudness
-            psrValue = peakOverWindowDB - shortTermLufs;
-        } else {
-            psrValue = -INFINITY;  // Not enough valid data for current PSR
-        }
-
-        truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
         truePeakSlidingMax = peakOverWindowDB;
 
+        if (peakOverWindowDB > ALMOST_NEGATIVE_INFINITY && shortTermLufs > ALMOST_NEGATIVE_INFINITY) {
+            psrValue = peakOverWindowDB - shortTermLufs;
+        } else {
+            psrValue = -INFINITY;
+        }
+
+        // Update overall max true peak
+        maxTruePeakL = std::fmax(maxTruePeakL, currentPeakL);
+        if (currentInputChannels == 2) {
+            maxTruePeakR = std::fmax(maxTruePeakR, currentPeakR);
+            truePeakMax = std::fmax(maxTruePeakL, maxTruePeakR);
+        } else {
+            truePeakMax = maxTruePeakL;  // Use only L max if mono
+        }
+
+        // --- PLR Calculation ---
         if (truePeakMax > ALMOST_NEGATIVE_INFINITY && integratedLufs > ALMOST_NEGATIVE_INFINITY) {
-            // Calculate PLR (Peak to Loudness Ratio)
             plrValue = truePeakMax - integratedLufs;
         } else {
-            plrValue = -INFINITY;  // Not enough valid data for current PLR
+            plrValue = -INFINITY;
         }
     }
 
     void resetMeter() {
-        processBlockBuffer();
+        // Process any remaining samples in the buffer before destroying the handle
+        if (ebur128_handle && bufferPosition > 0) {
+            processBlockBuffer();
+        }
 
         if (ebur128_handle) {
             ebur128_destroy(&ebur128_handle);
             ebur128_handle = nullptr;
         }
 
-        size_t channels = inputs[AUDIO_INPUT_R].isConnected() ? 2 : (inputs[AUDIO_INPUT_L].isConnected() ? 1 : 0);
+        // Determine the effective number of channels for the *new* state
+        size_t effectiveChannels = calculateEffectiveChannels();
         float sampleRate = APP->engine->getSampleRate();
 
-        if (channels > 0 && sampleRate > 0) {
+        // 4. Initialize ebur128 with the new configuration
+        if (effectiveChannels > 0 && sampleRate > 0) {
             ebur128_handle = ebur128_init(
-                channels,
+                effectiveChannels,
                 (size_t)sampleRate,
                 EBUR128_MODE_M | EBUR128_MODE_S |
                     EBUR128_MODE_I | EBUR128_MODE_LRA |
@@ -292,12 +331,12 @@ struct LoudnessMeter : engine::Module {
 
             if (!ebur128_handle) {
                 DEBUG("LoudnessMeter: Failed to re-initialize ebur128");
-                currentInputChannels = 0;
+                currentInputChannels = 0;  // Mark as inactive if init failed
             } else {
-                currentInputChannels = channels;
+                currentInputChannels = effectiveChannels;  // Store the successfully initialized channel count
             }
         } else {
-            currentInputChannels = 0;
+            currentInputChannels = 0;  // Mark as inactive if no channels or invalid sample rate
             ebur128_handle = nullptr;
         }
 
@@ -318,6 +357,7 @@ struct LoudnessMeter : engine::Module {
         maxTruePeakR = -INFINITY;
         truePeakMax = -INFINITY;
         truePeakSlidingMax = -INFINITY;
+        previousProcessingMode = processingMode;
     }
 
     void onReset(const ResetEvent& e) override {
@@ -332,78 +372,125 @@ struct LoudnessMeter : engine::Module {
     }
 
     void process(const ProcessArgs& args) override {
-        if (resetTrigger.process(params[RESET_PARAM].getValue()) || resetPortTrigger.process(inputs[RESET_INPUT].getVoltage())) {
-            resetMeter();
-        }
-        targetLoudness = params[TARGET_PARAM].getValue();
-        size_t connectedChannels = inputs[AUDIO_INPUT_R].isConnected() ? 2 : (inputs[AUDIO_INPUT_L].isConnected() ? 1 : 0);
-        if (connectedChannels != currentInputChannels) {
+        bool manualReset = resetTrigger.process(params[RESET_PARAM].getValue()) || resetPortTrigger.process(inputs[RESET_INPUT].getVoltage());
+        if (manualReset) {
             resetMeter();
         }
 
-        // If no input or init failed, bail out for this sample
+        if (processingMode != previousProcessingMode) {
+            resetMeter();
+        }
+
+        //  Check for Input Connection Changes Requiring Reset ---
+        size_t expectedChannels = calculateEffectiveChannels();
+        if (expectedChannels != currentInputChannels && !manualReset) {  // Avoid double reset if manual reset already happened
+            resetMeter();
+        }
+
+        targetLoudness = params[TARGET_PARAM].getValue();
+
+        // Handle No Input / Inactive State ---
         if (!ebur128_handle || currentInputChannels == 0) {
             momentaryLufs = -INFINITY;
             shortTermLufs = -INFINITY;
-            // Keep integrated unless reset
             loudnessRange = -INFINITY;
             loudnessRangeHigh = -INFINITY;
             loudnessRangeLow = -INFINITY;
             psrValue = -INFINITY;
-            plrValue = -INFINITY;
-            truePeakMax = -INFINITY;
             truePeakSlidingMax = -INFINITY;
-            maxShortTermLufs = -INFINITY;
+
+            if (!chunkPeakHistoryDB.empty()) {
+                chunkPeakHistoryDB.push_back(-INFINITY);  // Push -inf to represent silence
+                while (chunkPeakHistoryDB.size() > peakHistorySizeChunks) {
+                    chunkPeakHistoryDB.pop_front();
+                }
+                truePeakSlidingMax = get_max_from_deque(chunkPeakHistoryDB);
+            }
 
             return;
         }
 
-        // --- 3. Get Current Sample(s) and Add to Internal Buffer ---
-        float left = inputs[AUDIO_INPUT_L].getVoltage() * VOLTAGE_SCALE;
-        float right = (currentInputChannels == 2) ? inputs[AUDIO_INPUT_R].getVoltage() * VOLTAGE_SCALE : left;  // Use left for mono/unconnected right
+        // Get Input Samples and Prepare for Processing ---
+        float rawLeft = inputs[AUDIO_INPUT_L].getVoltage() * VOLTAGE_SCALE;
+        float rawRight = inputs[AUDIO_INPUT_R].getVoltage() * VOLTAGE_SCALE;
+        bool leftConnected = inputs[AUDIO_INPUT_L].isConnected();
+        bool rightConnected = inputs[AUDIO_INPUT_R].isConnected();
 
-        // Add sample(s) to the processing buffer (interleaved)
+        float leftToProcess = 0.f;
+        float rightToProcess = 0.f;  // Only used if currentInputChannels == 2
+
+        // Determine the actual samples to feed based on the initialized channel count
+        // and the rules of the current processing mode.
+        if (currentInputChannels == 1) {
+            // We need a single mono sample.
+            // FORCE_MONO or TRUE_AUTO (when only one input is connected)
+            if (leftConnected && rightConnected) {  // Mix down (Only happens in FORCE_MONO mode logically)
+                leftToProcess = (rawLeft + rawRight) * 0.5f;
+            } else if (leftConnected) {  // Only L connected
+                leftToProcess = rawLeft;
+            } else {  // Only R connected (or neither, but handled by inactive state)
+                leftToProcess = rawRight;
+            }
+        } else {  // currentInputChannels == 2
+            // We need two samples (L/R).
+            // FORCE_STEREO or TRUE_AUTO (when both inputs are connected)
+            if (leftConnected && rightConnected) {  // Normal stereo
+                leftToProcess = rawLeft;
+                rightToProcess = rawRight;
+            } else if (leftConnected) {  // Only L connected, need stereo (FORCE_STEREO mode)
+                leftToProcess = rawLeft;
+                rightToProcess = rawLeft;  // Duplicate L -> R
+            } else {                       // Only R connected, need stereo (FORCE_STEREO mode)
+                leftToProcess = rawRight;  // Duplicate R -> L
+                rightToProcess = rawRight;
+            }
+        }
+
+        // Add Sample(s) to Internal Buffer ---
         if (bufferPosition < PROCESSING_BLOCK_FRAMES) {
             size_t bufferBaseIndex = bufferPosition * currentInputChannels;
-            processingBuffer[bufferBaseIndex] = left;
+            processingBuffer[bufferBaseIndex] = leftToProcess;
             if (currentInputChannels == 2) {
-                processingBuffer[bufferBaseIndex + 1] = right;
+                processingBuffer[bufferBaseIndex + 1] = rightToProcess;
             }
             bufferPosition++;
         }
 
+        // --- 8. Process Block Buffer if Full ---
         if (bufferPosition >= PROCESSING_BLOCK_FRAMES) {
             processBlockBuffer();
         }
     }
 
-    // --- 8. Data Persistence ---
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "integratedLufs", json_real(integratedLufs));
+        json_object_set_new(rootJ, "processingMode", json_integer(processingMode));
         json_object_set_new(rootJ, "shortTermEnabled", json_boolean(shortTermEnabled));
         return rootJ;
     }
 
     void dataFromJson(json_t* rootJ) override {
-        json_t* lufsJ = json_object_get(rootJ, "integratedLufs");
-        if (lufsJ) {
-            integratedLufs = json_real_value(lufsJ);
+        json_t* integratedLufsJ = json_object_get(rootJ, "integratedLufs");
+        if (integratedLufsJ) integratedLufs = json_real_value(integratedLufsJ);
+
+        json_t* processingModeJ = json_object_get(rootJ, "processingMode");
+        if (processingModeJ) {
+            processingMode = json_integer_value(processingModeJ);
         } else {
-            integratedLufs = -INFINITY;
+            processingMode = TRUE_AUTO;
         }
+        previousProcessingMode = processingMode;  // Sync previous mode to loaded state
+
         json_t* shortTermEnabledJ = json_object_get(rootJ, "shortTermEnabled");
         if (shortTermEnabledJ) shortTermEnabled = json_boolean_value(shortTermEnabledJ);
-        // Ensure other derived values are reset on load, they will recalculate.
-        bufferPosition = 0;  // Clear any partially filled buffer from save state
+
+        bufferPosition = 0;
         momentaryLufs = -INFINITY;
         shortTermLufs = -INFINITY;
         loudnessRange = -INFINITY;
         psrValue = -INFINITY;
         plrValue = -INFINITY;
-        maxShortTermLufs = -INFINITY;
-        maxMomentaryLufs = -INFINITY;
-        maxTruePeakL = -INFINITY;
-        maxTruePeakR = -INFINITY;
+        truePeakSlidingMax = -INFINITY;
     }
 };

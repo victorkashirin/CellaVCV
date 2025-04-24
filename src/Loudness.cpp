@@ -271,6 +271,11 @@ struct LoudnessWidget : ModuleWidget {
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Settings"));
+        menu->addChild(createIndexPtrSubmenuItem("Processing mode",
+                                                 {"Auto",
+                                                  "Mono",
+                                                  "Stereo"},
+                                                 &module->processingMode));
         menu->addChild(createIndexPtrSubmenuItem("Short-Term loudness",
                                                  {"Disabled",
                                                   "Enabled"},
