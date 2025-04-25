@@ -368,14 +368,36 @@ A comprehensive audio loudness meter based on the EBU R128 standard, utilizing t
 
 ## Inputs
 
-*   **Audio L / Mono**: Left channel audio input. If the 'Audio R' input is disconnected, this input is used for mono analysis. Expects standard VCV Rack +/- 10V signals, scaled internally to +/- 1.0f for processing.
-*   **Audio R**: Right channel audio input. Connect this for stereo analysis. If connected, both L and R inputs are processed as a stereo pair.
+Inputs expect standard VCV Rack +/- 10V signals, which are scaled internally to +/- 1.0f for processing.
+
 *   **Reset**: Resets all integrated, maximum, and historical measurements when a trigger signal (rising edge, typically > 1V) is received.
+
+*   **Audio L / Mono**: Left channel audio input. Serves as the primary input for mono signals or the left channel of a stereo pair.
+*   **Audio R**: Right channel audio input. Used for the right channel of a stereo pair.
+
+**Input Interpretation & Processing Mode:**
+
+The way the connected audio inputs are interpreted and processed depends on the **Processing mode** selected in the module's context menu:
+
+*   **Auto (Default):** This mode automatically adapts to the connections.
+    *   If *only* 'Audio L' or *only* 'Audio R' is connected, the signal is processed as **mono**.
+    *   If *both* 'Audio L' and 'Audio R' are connected, the signal is processed as **stereo**.
+
+*   **Mono:** This mode forces the processing to be **mono**, regardless of input connections.
+    *   If *both* 'Audio L' and 'Audio R' are connected, they are mixed down to mono before processing.
+    *   If *only* 'Audio L' or *only* 'Audio R' is connected, that single input is used directly as the mono source.
+
+*   **Stereo:** This mode forces the processing to be **stereo**, regardless of input connections.
+    *   If *both* 'Audio L' and 'Audio R' are connected, they are processed as a standard stereo pair.
+    *   If *only* 'Audio L' is connected, its signal is duplicated to both the left and right channels for stereo processing.
+    *   If *only* 'Audio R' is connected, *its* signal is duplicated to both the left and right channels for stereo processing.
+
+**Why Mode Matters:** The selected mode directly influences the final loudness value. Because the ITU-R BS.1770 standard sums the energy from both channels for stereo analysis (but only uses the single channel for mono), processing the same audio signal in 'Stereo' mode will typically result in a reading approximately 3 LUFS higher than processing it in 'Mono' mode.
 
 ## Controls
 
 *   **Reset Button**: Manually resets all integrated, maximum, and historical measurements when clicked.
-*   **Target Loudness Knob**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target.
+*   **Target Loudness**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target. On **Loudness**, target loudness can be adjusted with a slider in the context menu.
 
 ## Measurements & Displays
 
@@ -402,6 +424,11 @@ The module features a large display area showing several loudness metrics:
 ## Context Menu
 
 Right-clicking the panel opens the context menu, which includes:
+
+*   **Processing mode**: Selects how the audio inputs are interpreted for analysis.
+    *   **Auto (Default)**: Automatically selects mono (1 input connected) or stereo (2 inputs connected) processing.
+    *   **Mono**: Forces mono processing, mixing L and R if both are connected.
+    *   **Stereo**: Forces stereo processing, duplicating a single input if only one is connected.
 
 *   **Short-Term Loudness**:
     *   **Enabled (Default)**: Calculates and displays Short-Term Loudness and PSR.

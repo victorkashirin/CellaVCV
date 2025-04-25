@@ -5,7 +5,7 @@
 ## Modules Overview
 
 
-<img src="docs/Dark.png" alt="Cella - Dark Theme" style="width: 700px;">
+<img src="docs/Dark.jpg" alt="Cella - Dark Theme" style="width: 900px;">
 
 ### Resonators
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in popular DAW.
@@ -40,7 +40,7 @@ Main differentiator from other implementations is the ability to output triggers
 
 ### Loudness Meter
 
-**Loudness Meter** is a comprehensive audio loudness meter based on the EBU R128 standard, utilizing the [libebur128](https://github.com/jiixyj/libebur128) library for accurate measurements.
+**Loudness Meter** and its narrow version **Loudness** are a comprehensive audio loudness meters based on the EBU R128 standard, utilizing the [libebur128](https://github.com/jiixyj/libebur128) library for accurate measurements.
 
 ### Euler
 **Euler** calculates rate of change of any signal. It finds angle *theta* of a slope of incoming signal, normalises it by 90 degrees and scales to -10..10V. *Frequency* parameter is required to adjust calculation sensitivity, while parameter *Smooth* removes irregularities from the input. There are four outputs: theta, absolute value of theta, positive component of theta and negative component of theta.
