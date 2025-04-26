@@ -494,3 +494,56 @@ struct LoudnessMeter : engine::Module {
         truePeakSlidingMax = -INFINITY;
     }
 };
+
+struct TargetQuantity : Quantity {
+    LoudnessMeter* _module;
+
+    TargetQuantity(LoudnessMeter* m) : _module(m) {}
+
+    void setValue(float value) override {
+        value = clamp(value, getMinValue(), getMaxValue());
+        if (_module) {
+            _module->params[1].setValue(std::ceil(value * 10.0) / 10.0);
+        }
+    }
+
+    float getValue() override {
+        if (_module) {
+            return _module->params[1].getValue();
+        }
+        return getDefaultValue();
+    }
+
+    float getMinValue() override { return -36.0f; }
+    float getMaxValue() override { return 0.0f; }
+    float getDefaultValue() override { return LoudnessMeter::defaultTarget; }
+    std::string getLabel() override { return "Target loudness"; }
+    std::string getUnit() override { return " LUFS"; }
+};
+
+template <class Q>
+struct LoudnessSlider : ui::Slider {
+    LoudnessSlider(LoudnessMeter* module) {
+        quantity = new Q(module);
+        box.size.x = 200.0f;
+    }
+    virtual ~LoudnessSlider() {
+        delete quantity;
+    }
+};
+
+template <class Q>
+struct LoudnessSliderMenuItem : MenuItem {
+    LoudnessMeter* _module;
+
+    LoudnessSliderMenuItem(LoudnessMeter* m, const char* label) : _module(m) {
+        this->text = label;
+        this->rightText = "▸";
+    }
+
+    Menu* createChildMenu() override {
+        Menu* menu = new Menu;
+        menu->addChild(new LoudnessSlider<Q>(_module));
+        return menu;
+    }
+};

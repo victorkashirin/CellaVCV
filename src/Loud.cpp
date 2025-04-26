@@ -10,7 +10,7 @@
 
 using namespace rack;
 
-struct LoudnessWidget;  // Forward declaration
+struct LoudWidget;  // Forward declaration
 
 // Generic number formatter (handles LUFS, LU, dB)
 static std::string formatValue(float value) {
@@ -22,22 +22,58 @@ static std::string formatValue(float value) {
     return std::string(buf);
 }
 
-struct ValueDisplaySmallWidget : TransparentWidget {
+struct ValueDisplayTinyWidget : Widget {
     std::shared_ptr<Font> font;
     std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
-    // NVGcolor labelColor = nvgRGB(0x1a, 0xa7, 0xff);
     NVGcolor labelColor = nvgRGB(95, 190, 250);
-    // NVGcolor labelColor = nvgRGB(121, 202, 252);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     std::string label;
     float* valuePtr = nullptr;
     float* maxValuePtr = nullptr;
     std::string unit = "";
 
-    ValueDisplaySmallWidget() {
+    Tooltip* tooltip = nullptr;  // Pointer to the active tooltip
+
+    void cleanupTooltip() {
+        if (tooltip) {
+            tooltip->requestDelete();
+            tooltip = nullptr;
+        }
+    }
+
+    ValueDisplayTinyWidget() {
         font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
         font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
+    }
+
+    // --- Destructor for Cleanup ---
+    ~ValueDisplayTinyWidget() override {
+        cleanupTooltip();
+    }
+
+    void onEnter(const EnterEvent& e) override {
+        Widget::onEnter(e);
+    }
+
+    void onHover(const event::Hover& e) override {
+        Widget::onHover(e);
+        if (e.isPropagating() && !unit.empty()) {
+            e.consume(this);
+            if (tooltip) {
+                tooltip->setPosition(e.pos.plus(math::Vec(10, 15)));
+            } else {
+                tooltip = new Tooltip;
+                tooltip->text = unit;
+                tooltip->setPosition(e.pos.plus(math::Vec(10, 15)));
+                APP->scene->addChild(tooltip);
+            }
+        }
+    }
+
+    void onLeave(const event::Leave& e) override {
+        Widget::onLeave(e);
+        cleanupTooltip();
     }
 
     void drawLayer(const DrawArgs& args, int layer) override {
@@ -45,7 +81,7 @@ struct ValueDisplaySmallWidget : TransparentWidget {
             return;
         if (!font || !font2) return;
 
-        float middleY = box.size.y - 11.f;
+        float middleY = box.size.y - 9.f;
 
         // --- Determine Value String ---
         std::string valueText = "-inf";
@@ -77,60 +113,64 @@ struct ValueDisplaySmallWidget : TransparentWidget {
         nvgFontFaceId(args.vg, font->handle);
         if (drawDash) {
             nvgStrokeColor(args.vg, valueColor);
-            nvgStrokeWidth(args.vg, 1.9f);
+            nvgStrokeWidth(args.vg, 1.53f);
             nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, box.size.x - 55, middleY - 6.3f);
-            nvgLineTo(args.vg, box.size.x - 70, middleY - 6.3f);
+            nvgMoveTo(args.vg, box.size.x - 50, middleY - 5.2f);
+            nvgLineTo(args.vg, box.size.x - 70, middleY - 5.2f);
             nvgStroke(args.vg);
         } else {
-            nvgFontSize(args.vg, 25);
+            nvgFontSize(args.vg, 21);
             nvgFillColor(args.vg, clipping ? redColor : valueColor);
             nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            nvgText(args.vg, box.size.x - 35, middleY, valueText.c_str(), NULL);
+            nvgText(args.vg, box.size.x - 37, middleY, valueText.c_str(), NULL);
         }
 
         // --- Draw Unit ---
-        nvgFontSize(args.vg, 14);
-        nvgFillColor(args.vg, valueColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        nvgText(args.vg, box.size.x - 32.f, middleY, unit.c_str(), NULL);
+        // nvgFontSize(args.vg, 14);
+        // nvgFillColor(args.vg, valueColor);
+        // nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        // nvgText(args.vg, box.size.x - 32.f, middleY, unit.c_str(), NULL);
 
         // --- Draw Label ---
         nvgFontFaceId(args.vg, font2->handle);
-        nvgFontSize(args.vg, 21);
+        nvgFontSize(args.vg, 16);
         nvgFillColor(args.vg, labelColor);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
-        nvgText(args.vg, 23, middleY, label.c_str(), NULL);
+        nvgText(args.vg, box.size.x - 19.f, middleY - 1, label.c_str(), NULL);
+
+        // nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        // nvgText(args.vg, box.size.x - 30.f, middleY - 1, label.c_str(), NULL);
     }
 };
 
-struct LoudnessWidget : ModuleWidget {
-    LoudnessWidget(LoudnessMeter* module) {
+struct LoudWidget : ModuleWidget {
+    LoudWidget(LoudnessMeter* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Loudness.svg"), asset::plugin(pluginInstance, "res/Loudness-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Loud.svg"), asset::plugin(pluginInstance, "res/Loud-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         LedDisplay* ledDisplay = createWidget<LedDisplay>(Vec(0, 26));
-        ledDisplay->box.size = Vec(135, 280);
+        ledDisplay->box.size = Vec(90, 230);
         addChild(ledDisplay);
 
-        float displayHeightPx = 30.35f;
+        float displayHeightPx = 25.f;
         float yStep = displayHeightPx;
-        float yStart = 306.f;
+        float yStart = 256.f;
         float displayX_Px = 0.f;
-        float displayWidthPx = 135.f;
+        float displayWidthPx = 90.f;
         float inputYPx = 329.28;
+        float inputYPx2 = 280.1f;
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_L));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_R));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LoudnessMeter::RESET_INPUT));
-        addParam(createParamCentered<VCVButton>(Vec(121.5f, 12.5f), module, LoudnessMeter::RESET_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx2), module, LoudnessMeter::RESET_INPUT));
+        addParam(createParamCentered<VCVButton>(Vec(67.5f, inputYPx2), module, LoudnessMeter::RESET_PARAM));
 
-        float off = 3.f;
+        float off = 2.f;
 
-        ValueDisplaySmallWidget* momentaryDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 9 * yStep));
+        ValueDisplayTinyWidget* momentaryDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 9 * yStep));
         momentaryDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             momentaryDisplay->valuePtr = &module->momentaryLufs;
@@ -140,7 +180,7 @@ struct LoudnessWidget : ModuleWidget {
         momentaryDisplay->unit = "LUFS";
         addChild(momentaryDisplay);
 
-        ValueDisplaySmallWidget* shortTermDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 8 * yStep - off));
+        ValueDisplayTinyWidget* shortTermDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 8 * yStep - off));
         shortTermDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             shortTermDisplay->valuePtr = &module->shortTermLufs;
@@ -149,7 +189,7 @@ struct LoudnessWidget : ModuleWidget {
         shortTermDisplay->unit = "LUFS";
         addChild(shortTermDisplay);
 
-        ValueDisplaySmallWidget* integratedDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 7 * yStep - 2 * off));
+        ValueDisplayTinyWidget* integratedDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 7 * yStep - 2 * off));
         integratedDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             integratedDisplay->valuePtr = &module->integratedLufs;
@@ -158,7 +198,7 @@ struct LoudnessWidget : ModuleWidget {
         integratedDisplay->unit = "LUFS";
         addChild(integratedDisplay);
 
-        ValueDisplaySmallWidget* lraDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 6 * yStep + off));
+        ValueDisplayTinyWidget* lraDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 6 * yStep + off));
         lraDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             lraDisplay->valuePtr = &module->loudnessRange;
@@ -167,7 +207,7 @@ struct LoudnessWidget : ModuleWidget {
         lraDisplay->unit = "LU";
         addChild(lraDisplay);
 
-        ValueDisplaySmallWidget* psrDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 5 * yStep));
+        ValueDisplayTinyWidget* psrDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 5 * yStep));
         psrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             psrDisplay->valuePtr = &module->psrValue;
@@ -176,7 +216,7 @@ struct LoudnessWidget : ModuleWidget {
         psrDisplay->unit = "LU";
         addChild(psrDisplay);
 
-        ValueDisplaySmallWidget* plrDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 4 * yStep - off));
+        ValueDisplayTinyWidget* plrDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 4 * yStep - off));
         plrDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             plrDisplay->valuePtr = &module->plrValue;
@@ -185,7 +225,7 @@ struct LoudnessWidget : ModuleWidget {
         plrDisplay->unit = "LU";
         addChild(plrDisplay);
 
-        ValueDisplaySmallWidget* mMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 3 * yStep + 2 * off));
+        ValueDisplayTinyWidget* mMaxDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 3 * yStep + 2 * off));
         mMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
@@ -194,7 +234,7 @@ struct LoudnessWidget : ModuleWidget {
         mMaxDisplay->unit = "LUFS";
         addChild(mMaxDisplay);
 
-        ValueDisplaySmallWidget* sMaxDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - 2 * yStep + off));
+        ValueDisplayTinyWidget* sMaxDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 2 * yStep + off));
         sMaxDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
@@ -203,7 +243,7 @@ struct LoudnessWidget : ModuleWidget {
         sMaxDisplay->unit = "LUFS";
         addChild(sMaxDisplay);
 
-        ValueDisplaySmallWidget* tpmDisplay = createWidget<ValueDisplaySmallWidget>(Vec(displayX_Px, yStart - yStep));
+        ValueDisplayTinyWidget* tpmDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - yStep));
         tpmDisplay->box.size = Vec(displayWidthPx, displayHeightPx);
         if (module) {
             tpmDisplay->valuePtr = &module->truePeakMax;
@@ -231,4 +271,4 @@ struct LoudnessWidget : ModuleWidget {
     }
 };
 
-Model* modelLoudness = createModel<LoudnessMeter, LoudnessWidget>("Loudness");
+Model* modelLoud = createModel<LoudnessMeter, LoudWidget>("Loud");
