@@ -125,12 +125,6 @@ struct ValueDisplayTinyWidget : Widget {
             nvgText(args.vg, box.size.x - 37, middleY, valueText.c_str(), NULL);
         }
 
-        // --- Draw Unit ---
-        // nvgFontSize(args.vg, 14);
-        // nvgFillColor(args.vg, valueColor);
-        // nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        // nvgText(args.vg, box.size.x - 32.f, middleY, unit.c_str(), NULL);
-
         // --- Draw Label ---
         nvgFontFaceId(args.vg, font2->handle);
         nvgFontSize(args.vg, 16);
@@ -177,7 +171,7 @@ struct LoudWidget : ModuleWidget {
             momentaryDisplay->maxValuePtr = &module->targetLoudness;
         }
         momentaryDisplay->label = "M";
-        momentaryDisplay->unit = "LUFS";
+        momentaryDisplay->unit = "Momentary, LUFS";
         addChild(momentaryDisplay);
 
         ValueDisplayTinyWidget* shortTermDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 8 * yStep - off));
@@ -186,7 +180,7 @@ struct LoudWidget : ModuleWidget {
             shortTermDisplay->valuePtr = &module->shortTermLufs;
         }
         shortTermDisplay->label = "S";
-        shortTermDisplay->unit = "LUFS";
+        shortTermDisplay->unit = "Short-term, LUFS";
         addChild(shortTermDisplay);
 
         ValueDisplayTinyWidget* integratedDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 7 * yStep - 2 * off));
@@ -195,7 +189,7 @@ struct LoudWidget : ModuleWidget {
             integratedDisplay->valuePtr = &module->integratedLufs;
         }
         integratedDisplay->label = "I";
-        integratedDisplay->unit = "LUFS";
+        integratedDisplay->unit = "Integrated, LUFS";
         addChild(integratedDisplay);
 
         ValueDisplayTinyWidget* lraDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 6 * yStep + off));
@@ -204,7 +198,7 @@ struct LoudWidget : ModuleWidget {
             lraDisplay->valuePtr = &module->loudnessRange;
         }
         lraDisplay->label = "LR";
-        lraDisplay->unit = "LU";
+        lraDisplay->unit = "Loudness range, LU";
         addChild(lraDisplay);
 
         ValueDisplayTinyWidget* psrDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 5 * yStep));
@@ -213,7 +207,7 @@ struct LoudWidget : ModuleWidget {
             psrDisplay->valuePtr = &module->psrValue;
         }
         psrDisplay->label = "PSR";
-        psrDisplay->unit = "LU";
+        psrDisplay->unit = "Dynamics, LU";
         addChild(psrDisplay);
 
         ValueDisplayTinyWidget* plrDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 4 * yStep - off));
@@ -222,7 +216,7 @@ struct LoudWidget : ModuleWidget {
             plrDisplay->valuePtr = &module->plrValue;
         }
         plrDisplay->label = "PLR";
-        plrDisplay->unit = "LU";
+        plrDisplay->unit = "Average dynamics, LU";
         addChild(plrDisplay);
 
         ValueDisplayTinyWidget* mMaxDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 3 * yStep + 2 * off));
@@ -231,7 +225,7 @@ struct LoudWidget : ModuleWidget {
             mMaxDisplay->valuePtr = &module->maxMomentaryLufs;
         }
         mMaxDisplay->label = "MMAX";
-        mMaxDisplay->unit = "LUFS";
+        mMaxDisplay->unit = "Momentary max, LUFS";
         addChild(mMaxDisplay);
 
         ValueDisplayTinyWidget* sMaxDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - 2 * yStep + off));
@@ -240,7 +234,7 @@ struct LoudWidget : ModuleWidget {
             sMaxDisplay->valuePtr = &module->maxShortTermLufs;
         }
         sMaxDisplay->label = "SMAX";
-        sMaxDisplay->unit = "LUFS";
+        sMaxDisplay->unit = "Short-term max, LUFS";
         addChild(sMaxDisplay);
 
         ValueDisplayTinyWidget* tpmDisplay = createWidget<ValueDisplayTinyWidget>(Vec(displayX_Px, yStart - yStep));
@@ -249,7 +243,7 @@ struct LoudWidget : ModuleWidget {
             tpmDisplay->valuePtr = &module->truePeakMax;
         }
         tpmDisplay->label = "TPMAX";
-        tpmDisplay->unit = "dBTP";
+        tpmDisplay->unit = "True peak max, dBTP";
         addChild(tpmDisplay);
     }
 
