@@ -106,17 +106,6 @@
       ]
     },
     {
-      "slug": "Loudness",
-      "name": "Loudness",
-      "description": "Loudness meter based on EBU R128 standard, narrow version",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#loudness-meter",
-      "keywords": "ebu loudness lufs",
-      "tags": [
-        "Utility",
-        "Visual"
-      ]
-    },
-    {
       "slug": "Loud",
       "name": "Loud",
       "description": "Loudness meter based on EBU R128 standard, narrow version",

@@ -397,7 +397,7 @@ The way the connected audio inputs are interpreted and processed depends on the 
 ## Controls
 
 *   **Reset Button**: Manually resets all integrated, maximum, and historical measurements when clicked.
-*   **Target Loudness**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target. On **Loudness**, target loudness can be adjusted with a slider in the context menu.
+*   **Target Loudness**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target. On **Loud**, target loudness can be adjusted with a slider in the context menu.
 
 ## Measurements & Displays
 
