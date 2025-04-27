@@ -23,8 +23,6 @@ static std::string formatValue(float value) {
 }
 
 struct LoudnessBarWidget : TransparentWidget {
-    std::shared_ptr<Font> font;
-    std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
     NVGcolor labelColor = nvgRGB(95, 190, 250);
@@ -35,12 +33,8 @@ struct LoudnessBarWidget : TransparentWidget {
     float* targetValuePtr = nullptr;
     std::string unit = "";
 
-    LoudnessBarWidget() {
-        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
-        font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
-    }
-
     void drawLevelMarks(NVGcontext* vg, float x, float y, std::string label) {
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
         float markWidth = 4.f;
         float margin = 8.f;
         nvgStrokeColor(vg, valueColor);
@@ -59,116 +53,115 @@ struct LoudnessBarWidget : TransparentWidget {
     }
 
     void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1)
-            return;
-        if (!font || !font2) return;
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
+        std::shared_ptr<Font> font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
+        if (layer == 1 && font && font2) {
+            float marksStep = 3.8f;
+            float marginBottom = 40.f;
+            float barWidth = 12.f;
 
-        float marksStep = 3.8f;
-        float marginBottom = 40.f;
-        float barWidth = 12.f;
+            // --- Draw Static Level Marks ---
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12, "0");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 3 * marksStep, "-3");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 6 * marksStep, "-6");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 9 * marksStep, "-9");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 18 * marksStep, "-18");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 27 * marksStep, "-27");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 36 * marksStep, "-36");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 45 * marksStep, "-45");
+            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 54 * marksStep, "-54");
 
-        // --- Draw Static Level Marks ---
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12, "0");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 3 * marksStep, "-3");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 6 * marksStep, "-6");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 9 * marksStep, "-9");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 18 * marksStep, "-18");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 27 * marksStep, "-27");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 36 * marksStep, "-36");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 45 * marksStep, "-45");
-        drawLevelMarks(args.vg, box.size.x * 0.5, 12 + 54 * marksStep, "-54");
+            bool canDrawDynamic = momentaryValuePtr && lowerRangeValuePtr && upperRangeValuePtr && targetValuePtr;
 
-        bool canDrawDynamic = momentaryValuePtr && lowerRangeValuePtr && upperRangeValuePtr && targetValuePtr;
+            if (canDrawDynamic) {
+                float value = *momentaryValuePtr;
+                float upperValue = *upperRangeValuePtr;
+                float lowerValue = *lowerRangeValuePtr;
+                float targetValue = *targetValuePtr;
 
-        if (canDrawDynamic) {
-            float value = *momentaryValuePtr;
-            float upperValue = *upperRangeValuePtr;
-            float lowerValue = *lowerRangeValuePtr;
-            float targetValue = *targetValuePtr;
+                if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
+                    value = -60.f;
+                }
+                if (std::isnan(upperValue)) upperValue = -60.f;
+                if (std::isnan(lowerValue)) lowerValue = -60.f;
+                if (std::isnan(targetValue)) targetValue = -23.f;
 
-            if (value <= ALMOST_NEGATIVE_INFINITY || std::isinf(value) || std::isnan(value)) {
-                value = -60.f;
-            }
-            if (std::isnan(upperValue)) upperValue = -60.f;
-            if (std::isnan(lowerValue)) lowerValue = -60.f;
-            if (std::isnan(targetValue)) targetValue = -23.f;
+                // Clamp values to the displayable range [-60, 0]
+                value = clamp(value, -60.f, 0.f);
+                upperValue = clamp(upperValue, -60.f, 0.f);
+                lowerValue = clamp(lowerValue, -60.f, 0.f);
+                targetValue = clamp(targetValue, -60.f, 0.f);
 
-            // Clamp values to the displayable range [-60, 0]
-            value = clamp(value, -60.f, 0.f);
-            upperValue = clamp(upperValue, -60.f, 0.f);
-            lowerValue = clamp(lowerValue, -60.f, 0.f);
-            targetValue = clamp(targetValue, -60.f, 0.f);
+                drawLevelMarks(args.vg, box.size.x * 0.5, 12 + (-targetValue) * marksStep, "");
 
-            drawLevelMarks(args.vg, box.size.x * 0.5, 12 + (-targetValue) * marksStep, "");
+                // Calculate bar geometry based on value and target
+                float overshoot = value - targetValue;
+                float room = (overshoot <= 0) ? 60.f + value : 60.f + targetValue;
+                float barHeight = room / 60.0f * 228.f;
 
-            // Calculate bar geometry based on value and target
-            float overshoot = value - targetValue;
-            float room = (overshoot <= 0) ? 60.f + value : 60.f + targetValue;
-            float barHeight = room / 60.0f * 228.f;
+                if (barHeight <= 0.0) barHeight = 1.f;
+                float yOffset = box.size.y - barHeight - marginBottom;
 
-            if (barHeight <= 0.0) barHeight = 1.f;
-            float yOffset = box.size.y - barHeight - marginBottom;
-
-            // Draw main bar segment
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset, barWidth, barHeight);
-            nvgFillColor(args.vg, valueColor);
-            nvgFill(args.vg);
-            nvgClosePath(args.vg);
-
-            // Draw overshoot segment
-            if (overshoot > 0.0) {
-                float overshootHeight = overshoot / 60.0f * 228.f;
-                float yOffsetOvershoot = yOffset - overshootHeight;
+                // Draw main bar segment
                 nvgBeginPath(args.vg);
-                nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffsetOvershoot, barWidth, overshootHeight);
-                nvgFillColor(args.vg, redColor);
+                nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffset, barWidth, barHeight);
+                nvgFillColor(args.vg, valueColor);
+                nvgFill(args.vg);
+                nvgClosePath(args.vg);
+
+                // Draw overshoot segment
+                if (overshoot > 0.0) {
+                    float overshootHeight = overshoot / 60.0f * 228.f;
+                    float yOffsetOvershoot = yOffset - overshootHeight;
+                    nvgBeginPath(args.vg);
+                    nvgRect(args.vg, 0.5 * (box.size.x - barWidth), yOffsetOvershoot, barWidth, overshootHeight);
+                    nvgFillColor(args.vg, redColor);
+                    nvgFill(args.vg);
+                    nvgClosePath(args.vg);
+                }
+
+                // Draw Loudness Range indicators
+                float upperYPos = 12 + (-upperValue) * marksStep;
+                float lowerYPos = 12 + (-lowerValue) * marksStep;
+
+                if (upperYPos != lowerYPos) {
+                    nvgStrokeColor(args.vg, nvgRGB(0xdd, 0xdd, 0xdd));
+                    nvgStrokeWidth(args.vg, 0.7f);
+                    nvgBeginPath(args.vg);
+                    nvgMoveTo(args.vg, box.size.x * 0.5 + 14, upperYPos);
+                    nvgLineTo(args.vg, box.size.x * 0.5 + 16, upperYPos);
+                    nvgLineTo(args.vg, box.size.x * 0.5 + 16, lowerYPos);
+                    nvgLineTo(args.vg, box.size.x * 0.5 + 14, lowerYPos);
+                    nvgStroke(args.vg);
+                }
+            } else {
+                float defaultBarHeight = 1.f;
+                float defaultYOffset = box.size.y - defaultBarHeight - marginBottom;
+                nvgBeginPath(args.vg);
+                nvgRect(args.vg, 0.5 * (box.size.x - barWidth), defaultYOffset, barWidth, defaultBarHeight);
+                nvgFillColor(args.vg, valueColor);
                 nvgFill(args.vg);
                 nvgClosePath(args.vg);
             }
 
-            // Draw Loudness Range indicators
-            float upperYPos = 12 + (-upperValue) * marksStep;
-            float lowerYPos = 12 + (-lowerValue) * marksStep;
-
-            if (upperYPos != lowerYPos) {
-                nvgStrokeColor(args.vg, nvgRGB(0xdd, 0xdd, 0xdd));
-                nvgStrokeWidth(args.vg, 0.7f);
-                nvgBeginPath(args.vg);
-                nvgMoveTo(args.vg, box.size.x * 0.5 + 14, upperYPos);
-                nvgLineTo(args.vg, box.size.x * 0.5 + 16, upperYPos);
-                nvgLineTo(args.vg, box.size.x * 0.5 + 16, lowerYPos);
-                nvgLineTo(args.vg, box.size.x * 0.5 + 14, lowerYPos);
-                nvgStroke(args.vg);
-            }
-        } else {
-            float defaultBarHeight = 1.f;
-            float defaultYOffset = box.size.y - defaultBarHeight - marginBottom;
-            nvgBeginPath(args.vg);
-            nvgRect(args.vg, 0.5 * (box.size.x - barWidth), defaultYOffset, barWidth, defaultBarHeight);
+            // --- Draw Unit and Label
+            nvgFontFaceId(args.vg, font->handle);
+            nvgFontSize(args.vg, 14);
             nvgFillColor(args.vg, valueColor);
-            nvgFill(args.vg);
-            nvgClosePath(args.vg);
+            nvgTextAlign(args.vg, NVG_ALIGN_TOP | NVG_ALIGN_CENTER);
+            nvgText(args.vg, box.size.x * 0.5, box.size.y - 35, unit.c_str(), NULL);
+
+            nvgFontFaceId(args.vg, font2->handle);
+            nvgFontSize(args.vg, 14);
+            nvgFillColor(args.vg, labelColor);
+            nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_CENTER);
+            nvgText(args.vg, box.size.x * 0.5, box.size.y - 11, label.c_str(), NULL);
         }
-
-        // --- Draw Unit and Label
-        nvgFontFaceId(args.vg, font->handle);
-        nvgFontSize(args.vg, 14);
-        nvgFillColor(args.vg, valueColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_TOP | NVG_ALIGN_CENTER);
-        nvgText(args.vg, box.size.x * 0.5, box.size.y - 35, unit.c_str(), NULL);
-
-        nvgFontFaceId(args.vg, font2->handle);
-        nvgFontSize(args.vg, 14);
-        nvgFillColor(args.vg, labelColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_CENTER);
-        nvgText(args.vg, box.size.x * 0.5, box.size.y - 11, label.c_str(), NULL);
+        Widget::drawLayer(args, layer);
     }
 };
 
 struct ValueDisplayWidget : TransparentWidget {
-    std::shared_ptr<Font> font;
-    std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
     NVGcolor labelColor = nvgRGB(95, 190, 250);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
@@ -176,71 +169,67 @@ struct ValueDisplayWidget : TransparentWidget {
     float* valuePtr = nullptr;
     std::string unit = "";
 
-    ValueDisplayWidget() {
-        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
-        font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
-    }
-
     void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1)
-            return;
-        if (!font || !font2) return;
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
+        std::shared_ptr<Font> font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
+        if (layer == 1 && font && font2) {
+            float middleY = box.size.y * 0.5f;
 
-        float middleY = box.size.y * 0.5f;
+            // --- Determine Value String ---
+            std::string valueText = "-inf";
+            bool drawDash = false;
+            bool clipping = false;
 
-        // --- Determine Value String ---
-        std::string valueText = "-inf";
-        bool drawDash = false;
-        bool clipping = false;
+            if (valuePtr) {
+                float currentValue = *valuePtr;
+                bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
+                bool cond2 = (label == "LOUDNESS RANGE") && currentValue <= 0.0f;
+                bool cond3 = (label == "TRUE PEAK MAX") && currentValue >= -0.5f;
 
-        if (valuePtr) {
-            float currentValue = *valuePtr;
-            bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
-            bool cond2 = (label == "LOUDNESS RANGE") && currentValue <= 0.0f;
-            bool cond3 = (label == "TRUE PEAK MAX") && currentValue >= -0.5f;
-
-            if (cond1 || cond2) {
-                drawDash = true;
-            } else {
-                // Format the valid number
-                valueText = formatValue(currentValue);
-                if (cond3) {
-                    clipping = true;
+                if (cond1 || cond2) {
+                    drawDash = true;
+                } else {
+                    // Format the valid number
+                    valueText = formatValue(currentValue);
+                    if (cond3) {
+                        clipping = true;
+                    }
                 }
+            } else {
+                drawDash = true;
+                valueText = "";
             }
-        } else {
-            drawDash = true;
-            valueText = "";
+
+            // --- Draw Value ---
+            nvgFontFaceId(args.vg, font->handle);
+            if (drawDash) {
+                nvgStrokeColor(args.vg, valueColor);
+                nvgStrokeWidth(args.vg, 2.1f);
+                nvgBeginPath(args.vg);
+                nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 13.0);
+                nvgLineTo(args.vg, box.size.x - 29.5, middleY - 13.0);
+                nvgStroke(args.vg);
+            } else {
+                nvgFontSize(args.vg, 32);
+                nvgFillColor(args.vg, clipping ? redColor : valueColor);
+                nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+                nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, valueText.c_str(), NULL);
+            }
+
+            // --- Draw Unit ---
+            nvgFontSize(args.vg, 14);
+            nvgFillColor(args.vg, valueColor);
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+            nvgText(args.vg, box.size.x - 9.5, middleY, unit.c_str(), NULL);
+
+            // --- Draw Label ---
+            nvgFontFaceId(args.vg, font2->handle);
+            nvgFontSize(args.vg, 14);
+            nvgFillColor(args.vg, labelColor);
+            nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_RIGHT);
+            nvgText(args.vg, box.size.x - 9.5, box.size.y - 11, label.c_str(), NULL);
         }
-
-        // --- Draw Value ---
-        nvgFontFaceId(args.vg, font->handle);
-        if (drawDash) {
-            nvgStrokeColor(args.vg, valueColor);
-            nvgStrokeWidth(args.vg, 2.1f);
-            nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, box.size.x - 9.5, middleY - 13.0);
-            nvgLineTo(args.vg, box.size.x - 29.5, middleY - 13.0);
-            nvgStroke(args.vg);
-        } else {
-            nvgFontSize(args.vg, 32);
-            nvgFillColor(args.vg, clipping ? redColor : valueColor);
-            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            nvgText(args.vg, box.size.x - 9.5, middleY - 5.0, valueText.c_str(), NULL);
-        }
-
-        // --- Draw Unit ---
-        nvgFontSize(args.vg, 14);
-        nvgFillColor(args.vg, valueColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-        nvgText(args.vg, box.size.x - 9.5, middleY, unit.c_str(), NULL);
-
-        // --- Draw Label ---
-        nvgFontFaceId(args.vg, font2->handle);
-        nvgFontSize(args.vg, 14);
-        nvgFillColor(args.vg, labelColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_BASELINE | NVG_ALIGN_RIGHT);
-        nvgText(args.vg, box.size.x - 9.5, box.size.y - 11, label.c_str(), NULL);
+        Widget::drawLayer(args, layer);
     }
 };
 

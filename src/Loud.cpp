@@ -23,8 +23,6 @@ static std::string formatValue(float value) {
 }
 
 struct ValueDisplayTinyWidget : Widget {
-    std::shared_ptr<Font> font;
-    std::shared_ptr<Font> font2;
     NVGcolor valueColor = nvgRGB(0xf5, 0xf5, 0xdc);
     NVGcolor labelColor = nvgRGB(95, 190, 250);
     NVGcolor redColor = nvgRGB(0xc0, 0x39, 0x2b);
@@ -40,11 +38,6 @@ struct ValueDisplayTinyWidget : Widget {
             tooltip->requestDelete();
             tooltip = nullptr;
         }
-    }
-
-    ValueDisplayTinyWidget() {
-        font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
-        font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
     }
 
     // --- Destructor for Cleanup ---
@@ -77,63 +70,61 @@ struct ValueDisplayTinyWidget : Widget {
     }
 
     void drawLayer(const DrawArgs& args, int layer) override {
-        if (layer != 1)
-            return;
-        if (!font || !font2) return;
+        std::shared_ptr<Font> font = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/JetBrainsMono-Medium.ttf"));
+        std::shared_ptr<Font> font2 = APP->window->loadFont(asset::plugin(pluginInstance, "res/fonts/SofiaSansExtraCondensed-Regular.ttf"));
+        if (layer == 1 && font && font2) {
+            float middleY = box.size.y - 9.f;
 
-        float middleY = box.size.y - 9.f;
+            // --- Determine Value String ---
+            std::string valueText = "-inf";
+            bool drawDash = false;
+            bool clipping = false;
 
-        // --- Determine Value String ---
-        std::string valueText = "-inf";
-        bool drawDash = false;
-        bool clipping = false;
+            if (valuePtr) {
+                float currentValue = *valuePtr;
+                bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
+                bool cond2 = (label == "LR") && currentValue <= 0.0f;
+                bool cond3 = (label == "TPMAX") && currentValue >= -0.5f;
+                bool cond4 = maxValuePtr && !std::isnan(currentValue) && (label == "M") && currentValue >= *maxValuePtr;
 
-        if (valuePtr) {
-            float currentValue = *valuePtr;
-            bool cond1 = currentValue <= ALMOST_NEGATIVE_INFINITY || std::isinf(currentValue) || std::isnan(currentValue);
-            bool cond2 = (label == "LR") && currentValue <= 0.0f;
-            bool cond3 = (label == "TPMAX") && currentValue >= -0.5f;
-            bool cond4 = maxValuePtr && !std::isnan(currentValue) && (label == "M") && currentValue >= *maxValuePtr;
-
-            if (cond1 || cond2) {
-                drawDash = true;
-            } else {
-                // Format the valid number
-                valueText = formatValue(currentValue);
-                if (cond3 | cond4) {
-                    clipping = true;
+                if (cond1 || cond2) {
+                    drawDash = true;
+                } else {
+                    // Format the valid number
+                    valueText = formatValue(currentValue);
+                    if (cond3 | cond4) {
+                        clipping = true;
+                    }
                 }
+            } else {
+                drawDash = true;
+                valueText = "";
             }
-        } else {
-            drawDash = true;
-            valueText = "";
+
+            // --- Draw Value ---
+            nvgFontFaceId(args.vg, font->handle);
+            if (drawDash) {
+                nvgStrokeColor(args.vg, valueColor);
+                nvgStrokeWidth(args.vg, 1.53f);
+                nvgBeginPath(args.vg);
+                nvgMoveTo(args.vg, box.size.x - 50, middleY - 5.2f);
+                nvgLineTo(args.vg, box.size.x - 70, middleY - 5.2f);
+                nvgStroke(args.vg);
+            } else {
+                nvgFontSize(args.vg, 21);
+                nvgFillColor(args.vg, clipping ? redColor : valueColor);
+                nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
+                nvgText(args.vg, box.size.x - 37, middleY, valueText.c_str(), NULL);
+            }
+
+            // --- Draw Label ---
+            nvgFontFaceId(args.vg, font2->handle);
+            nvgFontSize(args.vg, 16);
+            nvgFillColor(args.vg, labelColor);
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
+            nvgText(args.vg, box.size.x - 19.f, middleY - 1, label.c_str(), NULL);
         }
-
-        // --- Draw Value ---
-        nvgFontFaceId(args.vg, font->handle);
-        if (drawDash) {
-            nvgStrokeColor(args.vg, valueColor);
-            nvgStrokeWidth(args.vg, 1.53f);
-            nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, box.size.x - 50, middleY - 5.2f);
-            nvgLineTo(args.vg, box.size.x - 70, middleY - 5.2f);
-            nvgStroke(args.vg);
-        } else {
-            nvgFontSize(args.vg, 21);
-            nvgFillColor(args.vg, clipping ? redColor : valueColor);
-            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BASELINE);
-            nvgText(args.vg, box.size.x - 37, middleY, valueText.c_str(), NULL);
-        }
-
-        // --- Draw Label ---
-        nvgFontFaceId(args.vg, font2->handle);
-        nvgFontSize(args.vg, 16);
-        nvgFillColor(args.vg, labelColor);
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BASELINE);
-        nvgText(args.vg, box.size.x - 19.f, middleY - 1, label.c_str(), NULL);
-
-        // nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
-        // nvgText(args.vg, box.size.x - 30.f, middleY - 1, label.c_str(), NULL);
+        Widget::drawLayer(args, layer);
     }
 };
 
