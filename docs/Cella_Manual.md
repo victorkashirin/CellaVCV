@@ -1,6 +1,6 @@
 # Cella – User Manual
 
-# Version 2.0.7
+# Version 2.8.0
 
 # **LICENSE**
 
@@ -164,9 +164,9 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 <img src="images/Resonators.png" alt="Cella - Resonators" style="height: 380px;">
 
-[**Resonators Demo (YouTube)**](https://www.youtube.com/watch?v=gn_RQxh0R7A)
+[Resonators DEMO (YouTube)](https://www.youtube.com/watch?v=gn_RQxh0R7A)
 
-[**Resonators demo by Omri Cohen (YouTube)**](https://www.youtube.com/watch?v=IwO37pXGd5A)
+[Resonators DEMO by Omri Cohen (YouTube)](https://www.youtube.com/watch?v=IwO37pXGd5A)
 
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in the popular DAW.
 
@@ -250,6 +250,8 @@ Taken from [here](http://viznut.fi/demos/unix/bytebeat_formulas.txt)
 # **Cognitive Shift**
 
 <img src="images/CognitiveShift.png" alt="Cella - Cognitive Shift" style="height: 380px;">
+
+[Cognitive Shift DEMO (YouTube)](https://www.youtube.com/watch?v=w_rUmVgKfsE)
 
 Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack. It goes beyond basic shift register functionality by incorporating flexible input logic (including XOR and selectable logic operations), manual data overrides, data edit mode, three overlapping unipolar 4-bit DAC outputs, a bipolar/unipolar 8-bit DAC output, and configurable gate output modes. It also features intelligent self-patching detection to facilitate complex feedback patterns.
 
@@ -372,27 +374,27 @@ Inputs expect standard VCV Rack +/- 10V signals, which are scaled internally to 
 
 *   **Reset**: Resets all integrated, maximum, and historical measurements when a trigger signal (rising edge, typically > 1V) is received.
 
-*   **Audio L / Mono**: Left channel audio input. Serves as the primary input for mono signals or the left channel of a stereo pair.
-*   **Audio R**: Right channel audio input. Used for the right channel of a stereo pair.
+*   **LEFT**: Left channel audio input. Serves as the primary input for mono signals or the left channel of a stereo pair.
+*   **RIGHT**: Right channel audio input. Used for the right channel of a stereo pair.
 
 **Input Interpretation & Processing Mode:**
 
 The way the connected audio inputs are interpreted and processed depends on the **Processing mode** selected in the module's context menu:
 
 *   **Auto (Default):** This mode automatically adapts to the connections.
-    *   If *only* 'Audio L' or *only* 'Audio R' is connected, the signal is processed as **mono**.
-    *   If *both* 'Audio L' and 'Audio R' are connected, the signal is processed as **stereo**.
+    *   If *only* 'LEFT' or *only* 'RIGHT' is connected, the signal is processed as **mono**.
+    *   If *both* 'LEFT' and 'RIGHT' are connected, the signal is processed as **stereo**.
 
 *   **Mono:** This mode forces the processing to be **mono**, regardless of input connections.
-    *   If *both* 'Audio L' and 'Audio R' are connected, they are mixed down to mono before processing.
-    *   If *only* 'Audio L' or *only* 'Audio R' is connected, that single input is used directly as the mono source.
+    *   If *both* 'LEFT' and 'RIGHT' are connected, they are mixed down to mono before processing.
+    *   If *only* 'LEFT' or *only* 'RIGHT' is connected, that single input is used directly as the mono source.
 
 *   **Stereo:** This mode forces the processing to be **stereo**, regardless of input connections.
-    *   If *both* 'Audio L' and 'Audio R' are connected, they are processed as a standard stereo pair.
-    *   If *only* 'Audio L' is connected, its signal is duplicated to both the left and right channels for stereo processing.
-    *   If *only* 'Audio R' is connected, *its* signal is duplicated to both the left and right channels for stereo processing.
+    *   If *both* 'LEFT' and 'RIGHT' are connected, they are processed as a standard stereo pair.
+    *   If *only* 'LEFT' is connected, its signal is duplicated to both the left and right channels for stereo processing.
+    *   If *only* 'RIGHT' is connected, *its* signal is duplicated to both the left and right channels for stereo processing.
 
-**Why Mode Matters:** The selected mode directly influences the final loudness value. Because the ITU-R BS.1770 standard sums the energy from both channels for stereo analysis (but only uses the single channel for mono), processing the same audio signal in 'Stereo' mode will typically result in a reading approximately 3 LUFS higher than processing it in 'Mono' mode.
+**Why Mode Matters:** The selected mode directly influences the final loudness value. Because the ITU-R BS.1770 standard sums the energy from both channels for stereo analysis (but only uses the single channel for mono), processing the same mono audio signal in 'Stereo' mode will typically result in a reading approximately 3 LUFS higher than processing it in 'Mono' mode. For uncorrelated stereo signal that difference might be higher or lower.
 
 ## Controls
 
@@ -405,9 +407,9 @@ The module features a large display area showing several loudness metrics:
 
 1.  **Momentary Loudness (M) Bar**: Displays the momentary loudness (measured over a 400ms window) as a vertical bar graph. The bar is white up to the **Target Loudness** value and turns red above it. Small bracket indicates the current **Loudness Range**.
 
-2.  **SHORT TERM**: Displays the short-term loudness (measured over a 3s window). Calculation can be disabled via the context menu.
+2.  **SHORT TERM (S)**: Displays the short-term loudness (measured over a 3s window). Calculation can be disabled via the context menu.
 
-3.  **INTEGRATED**: Displays the integrated loudness (overall program loudness) calculated since the last reset. This value is saved and restored with the patch.
+3.  **INTEGRATED (I)**: Displays the integrated loudness (overall program loudness) calculated since the last reset. This value is saved and restored with the patch.
 
 4.  **DYNAMICS (PSR)**: Displays the Peak to Short-term Loudness Ratio (PSR). This is the difference between the *sliding maximum true peak* (measured over the last ~2.5 seconds) and the current *short-term loudness*. Provides an indication of recent dynamic range.
 
@@ -415,11 +417,11 @@ The module features a large display area showing several loudness metrics:
 
 6.  **LOUDNESS RANGE (LRA)**: Displays the statistical loudness range, indicating the variation in loudness throughout the measurement period (since the last reset).
 
-7.  **MOMENTARY MAX**: Displays the maximum momentary loudness level recorded since the last reset.
+7.  **MOMENTARY MAX (MMAX)**: Displays the maximum momentary loudness level recorded since the last reset.
 
-8.  **SHORT TERM MAX**: Displays the maximum short-term loudness level recorded since the last reset.
+8.  **SHORT TERM MAX (SMAX)**: Displays the maximum short-term loudness level recorded since the last reset.
 
-9.  **TRUE PEAK MAX**: Displays the maximum true peak level (accounting for inter-sample peaks) recorded on either channel since the last reset. The value turns red if it exceeds -0.5 dBTP, indicating potential clipping after D/A conversion.
+9.  **TRUE PEAK MAX (TPMAX)**: Displays the maximum true peak level (accounting for inter-sample peaks) recorded on either channel since the last reset. The value turns red if it exceeds -0.5 dBTP, indicating potential clipping after D/A conversion.
 
 ## Context Menu
 

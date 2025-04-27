@@ -38,6 +38,8 @@ Under the hood, the module uses the DSP core from Audible Instruments' Liquid Fi
 
 Main differentiator from other implementations is the ability to output triggers or gates per each step without merging consecutive gates together, and yet allow for self-patching.
 
+[YOUTUBE: Cella - Cognitive Shift DEMO](https://www.youtube.com/watch?v=w_rUmVgKfsE)
+
 ### Loudness Meter
 
 **Loudness Meter** and its narrow version **Loud** are a comprehensive audio loudness meters based on the EBU R128 standard, utilizing the [libebur128](https://github.com/jiixyj/libebur128) library for accurate measurements.
