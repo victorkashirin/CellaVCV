@@ -1,5 +1,9 @@
 # Cella modules changelog
 
+### 2.8.1 (2025-04-27)
+Bugfix:
+* Fix font rendering in Loud and Loudness Meter in DAWs
+
 ### 2.8.0 (2025-04-27)
 
 New modules:
