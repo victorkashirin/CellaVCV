@@ -46,7 +46,7 @@ struct VFDFreqAnalyzer : Module {
         configParam(NUM_BANDS_PARAM, 1.f, 25.f, 16.f, "Number of Bands");
         configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
         configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
-        configParam(GAIN_PARAM, 0.f, 2.f, 1.f, "Gain");
+        configParam(GAIN_PARAM, 0.f, 2.f, 0.003f, "Gain");
         // Ensure default responsiveness index is valid
         int defaultResponsivenessIndex = 2;  // Corresponds to 1024
         if (defaultResponsivenessIndex >= (int)WINDOW_SIZES.size()) {
@@ -181,12 +181,12 @@ struct VFDFreqAnalyzer : Module {
 
             // Input Handling: Average multi-channel, take mono as is
             if (channels == 1) {
-                summedInput = inputs[AUDIO_INPUT].getVoltage(0) * gain;
+                summedInput = inputs[AUDIO_INPUT].getVoltage(0) * gain * 0.1f;
             } else if (channels > 1) {
                 for (int c = 0; c < channels; c++) {
                     summedInput += inputs[AUDIO_INPUT].getVoltage(c);
                 }
-                summedInput = (summedInput / channels) * gain;  // Average channels
+                summedInput = (summedInput / channels) * gain * 0.1f;  // Average channels
             }
             // else: channels = 0, summedInput remains 0.f
 
@@ -274,17 +274,17 @@ struct VFDFreqAnalyzer : Module {
         float dcOffset = (windowSize > 0) ? (sum / windowSize) : 0.f;
 
         // Blackman Window Calculation
-        const float a0 = 0.42f;
-        const float a1 = 0.50f;
-        const float a2 = 0.08f;
-        const float factor = 2.f * M_PI / (windowSize > 1 ? (windowSize - 1) : 1);
-
-        for (size_t i = 0; i < windowSize; i++) {
-            float term1 = std::cos(factor * i);
-            float term2 = std::cos(2.f * factor * i);
-            float window = a0 - a1 * term1 + a2 * term2;
-            // Apply window and remove DC offset
-            fftInput[i] = (fftInput[i] - dcOffset) * window;
+        const float a0 = 0.35875f;
+        const float a1 = 0.48829f;
+        const float a2 = 0.14128f;
+        const float a3 = 0.01168f;
+        const float k = 2.f * M_PI / (windowSize - 1);
+        for (size_t i = 0; i < windowSize; ++i) {
+            float c1 = std::cos(k * i);
+            float c2 = std::cos(k * 2.f * i);
+            float c3 = std::cos(k * 3.f * i);
+            float w = a0 - a1 * c1 + a2 * c2 - a3 * c3;
+            fftInput[i] = (fftInput[i] - dcOffset) * w;
         }
 
         // --- Perform FFT using dsp::RealFFT ---
@@ -297,7 +297,7 @@ struct VFDFreqAnalyzer : Module {
 
         // Define audible frequency range limits in terms of bins
         // Bin 0 is DC, bin N/2 is Nyquist
-        const size_t minBin = std::max<size_t>(1, static_cast<size_t>(std::ceil(20.0f / binWidth)));          // Skip DC
+        const size_t minBin = std::max<size_t>(2, static_cast<size_t>(std::ceil(40.0f / binWidth)));          // Skip DC
         const size_t maxBin = std::min<size_t>(static_cast<size_t>(std::floor(20000.0f / binWidth)), N / 2);  // Up to Nyquist
 
         // Vector to store power (magnitude squared) for each bin
@@ -324,6 +324,7 @@ struct VFDFreqAnalyzer : Module {
                     float re = fftOutput[indexReal];
                     float im = fftOutput[indexImag];
                     power[k] = re * re + im * im;  // Power = Re^2 + Im^2
+                    power[k] *= 2.f;
                 } else {
                     // Should not happen if loop condition is correct, but safety first
                     power[k] = 0.f;
@@ -376,23 +377,18 @@ struct VFDFreqAnalyzer : Module {
                 // Ensure at least one potential bin in the range, and start <= end
                 endBin = std::max(endBin, startBin + 1);
 
-                float maxDbInBand = -200.0f;  // Initialize low
-                bool bandHasData = false;
-
-                // Find the maximum dB value within this band's bins
-                for (size_t i = startBin; i < endBin && i < numBins; i++) {  // Iterate bins in the band
-                                                                             // Use the calculated power vector
-                    float currentDb = 10.0f * std::log10(power[i] + epsilon);
-                    maxDbInBand = std::max(maxDbInBand, currentDb);
-                    bandHasData = true;
+                /* mean power (not max) for a fair comparison across bands */
+                double sumP = 0.0;
+                size_t samples = 0;
+                for (size_t i = startBin; i < endBin && i < numBins; i++) {
+                    sumP += power[i];
+                    ++samples;
                 }
-
-                if (bandHasData) {
-                    // Normalize the MAXIMUM dB value found in the band to [0, 1]
-                    // Using -60dB to 0dB range for normalization (can be adjusted)
-                    newLevels[b] = rack::math::clamp((maxDbInBand + 60.0f) / 60.0f, 0.0f, 1.0f);
+                if (samples) {
+                    float bandDb = 10.f * std::log10((sumP / samples) + epsilon);
+                    newLevels[b] = rack::math::clamp((bandDb + 60.f) / 60.f, 0.f, 1.f);
                 } else {
-                    newLevels[b] = 0.f;  // Band had no valid bins
+                    newLevels[b] = 0.f;
                 }
             }
         } else {  // Linear Bins
