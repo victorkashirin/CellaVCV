@@ -113,16 +113,24 @@ struct Resonators : Module {
         }
     }
 
-    // Function to read from the delay buffer
-    float readDelayBuffer(int bufferIndex, float delayTimeSamples) {
-        float readIndex = delayIndices[bufferIndex] - delayTimeSamples;
-        if (readIndex < 0)
-            readIndex += bufferSize;
-        int index0 = (int)readIndex;
-        int index1 = (index0 + 1) % bufferSize;
-        float frac = readIndex - index0;
-        float delayedSample = (1.f - frac) * delayBuffers[bufferIndex][index0] + frac * delayBuffers[bufferIndex][index1];
-        return delayedSample;
+    /* ---------------------- cubic‑Lagrange read ----------------------- */
+    float readDelayBuffer(int v, float d) {
+        float read = delayIndices[v] - d;
+        while (read < 0) read += bufferSize;
+        int i0 = static_cast<int>(read);
+        float f = read - i0;
+        int i_1 = (i0 - 1 + bufferSize) % bufferSize;
+        int i1 = (i0 + 1) % bufferSize;
+        int i2 = (i0 + 2) % bufferSize;
+        float y_1 = delayBuffers[v][i_1];
+        float y0 = delayBuffers[v][i0];
+        float y1 = delayBuffers[v][i1];
+        float y2 = delayBuffers[v][i2];
+        float c0 = y0;
+        float c1 = 0.5f * (y1 - y_1);
+        float c2 = y_1 - 2.5f * y0 + 2.f * y1 - 0.5f * y2;
+        float c3 = 0.5f * (y2 - y_1) + 1.5f * (y0 - y1);
+        return ((c3 * f + c2) * f + c1) * f + c0;
     }
 
     void writeDelayBuffer(int bufferIndex, float value) {
@@ -225,7 +233,7 @@ struct Resonators : Module {
 
             // Highpass filter
             float highpassFreq = clamp(20.f * colorFreq, 20.f, 20000.f);
-            highPassFilter[i].setCutoff(highpassFreq / args.sampleRate);
+            highPassFilter[i].setCutoffFreq(highpassFreq / args.sampleRate);
             highPassFilter[i].process(delayOutput);
             delayOutput = highPassFilter[i].highpass();
 
@@ -246,7 +254,8 @@ struct Resonators : Module {
         }
 
         // After summing all resonators, apply global crossfade
-        outputs[OUT_OUTPUT].setVoltage(crossfade(input, sumOutput, mix));
+        float out = crossfade(input, sumOutput, mix);
+        outputs[OUT_OUTPUT].setVoltage(out);
     }
 };
 
