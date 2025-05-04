@@ -51,11 +51,15 @@ struct DecayTimeQuantity : rack::ParamQuantity {
 struct Integrator : rack::Module {
     /* ───────────── ENUMS ─────────────────────────────── */
     enum ParamIds {
-        RATE_PARAM,  // fine time-constant trim −5 … +5 (≈ /32 … ×32)
+        RATE_PARAM,
         LEAK_PARAM,
-        RANGE_PARAM,  // 3-pos switch: 0=CV,1=LO,2=HI
-        CLIP_PARAM,   // 3-pos switch: 0=off,1=hard,2=soft
+        RANGE_PARAM,
+        CLIP_PARAM,
         RESET_PARAM,
+        INIT_BUTTON_PARAM,
+        INIT_PARAM,
+        GAIN_CV_PARAM,
+        LEAK_CV_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -70,6 +74,8 @@ struct Integrator : rack::Module {
         NUM_OUTPUTS
     };
     enum LightIds {
+        OUT_POS_LIGHT,
+        OUT_NEG_LIGHT,
         NUM_LIGHTS
     };
 
@@ -78,47 +84,70 @@ struct Integrator : rack::Module {
 
     dsp::SchmittTrigger resetButtonTrigger;
     dsp::SchmittTrigger resetInputTrigger;
+    dsp::ClockDivider lightDivider;
 
     Integrator() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
-        configParam(RATE_PARAM, -4.f, 4.f, 0.f, "Fine rate", "x", 2.f);
+        configParam(RATE_PARAM, -4.f, 4.f, 0.f, "Integration rate", "x", 2.f);
         configParam<DecayTimeQuantity>(LEAK_PARAM, 0.f, 1.f, 0.f, "Leak time");
+
+        configParam(INIT_PARAM, 0.f, 10.f, 5.f, "Init value", "V");
+        configButton(INIT_BUTTON_PARAM, "Init");
 
         configSwitch(RANGE_PARAM, 0.f, 2.f, 1.f, "Range", {"CV (slow)", "LO", "HI (audio)"});
 
-        configSwitch(CLIP_PARAM, 0.f, 2.f, 1.f, "Clip", {"Off", "Hard", "Soft"});
+        configParam(GAIN_CV_PARAM, -1.f, 1.f, 0.f, "Rate CV", "%", 0.f, 100.f);
+        configParam(LEAK_CV_PARAM, -1.f, 1.f, 0.f, "Leak CV", "%", 0.f, 100.f);
+
+        configSwitch(CLIP_PARAM, 0.f, 1.f, 1.f, "Clip", {"Fold", "Clip"});
         configButton(RESET_PARAM, "Reset");
 
-        configInput(GAIN_CV_INPUT, "Gain CV");
+        configInput(GAIN_CV_INPUT, "Rate CV");
         configInput(LEAK_CV_INPUT, "Leak CV");
-        configInput(IN_INPUT, "In");
+        configInput(IN_INPUT, "Signal");
         configInput(RESET_INPUT, "Reset Trigger");
-        configOutput(OUT_OUTPUT, "Out");
+        configOutput(OUT_OUTPUT, "Result");
+
+        lightDivider.setDivision(16);
+    }
+
+    float fold(float x, float a, float b) {
+        float result = x;
+        if (x > b) {
+            result = 2 * b - x;
+        } else if (x < a) {
+            result = 2 * a - x;
+        }
+        if (result < a || result > b) return fold(result, a, b);
+        return result;
     }
 
     /* ───────────── DSP ───────────────────────────────── */
     void process(const ProcessArgs& args) override {
-        const float v = inputs[IN_INPUT].getVoltageSum();
+        float v = inputs[IN_INPUT].getVoltageSum();
         const float dt = args.sampleTime;
+
+        if (params[INIT_BUTTON_PARAM].getValue() > 0.f) {
+            v += params[INIT_PARAM].getValue();
+        }
 
         /* --- τ from 3-way range + fine knob -------------- */
         static const float baseTau[3] = {4.f, 0.36f, 0.18f};  // CV, LO, HI
         int rangeSel = (int)std::round(params[RANGE_PARAM].getValue());
         rangeSel = clamp(rangeSel, 0, 2);
 
-        const float gain = params[RATE_PARAM].getValue() +
-                           (inputs[GAIN_CV_INPUT].isConnected()
-                                ? inputs[GAIN_CV_INPUT].getVoltage() / 2.f
-                                : 0.f);
-        const float tau = baseTau[rangeSel] *
-                          std::pow(2.f, -gain);
+        float rate = params[RATE_PARAM].getValue();
+        rate += (inputs[GAIN_CV_INPUT].isConnected()
+                     ? params[GAIN_CV_PARAM].getValue() * inputs[GAIN_CV_INPUT].getVoltage() / 5.f
+                     : 0.f);
+        const float effectiveTau = baseTau[rangeSel] * std::pow(2.f, -rate);
 
         /* --- leak multiplier ----------------------------- */
         float leakPos = params[LEAK_PARAM].getValue();
         if (inputs[LEAK_CV_INPUT].isConnected())
             leakPos = clamp(leakPos +
-                                inputs[LEAK_CV_INPUT].getVoltage() / 10.f,
+                                params[LEAK_CV_PARAM].getValue() * inputs[LEAK_CV_INPUT].getVoltage() / 5.f,
                             0.f, 1.f);
 
         const float tauLeak = DecayTimeQuantity::getLeakTimeConstant(
@@ -137,7 +166,7 @@ struct Integrator : rack::Module {
         }
 
         /* --- integrator step ----------------------------- */
-        y = y * leakMul + v * (dt / tau);
+        y = y * leakMul + v * (dt / effectiveTau);
 
         if (resetButtonTrigger.process(params[RESET_PARAM].getValue()) || resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
             y = 0.f;
@@ -145,12 +174,21 @@ struct Integrator : rack::Module {
 
         /* ---- clipping ---- */
         const int clipSel = (int)std::round(params[CLIP_PARAM].getValue());
-        if (clipSel == 1)  // hard ±10 V
+        if (clipSel == 1) {
             y = clamp(y, -10.f, 10.f);
-        else if (clipSel == 2)  // soft tanh
-            y = 10.f * std::tanh(y / 10.f);
+        }
 
-        outputs[OUT_OUTPUT].setVoltage(y);
+        float outputValue = y;
+        if (clipSel == 0) {
+            outputValue = fold(y, -10.f, 10.f);
+        }
+        outputs[OUT_OUTPUT].setVoltage(outputValue);
+
+        if (lightDivider.process()) {
+            float lightTime = args.sampleTime * lightDivider.getDivision();
+            lights[OUT_POS_LIGHT].setBrightnessSmooth(fmaxf(0.0f, outputValue / 10.f), lightTime);
+            lights[OUT_NEG_LIGHT].setBrightnessSmooth(fmaxf(0.0f, -outputValue / 10.f), lightTime);
+        }
     }
 };
 
@@ -158,26 +196,34 @@ struct Integrator : rack::Module {
 struct IntegratorWidget : rack::ModuleWidget {
     IntegratorWidget(Integrator* m) {
         setModule(m);
-        setPanel(APP->window->loadSvg(asset::plugin(pluginInstance, "res/Integrator.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Integrator.svg"), asset::plugin(pluginInstance, "res/Integrator-dark.svg")));
 
         addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+
+        addChild(createLightCentered<LargeFresnelLight<GreenRedLight>>(Vec(45.0, 35.0), module, Integrator::OUT_POS_LIGHT));
 
         /* layout coordinates assume 128 px wide panel */
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.39), m, Integrator::RATE_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.39), m, Integrator::LEAK_PARAM));
 
-        addParam(createParamCentered<CKSSThree>(Vec(16.5, 162.66), m, Integrator::RANGE_PARAM));
-        addParam(createParamCentered<CKSSThree>(Vec(54.74, 162.66), m, Integrator::CLIP_PARAM));
+        addParam(createParamCentered<VCVButtonHuge>(Vec(22.5, 104.35), module, Integrator::INIT_BUTTON_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.35), module, Integrator::INIT_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 231.31), m, Integrator::GAIN_CV_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(67.5, 231.31), m, Integrator::LEAK_CV_INPUT));
+        addParam(createParamCentered<CKSSThree>(Vec(16.54, 162.66), m, Integrator::RANGE_PARAM));
+        addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integrator::CLIP_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 280.1), m, Integrator::RESET_INPUT));
+        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.79), module, Integrator::GAIN_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.79), module, Integrator::LEAK_CV_PARAM));
+
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 231.31), m, Integrator::GAIN_CV_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 231.31), m, Integrator::LEAK_CV_INPUT));
+
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.1), m, Integrator::RESET_INPUT));
         addParam(createParamCentered<VCVButton>(Vec(67.5, 280.1), m, Integrator::RESET_PARAM));
 
-        addInput(createInputCentered<PJ301MPort>(Vec(22.5, 329.25), m, Integrator::IN_INPUT));
-        addOutput(createOutputCentered<PJ301MPort>(Vec(67.5, 329.25), m, Integrator::OUT_OUTPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), m, Integrator::IN_INPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), m, Integrator::OUT_OUTPUT));
     }
 };
 
