@@ -64,6 +64,7 @@ struct Integrator : rack::Module {
     };
     enum InputIds {
         IN_INPUT,
+        GATE_INPUT,
         GAIN_CV_INPUT,
         LEAK_CV_INPUT,
         RESET_INPUT,
@@ -89,7 +90,7 @@ struct Integrator : rack::Module {
     Integrator() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
-        configParam(RATE_PARAM, -4.f, 4.f, 0.f, "Integration rate", "x", 2.f);
+        configParam(RATE_PARAM, -4.f, 4.f, 0.f, "Integration rate", "x");
         configParam<DecayTimeQuantity>(LEAK_PARAM, 0.f, 1.f, 0.f, "Leak time");
 
         configParam(INIT_PARAM, 0.f, 10.f, 5.f, "Init value", "V");
@@ -106,6 +107,7 @@ struct Integrator : rack::Module {
         configInput(GAIN_CV_INPUT, "Rate CV");
         configInput(LEAK_CV_INPUT, "Leak CV");
         configInput(IN_INPUT, "Signal");
+        configInput(GATE_INPUT, "Integrator Gate");
         configInput(RESET_INPUT, "Reset Trigger");
         configOutput(OUT_OUTPUT, "Result");
 
@@ -133,7 +135,7 @@ struct Integrator : rack::Module {
         }
 
         /* --- τ from 3-way range + fine knob -------------- */
-        static const float baseTau[3] = {4.f, 0.36f, 0.18f};  // CV, LO, HI
+        static const float baseTau[3] = {2.f, 0.25f, 0.03125f};  // CV, LO, HI
         int rangeSel = (int)std::round(params[RANGE_PARAM].getValue());
         rangeSel = clamp(rangeSel, 0, 2);
 
@@ -203,7 +205,6 @@ struct IntegratorWidget : rack::ModuleWidget {
 
         addChild(createLightCentered<LargeFresnelLight<GreenRedLight>>(Vec(45.0, 35.0), module, Integrator::OUT_POS_LIGHT));
 
-        /* layout coordinates assume 128 px wide panel */
         addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.39), m, Integrator::RATE_PARAM));
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.39), m, Integrator::LEAK_PARAM));
 
@@ -213,11 +214,12 @@ struct IntegratorWidget : rack::ModuleWidget {
         addParam(createParamCentered<CKSSThree>(Vec(16.54, 162.66), m, Integrator::RANGE_PARAM));
         addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integrator::CLIP_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(22.5, 203.79), module, Integrator::GAIN_CV_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(67.5, 203.79), module, Integrator::LEAK_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(15.f, 203.79), module, Integrator::GAIN_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(75.f, 203.79), module, Integrator::LEAK_CV_PARAM));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 231.31), m, Integrator::GAIN_CV_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5, 231.31), m, Integrator::LEAK_CV_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, 231.31), m, Integrator::GAIN_CV_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45.f, 231.31), m, Integrator::GATE_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(75.f, 231.31), m, Integrator::LEAK_CV_INPUT));
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.1), m, Integrator::RESET_INPUT));
         addParam(createParamCentered<VCVButton>(Vec(67.5, 280.1), m, Integrator::RESET_PARAM));
@@ -227,5 +229,4 @@ struct IntegratorWidget : rack::ModuleWidget {
     }
 };
 
-/* ───────────── PLUGIN ENTRY ───────────────────────── */
 Model* modelIntegrator = rack::createModel<Integrator, IntegratorWidget>("Integrator");
