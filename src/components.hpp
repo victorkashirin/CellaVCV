@@ -30,3 +30,12 @@ struct VCVButtonHuge : app::SvgSwitch {
         this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonHuge_1.svg")));
     }
 };
+
+template <typename TBase = GrayModuleLightWidget>
+struct TGoldLight : TBase {
+    TGoldLight() {
+        // this->addBaseColor(nvgRGB(0xf7, 0xc5, 0xad));
+        this->addBaseColor(nvgRGB(0xd9, 0xa1, 0x86));
+    }
+};
+using GoldLight = TGoldLight<>;

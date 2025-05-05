@@ -60,6 +60,7 @@ struct Integrator : rack::Module {
         INIT_PARAM,
         GAIN_CV_PARAM,
         LEAK_CV_PARAM,
+        GATE_PARAM,
         NUM_PARAMS
     };
     enum InputIds {
@@ -77,15 +78,18 @@ struct Integrator : rack::Module {
     enum LightIds {
         OUT_POS_LIGHT,
         OUT_NEG_LIGHT,
+        GATE_LIGHT,
         NUM_LIGHTS
     };
 
     /* ───────────── STATE ─────────────────────────────── */
-    float y = 0.f;  // integrator state
+    float y = 0.f;          // integrator state
+    bool gateMode = false;  // Used to determine if the knob is in gate mode
 
     dsp::SchmittTrigger resetButtonTrigger;
     dsp::SchmittTrigger resetInputTrigger;
     dsp::ClockDivider lightDivider;
+    dsp::BooleanTrigger gateBoolean;
 
     Integrator() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -130,8 +134,16 @@ struct Integrator : rack::Module {
         float v = inputs[IN_INPUT].getVoltageSum();
         const float dt = args.sampleTime;
 
+        if (gateBoolean.process(params[GATE_PARAM].getValue()))
+            gateMode ^= true;
+
         if (params[INIT_BUTTON_PARAM].getValue() > 0.f) {
             v += params[INIT_PARAM].getValue();
+        }
+
+        if (resetButtonTrigger.process(params[RESET_PARAM].getValue()) ||
+            resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
+            y = 0.f;
         }
 
         /* --- τ from 3-way range + fine knob -------------- */
@@ -168,10 +180,19 @@ struct Integrator : rack::Module {
         }
 
         /* --- integrator step ----------------------------- */
-        y = y * leakMul + v * (dt / effectiveTau);
-
-        if (resetButtonTrigger.process(params[RESET_PARAM].getValue()) || resetInputTrigger.process(inputs[RESET_INPUT].getVoltage())) {
-            y = 0.f;
+        bool shouldIntegrate = true;
+        if (inputs[GATE_INPUT].isConnected()) {
+            float gateValue = inputs[GATE_INPUT].getVoltage();
+            if (gateMode && gateValue > 0.f) {
+                shouldIntegrate = true;
+            } else if (!gateMode && gateValue == 0.f) {
+                shouldIntegrate = true;
+            } else {
+                shouldIntegrate = false;
+            }
+        }
+        if (shouldIntegrate) {
+            y = y * leakMul + v * (dt / effectiveTau);
         }
 
         /* ---- clipping ---- */
@@ -190,6 +211,7 @@ struct Integrator : rack::Module {
             float lightTime = args.sampleTime * lightDivider.getDivision();
             lights[OUT_POS_LIGHT].setBrightnessSmooth(fmaxf(0.0f, outputValue / 10.f), lightTime);
             lights[OUT_NEG_LIGHT].setBrightnessSmooth(fmaxf(0.0f, -outputValue / 10.f), lightTime);
+            lights[GATE_LIGHT].setBrightness(gateMode);
         }
     }
 };
@@ -199,8 +221,6 @@ struct IntegratorWidget : rack::ModuleWidget {
     IntegratorWidget(Integrator* m) {
         setModule(m);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Integrator.svg"), asset::plugin(pluginInstance, "res/Integrator-dark.svg")));
-
-        addChild(createWidget<ScrewGrey>(Vec(0, 0)));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         addChild(createLightCentered<LargeFresnelLight<GreenRedLight>>(Vec(45.0, 35.0), module, Integrator::OUT_POS_LIGHT));
@@ -215,6 +235,7 @@ struct IntegratorWidget : rack::ModuleWidget {
         addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integrator::CLIP_PARAM));
 
         addParam(createParamCentered<Trimpot>(Vec(15.f, 203.79), module, Integrator::GAIN_CV_PARAM));
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<GoldLight>>>(Vec(45, 203.79), module, Integrator::GATE_PARAM, Integrator::GATE_LIGHT));
         addParam(createParamCentered<Trimpot>(Vec(75.f, 203.79), module, Integrator::LEAK_CV_PARAM));
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, 231.31), m, Integrator::GAIN_CV_INPUT));
