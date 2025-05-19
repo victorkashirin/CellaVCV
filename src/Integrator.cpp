@@ -2,7 +2,6 @@
 #include "plugin.hpp"
 
 struct Integrator : rack::Module {
-    /* ───────────── ENUMS ─────────────────────────────── */
     enum ParamIds {
         RATE_PARAM,
         LEAK_PARAM,
@@ -35,9 +34,9 @@ struct Integrator : rack::Module {
         NUM_LIGHTS
     };
 
-    /* ───────────── STATE ─────────────────────────────── */
-    float y = 0.f;          // integrator state
-    bool gateMode = false;  // Used to determine if the knob is in gate mode
+    float y = 0.f;
+    bool gateMode = false;
+    int clipValue = 1;
 
     dsp::SchmittTrigger resetButtonTrigger;
     dsp::SchmittTrigger resetInputTrigger;
@@ -47,103 +46,75 @@ struct Integrator : rack::Module {
     struct DecayTimeQuantity : rack::ParamQuantity {
         static constexpr float minTime = 0.001f;  // 1 ms
         static constexpr float maxTime = 100.f;   // 100 s
-        static constexpr float epsilon = 0.001f;  // Threshold below which value is considered "off"
+        static constexpr float epsilon = 0.001f;
 
         DecayTimeQuantity() {
             description = "Time required for the voltage to\ndecay towards zero by approximately 63%";
         }
 
-        // Map the knob's internal 0..1 value to the time constant
-        // Static allows calling without an instance, useful in process()
         static float getLeakTimeConstant(float value, float minT, float maxT, float eps) {
             if (value < eps) {
                 return std::numeric_limits<float>::infinity();
             }
-            // Logarithmic mapping: value=eps -> maxTime, value=1 -> minTime
-            // Normalize value to range slightly > 0 to 1 for calculation clarity if eps is used
-            // Or adjust the mapping range directly:
             float logMin = std::log10(minT);
             float logMax = std::log10(maxT);
-            // Map value in [eps, 1] to exponent range [logMax, logMin]
-            // When value = eps, factor = 0 -> logMax
-            // When value = 1, factor = 1 -> logMin
             float factor = (value - eps) / (1.f - eps);
             float timeLog = logMax + factor * (logMin - logMax);
             return std::pow(10.f, timeLog);
         }
 
-        // Override how the value is displayed on the panel
         std::string getDisplayValueString() override {
-            float knobValue = getValue();  // Gets the internal 0..1 value
+            float knobValue = getValue();
             float time = getLeakTimeConstant(knobValue, minTime, maxTime, epsilon);
 
             if (std::isinf(time)) {
                 return "Off";  // Or "Inf" or "∞"
             } else if (time >= 1.f) {
-                return rack::string::f("%.1f s", time);  // Show seconds
+                return rack::string::f("%.1f s", time);
             } else if (time >= 0.001f) {
-                return rack::string::f("%.1f ms", time * 1000.f);  // Show milliseconds
+                return rack::string::f("%.1f ms", time * 1000.f);
             } else {
-                return rack::string::f("%.1f µs", time * 1000000.f);  // Show microseconds for very small values
+                return rack::string::f("%.1f µs", time * 1000000.f);
             }
         }
 
-        // Provide access to the static calculation method if needed elsewhere
         static float getTimeConstantForValue(float value) {
             return getLeakTimeConstant(value, minTime, maxTime, epsilon);
         }
     };
 
     struct IntegrationRateQuantity : rack::ParamQuantity {
-        // Copy the baseTau values here for easy access
-        // These are the base time constants in seconds for each range
         static constexpr float baseTau[3] = {2.f, 0.25f, 0.03125f};      // LO, MID, HI
         const float minRate = 1.f / (baseTau[0] * std::pow(2.f, -4.f));  // Max Tau -> Min Rate
         const float maxRate = 1.f / (baseTau[2] * std::pow(2.f, 4.f));   // Min Tau -> Max Rate
 
-        // Override getDisplayValueString to show the calculated rate
         std::string getDisplayValueString() override {
-            // The `module` pointer is automatically set by Rack engine
-            // We need it to access the RANGE_PARAM value
             if (!module) {
-                // Should not happen in normal operation, but good practice
-                return rack::ParamQuantity::getDisplayValueString();  // Fallback
+                return rack::ParamQuantity::getDisplayValueString();
             }
 
-            // Get the raw value of THIS parameter (RATE_PARAM: -4.f to 4.f)
             float rateKnobValue = getValue();
-
-            // Get the current value of the RANGE_PARAM switch from the module
-            // We need to cast module to the specific type (Integrator*) to access its enums
-            // This creates a dependency but is necessary here.
             Integrator* integratorModule = dynamic_cast<Integrator*>(module);
             if (!integratorModule) {
                 return rack::ParamQuantity::getDisplayValueString();  // Fallback if cast fails
             }
             float rangeSwitchValue = module->params[Integrator::RANGE_PARAM].getValue();
             int rangeSel = rack::clamp((int)std::round(rangeSwitchValue), 0, 2);
-
-            // Calculate effectiveTau based *only* on knob and range switch
-            // (Ignoring CV modulation as requested)
             float effectiveTau = baseTau[rangeSel] * std::pow(2.f, -rateKnobValue);  // Units: seconds
 
-            // --- Calculate the display rate (1 / effectiveTau) ---
             float displayRate;  // Units: 1/s = Hz
-
-            // Handle edge cases: very small or infinite tau
             if (!std::isfinite(effectiveTau) || effectiveTau <= 0.f) {
                 // effectiveTau is inf, nan, zero or negative -> rate is problematic
-                if (rateKnobValue <= getMinValue()) {  // Knob at max negative -> large tau
-                    return "<0.01 mHz";                // Or "~0 Hz"
-                } else {                               // Should ideally not happen with pow(2,...) unless baseTau is weird
+                if (rateKnobValue <= getMinValue()) {
+                    return "<0.01 mHz";
+                } else {
                     return "? Hz";
                 }
-            } else if (effectiveTau < 1e-9f) {  // Effective tau is extremely small (~nanoseconds)
-                                                // Rate is extremely high
-                displayRate = 1.0e9f;           // Cap display at 1 GHz for practicality
-            } else if (effectiveTau > 1e8f) {   // Effective tau is extremely large (~years)
+            } else if (effectiveTau < 1e-9f) {
+                displayRate = 1.0e9f;
+            } else if (effectiveTau > 1e8f) {
                 // Rate is extremely low
-                displayRate = 0.f;  // Treat as effectively zero for display
+                displayRate = 0.f;
             } else {
                 displayRate = 1.f / effectiveTau;
             }
@@ -163,20 +134,15 @@ struct Integrator : rack::Module {
                 if (displayRate >= 10.f) return rack::string::f("%.1f Hz", displayRate);
                 return rack::string::f("%.2f Hz", displayRate);
             } else if (displayRate >= 1e-3f) {
-                if (displayRate >= 0.1f) return rack::string::f("%.1f mHz", displayRate * 1e3f);   // e.g. 150.2 mHz
-                if (displayRate >= 0.01f) return rack::string::f("%.1f mHz", displayRate * 1e3f);  // e.g. 15.3 mHz
-                return rack::string::f("%.2f mHz", displayRate * 1e3f);                            // e.g. 1.54 mHz
-            } else if (displayRate > 1e-5f) {                                                      // Between 0.01 mHz and 1 mHz
+                if (displayRate >= 0.1f) return rack::string::f("%.1f mHz", displayRate * 1e3f);
+                if (displayRate >= 0.01f) return rack::string::f("%.1f mHz", displayRate * 1e3f);
                 return rack::string::f("%.2f mHz", displayRate * 1e3f);
-            } else {                 // Very close or equal to zero
-                return "<0.01 mHz";  // Or "0 Hz" if preferred
+            } else if (displayRate > 1e-5f) {
+                return rack::string::f("%.2f mHz", displayRate * 1e3f);
+            } else {
+                return "<0.01 mHz";
             }
         }
-
-        // Optional: You might want to override getLabel() if you don't want the unit
-        // specified in configParam to appear redundantly, but getDisplayValueString()
-        // includes the unit, so it's usually fine.
-        // std::string getLabel() override { return ""; } // Removes unit label next to knob
     };
 
     Integrator() {
@@ -217,19 +183,20 @@ struct Integrator : rack::Module {
         } else if (x < a) {
             result = 2 * a - x;
         }
-        // Recursive call might be risky, iterative is safer
         while (result < a || result > b) {
             if (result > b)
                 result = 2 * b - result;
             else if (result < a)
                 result = 2 * a - result;
-            // Add a safety break for potential infinite loops if logic is flawed
-            if (std::abs(result) > 1e6) break;  // Arbitrary large value
+            if (std::abs(result) > 1e6) break;
         }
         return result;
     }
 
-    /* ───────────── DSP ───────────────────────────────── */
+    void onReset() override {
+        y = 0.f;
+    }
+
     void process(const ProcessArgs& args) override {
         float v = inputs[IN_INPUT].getVoltageSum();
         const float dt = args.sampleTime;
@@ -246,7 +213,6 @@ struct Integrator : rack::Module {
             y = 0.f;
         }
 
-        /* --- τ from 3-way range + fine knob -------------- */
         int rangeSel = (int)std::round(params[RANGE_PARAM].getValue());
         rangeSel = clamp(rangeSel, 0, 2);
 
@@ -254,10 +220,8 @@ struct Integrator : rack::Module {
         rate += (inputs[RATE_CV_INPUT].isConnected()
                      ? params[RATE_CV_PARAM].getValue() * inputs[RATE_CV_INPUT].getVoltage() / 5.f
                      : 0.f);
-        // const float effectiveTau = baseTau[rangeSel] * std::pow(2.f, -rate);
         const float effectiveTau = IntegrationRateQuantity::baseTau[rangeSel] * std::pow(2.f, -rate);
 
-        /* --- leak multiplier ----------------------------- */
         float leakPos = params[LEAK_PARAM].getValue();
         if (inputs[LEAK_CV_INPUT].isConnected())
             leakPos = clamp(leakPos +
@@ -267,14 +231,13 @@ struct Integrator : rack::Module {
         const float tauLeak = DecayTimeQuantity::getTimeConstantForValue(leakPos);
 
         float leakMul;
-        if (std::isinf(tauLeak)) {  // treat near-zero as ideal
+        if (std::isinf(tauLeak)) {
             leakMul = 1.f;
         } else {
             const float safeTauLeak = std::max(tauLeak, 1e-9f);
-            leakMul = std::exp(-dt / safeTauLeak);  // exact decay multiplier
+            leakMul = std::exp(-dt / safeTauLeak);
         }
 
-        /* --- integrator step ----------------------------- */
         bool shouldIntegrate = true;
         if (inputs[GATE_INPUT].isConnected()) {
             float gateValue = inputs[GATE_INPUT].getVoltage();
@@ -290,15 +253,15 @@ struct Integrator : rack::Module {
             y = y * leakMul + v * (dt / effectiveTau);
         }
 
-        /* ---- clipping ---- */
+        float clipValueVolt = 5.f * (clipValue + 1);
         const int clipSel = (int)std::round(params[CLIP_PARAM].getValue());
         if (clipSel == 1) {
-            y = clamp(y, -10.f, 10.f);
+            y = clamp(y, -clipValueVolt, clipValueVolt);
         }
 
         float outputValue = y;
         if (clipSel == 0) {
-            outputValue = fold(y, -10.f, 10.f);
+            outputValue = fold(y, -clipValueVolt, clipValueVolt);
         }
         outputs[OUT_OUTPUT].setVoltage(outputValue);
 
@@ -313,16 +276,19 @@ struct Integrator : rack::Module {
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "gateMode", json_boolean(gateMode));
+        json_object_set_new(rootJ, "clipValue", json_integer(clipValue));
         return rootJ;
     }
 
     void dataFromJson(json_t* rootJ) override {
         json_t* gateModeJ = json_object_get(rootJ, "gateMode");
         if (gateModeJ) gateMode = json_boolean_value(gateModeJ);
+
+        json_t* clipValueJ = json_object_get(rootJ, "clipValue");
+        if (clipValueJ) clipValue = json_integer_value(clipValueJ);
     }
 };
 
-/* ───────────── WIDGET ─────────────────────────────── */
 struct IntegratorWidget : rack::ModuleWidget {
     IntegratorWidget(Integrator* m) {
         setModule(m);
@@ -353,6 +319,17 @@ struct IntegratorWidget : rack::ModuleWidget {
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), m, Integrator::IN_INPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), m, Integrator::OUT_OUTPUT));
+    }
+
+    void appendContextMenu(Menu* menu) override {
+        Integrator* module = dynamic_cast<Integrator*>(this->module);
+        assert(module);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Settings"));
+        menu->addChild(createIndexPtrSubmenuItem("Range",
+                                                 {"-5V..5V",
+                                                  "-10V..10V"},
+                                                 &module->clipValue));
     }
 };
 
