@@ -159,6 +159,44 @@ Another use for the **FREQ** parameter is boosting the output signal, so that ou
 Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second – to the incoming signal. This is helpful when input comes from a manual controller, such as fader, because the signal can have unpredictable jumps, and it affects the quality of Euler’s output. With smoothing applied output would be closer to expected.
 
 
+# Integral
+
+<img src="images/Integral.png" alt="Cella - Integral" style="height: 380px;">
+
+The **Integral** module is a signal integrator. In simple terms, one can think of it like a bucket: it accumulates or "charges up" when a positive voltage is fed into its input, and it subtracts or "loses charge" when a negative voltage is applied. The output voltage reflects this accumulated total. If the input is zero, the output (ideally) remains constant, unless a "leak" is introduced.
+
+#### **Key Features / Controls**
+
+* **RATE:** This knob, in conjunction with the three-position rate range switch (see below), sets the integration rate in Hertz (Hz). This rate determines how many volts the output will change per second for a 1 Volt DC input. For example, if the effective rate is set to 1 Hz, a constant +1V input will cause the output to rise by 1V per second (assuming no leak). A -1V input would cause it to fall by 1V per second. Turning the knob clockwise increases this rate.
+
+* **LEAK:** Controls the decay time constant of the integrated output voltage back towards zero. The value displayed (and controlled by the knob) is in seconds (s) or milliseconds (ms). This is the time required for the voltage to decay by approximately 63% of its current value (relative to zero).
+    *   Fully counter-clockwise: Infinite decay time (displayed as "Off"). The integrator holds its value without leaking.
+    *   Clockwise: Shorter decay times, causing the output to return to zero more quickly.
+
+*  **INIT Button:** When pressed, this button momentarily adds the voltage set by the **INIT** knob to the main input signal. This allows for injecting a specific DC offset or "jump-starting" the integrated value.
+
+*  **INIT Knob:** Sets the voltage value (0V to +10V) that is added to the input when the INIT button is pressed.
+
+*  **Rate Range Switch:** sets the coarse range for the integration **RATE** knob, determining the effective integration rate in Hz. The approximate rate ranges (with the rate knob from fully CCW to fully CW) and the rate at the center (default) position of the rate knob are:
+    *   **H:** 2 Hz to 512 Hz. (Center: 32 Hz)
+    *   **M:** 0.25 Hz to 64 Hz. (Center: 4 Hz)
+    *   **L:** 0.03 Hz to 8 Hz. (Center: 0.5 Hz)
+
+*  **Clip Behavior Switch:** Determines the behavior of the output signal when it reaches its maximum or minimum voltage limits (configurable via the context menu, ±5V or ±10V).
+    *   **CLIP:** The output signal is hard-clipped; it will not exceed the set voltage limits.
+    *   **FOLD:** When the output attempts to exceed a limit, it "folds" back, reversing direction and staying within the voltage boundaries.
+
+*  **Gate Input & Mode Button:**
+    *   **Gate Input:** Accepts a gate or trigger signal to control when integration occurs.
+    *   **Gate Button:** Toggles the gate behavior.
+        *   In one mode, integration occurs only when the gate input is LOW (0V).
+        *   In the other mode, integration occurs only when the gate input is HIGH (>0V).
+    *   If the gate input jack is unconnected, integration is always active regardless of the button state.
+
+* **Reset:**
+    *   **Reset Input:** A trigger signal (rising edge) received at this input will immediately reset the integrated output voltage to 0V.
+    *   **Reset Button:** Manually press to reset the integrated output to 0V.
+
 
 # **Resonators**
 

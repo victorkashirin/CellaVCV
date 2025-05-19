@@ -117,11 +117,11 @@
       ]
     },
     {
-      "slug": "Integrator",
-      "name": "Integrator",
-      "description": "Loudness meter based on EBU R128 standard, narrow version",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#loudness-meter",
-      "keywords": "ebu loudness lufs",
+      "slug": "Integral",
+      "name": "Integral",
+      "description": "Signal integrator, essential for analog computing, chaotic and cybernetic patches",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#integral",
+      "keywords": "cybernetic chaos feedback",
       "tags": [
         "Utility",
         "Visual"

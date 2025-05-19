@@ -1,7 +1,7 @@
 #include "components.hpp"
 #include "plugin.hpp"
 
-struct Integrator : rack::Module {
+struct Integral : rack::Module {
     enum ParamIds {
         RATE_PARAM,
         LEAK_PARAM,
@@ -94,11 +94,11 @@ struct Integrator : rack::Module {
             }
 
             float rateKnobValue = getValue();
-            Integrator* integratorModule = dynamic_cast<Integrator*>(module);
+            Integral* integratorModule = dynamic_cast<Integral*>(module);
             if (!integratorModule) {
                 return rack::ParamQuantity::getDisplayValueString();  // Fallback if cast fails
             }
-            float rangeSwitchValue = module->params[Integrator::RANGE_PARAM].getValue();
+            float rangeSwitchValue = module->params[Integral::RANGE_PARAM].getValue();
             int rangeSel = rack::clamp((int)std::round(rangeSwitchValue), 0, 2);
             float effectiveTau = baseTau[rangeSel] * std::pow(2.f, -rateKnobValue);  // Units: seconds
 
@@ -145,7 +145,7 @@ struct Integrator : rack::Module {
         }
     };
 
-    Integrator() {
+    Integral() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
         configParam<IntegrationRateQuantity>(RATE_PARAM, -4.f, 4.f, 0.f, "Integration rate", "");
@@ -289,40 +289,40 @@ struct Integrator : rack::Module {
     }
 };
 
-struct IntegratorWidget : rack::ModuleWidget {
-    IntegratorWidget(Integrator* m) {
+struct IntegralWidget : rack::ModuleWidget {
+    IntegralWidget(Integral* m) {
         setModule(m);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Integrator.svg"), asset::plugin(pluginInstance, "res/Integrator-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Integral.svg"), asset::plugin(pluginInstance, "res/Integral-dark.svg")));
         addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        addChild(createLightCentered<LargeFresnelLight<GreenRedLight>>(Vec(45.0, 35.0), module, Integrator::OUT_POS_LIGHT));
+        addChild(createLightCentered<LargeFresnelLight<GreenRedLight>>(Vec(45.0, 35.0), module, Integral::OUT_POS_LIGHT));
 
-        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.39), m, Integrator::RATE_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.39), m, Integrator::LEAK_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(22.5, 53.39), m, Integral::RATE_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 53.39), m, Integral::LEAK_PARAM));
 
-        addParam(createParamCentered<VCVButtonHuge>(Vec(22.5, 104.35), module, Integrator::INIT_BUTTON_PARAM));
-        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.35), module, Integrator::INIT_PARAM));
+        addParam(createParamCentered<VCVButtonHuge>(Vec(22.5, 104.35), module, Integral::INIT_BUTTON_PARAM));
+        addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.35), module, Integral::INIT_PARAM));
 
-        addParam(createParamCentered<CKSSThree>(Vec(16.54, 162.66), m, Integrator::RANGE_PARAM));
-        addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integrator::CLIP_PARAM));
+        addParam(createParamCentered<CKSSThree>(Vec(16.54, 162.66), m, Integral::RANGE_PARAM));
+        addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integral::CLIP_PARAM));
 
-        addParam(createParamCentered<Trimpot>(Vec(15.f, 203.79), module, Integrator::RATE_CV_PARAM));
-        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<GoldLight>>>(Vec(45, 203.79), module, Integrator::GATE_PARAM, Integrator::GATE_LIGHT));
-        addParam(createParamCentered<Trimpot>(Vec(75.f, 203.79), module, Integrator::LEAK_CV_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(15.f, 203.79), module, Integral::RATE_CV_PARAM));
+        addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<GoldLight>>>(Vec(45, 203.79), module, Integral::GATE_PARAM, Integral::GATE_LIGHT));
+        addParam(createParamCentered<Trimpot>(Vec(75.f, 203.79), module, Integral::LEAK_CV_PARAM));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, 231.31), m, Integrator::RATE_CV_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45.f, 231.31), m, Integrator::GATE_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(75.f, 231.31), m, Integrator::LEAK_CV_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, 231.31), m, Integral::RATE_CV_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45.f, 231.31), m, Integral::GATE_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(75.f, 231.31), m, Integral::LEAK_CV_INPUT));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.1), m, Integrator::RESET_INPUT));
-        addParam(createParamCentered<VCVButton>(Vec(67.5, 280.1), m, Integrator::RESET_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 280.1), m, Integral::RESET_INPUT));
+        addParam(createParamCentered<VCVButton>(Vec(67.5, 280.1), m, Integral::RESET_PARAM));
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), m, Integrator::IN_INPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), m, Integrator::OUT_OUTPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5, 329.25), m, Integral::IN_INPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(67.5, 329.25), m, Integral::OUT_OUTPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
-        Integrator* module = dynamic_cast<Integrator*>(this->module);
+        Integral* module = dynamic_cast<Integral*>(this->module);
         assert(module);
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Settings"));
@@ -333,4 +333,4 @@ struct IntegratorWidget : rack::ModuleWidget {
     }
 };
 
-Model* modelIntegrator = rack::createModel<Integrator, IntegratorWidget>("Integrator");
+Model* modelIntegral = rack::createModel<Integral, IntegralWidget>("Integral");
