@@ -29,7 +29,10 @@ struct LoudnessMeter : engine::Module {
         RESET_INPUT,
         NUM_INPUTS
     };
-    enum OutputIds { NUM_OUTPUTS };
+    enum OutputIds {
+        OVERSHOOT_OUTPUT,
+        NUM_OUTPUTS
+    };
     enum LightIds { NUM_LIGHTS };
 
     // Enum for processing modes
@@ -92,6 +95,7 @@ struct LoudnessMeter : engine::Module {
         configInput(AUDIO_INPUT_L, "Audio L / Mono");
         configInput(AUDIO_INPUT_R, "Audio R");
         configInput(RESET_INPUT, "Reset");
+        configOutput(OVERSHOOT_OUTPUT, "Overshoot");
         configParam(TARGET_PARAM, -36.f, 0.f, -23.f, "Target loudness", " LUFS");
         configParam(RESET_PARAM, 0.f, 1.f, 0.f, "Reset");
 
@@ -460,6 +464,13 @@ struct LoudnessMeter : engine::Module {
         if (bufferPosition >= PROCESSING_BLOCK_FRAMES) {
             processBlockBuffer();
         }
+
+        float targetValue = params[TARGET_PARAM].getValue();
+        float overshoot = momentaryLufs - targetValue;
+        float overshootVoltage = overshoot / 20.f * 10.f;
+
+        overshootVoltage = clamp(overshootVoltage, -10.f, 10.f); // Ensure within -10V to +10V
+        outputs[OVERSHOOT_OUTPUT].setVoltage(overshootVoltage);
     }
 
     json_t* dataToJson() override {
