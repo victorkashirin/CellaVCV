@@ -113,7 +113,6 @@ struct Resonators : Module {
         }
     }
 
-    /* ---------------------- cubic‑Lagrange read ----------------------- */
     float readDelayBuffer(int v, float d) {
         float read = delayIndices[v] - d;
         while (read < 0) read += bufferSize;
