@@ -14,4 +14,5 @@ void init(Plugin *p) {
     p->addModel(modelCognitiveShift);
     p->addModel(modelLoudnessMeter);
     p->addModel(modelLoud);
+    p->addModel(modelIntegral);
 }

@@ -14,3 +14,4 @@ extern Model *modelBytebeat;
 extern Model *modelCognitiveShift;
 extern Model *modelLoudnessMeter;
 extern Model *modelLoud;
+extern Model *modelIntegral;
