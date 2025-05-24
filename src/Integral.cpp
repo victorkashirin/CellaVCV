@@ -84,9 +84,7 @@ struct Integral : rack::Module {
     };
 
     struct IntegrationRateQuantity : rack::ParamQuantity {
-        // static constexpr float baseTau[3] = {2.f, 0.25f, 0.03125f};      // LO, MID, HI
-        static constexpr float baseTau[3] = {5.f, 0.25f, 0.00125f};  // LO, MID, HI
-        // static constexpr float baseTau[3] = {0.03125f, 0.00125f, 0.0002f};  // LO, MID, HI
+        static constexpr float baseTau[3] = {5.f, 0.25f, 0.00125f};      // LO, MID, HI
         const float minRate = 1.f / (baseTau[0] * std::pow(2.f, -5.f));  // Max Tau -> Min Rate
         const float maxRate = 1.f / (baseTau[2] * std::pow(2.f, 5.f));   // Min Tau -> Max Rate
 
@@ -292,6 +290,8 @@ struct Integral : rack::Module {
         if (clipValueJ) clipValue = json_integer_value(clipValueJ);
     }
 };
+
+constexpr float Integral::IntegrationRateQuantity::baseTau[3];
 
 struct IntegralWidget : rack::ModuleWidget {
     IntegralWidget(Integral* m) {
