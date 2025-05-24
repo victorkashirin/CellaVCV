@@ -31,6 +31,22 @@ struct VCVButtonHuge : app::SvgSwitch {
     }
 };
 
+struct VCVSwitchTiny : app::SvgSwitch {
+    VCVSwitchTiny() {
+        momentary = false;
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonTiny_0.svg")));
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonTiny_1.svg")));
+    }
+};
+
+struct VCVButtonTiny : app::SvgSwitch {
+    VCVButtonTiny() {
+        momentary = true;
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonTiny_0.svg")));
+        this->addFrame(Svg::load(asset::plugin(pluginInstance, "res/components/VCVButtonTiny_1.svg")));
+    }
+};
+
 template <typename TBase = GrayModuleLightWidget>
 struct TGoldLight : TBase {
     TGoldLight() {
