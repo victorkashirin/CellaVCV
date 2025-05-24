@@ -70,10 +70,26 @@ struct TwoStepWidget : ModuleWidget {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/2Step.svg"), asset::plugin(pluginInstance, "res/2Step-dark.svg")));
 
-        addChild(createWidget<ScrewGrey>(Vec(0, 0)));
-        addChild(createWidget<ScrewGrey>(Vec(0, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
+        float col1 = 15.f;
+        float col2 = 45.f;
+        float row1 = 53.4f;
+        float row2 = 104.36f;
+        float step = 113.35f;
 
-  
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1), module, TwoStep::LOW1_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1), module, TwoStep::HIGH1_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step), module, TwoStep::LOW2_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step), module, TwoStep::HIGH2_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step * 2), module, TwoStep::LOW3_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step * 2), module, TwoStep::HIGH3_PARAM));
+
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2), module, TwoStep::GATE1_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step), module, TwoStep::GATE2_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step * 2), module, TwoStep::GATE3_INPUT));
+
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2), module, TwoStep::OUT1_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step), module, TwoStep::OUT2_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step * 2), module, TwoStep::OUT3_OUTPUT));
     }
 };
 
