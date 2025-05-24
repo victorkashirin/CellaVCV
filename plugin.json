@@ -119,12 +119,12 @@
     {
       "slug": "Integral",
       "name": "Integral",
-      "description": "Signal integrator, essential for analog computing, chaotic and cybernetic patches",
+      "description": "Signal integrator, essential for feedback, chaotic and cybernetic patches",
       "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#integral",
-      "keywords": "cybernetic chaos feedback",
+      "keywords": "cybernetic chaos feedback analog computing",
       "tags": [
         "Utility",
-        "Visual"
+        "Sample and hold"
       ]
     }
   ]

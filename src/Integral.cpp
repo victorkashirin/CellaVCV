@@ -84,9 +84,11 @@ struct Integral : rack::Module {
     };
 
     struct IntegrationRateQuantity : rack::ParamQuantity {
-        static constexpr float baseTau[3] = {2.f, 0.25f, 0.03125f};      // LO, MID, HI
-        const float minRate = 1.f / (baseTau[0] * std::pow(2.f, -4.f));  // Max Tau -> Min Rate
-        const float maxRate = 1.f / (baseTau[2] * std::pow(2.f, 4.f));   // Min Tau -> Max Rate
+        // static constexpr float baseTau[3] = {2.f, 0.25f, 0.03125f};      // LO, MID, HI
+        static constexpr float baseTau[3] = {5.f, 0.25f, 0.00125f};  // LO, MID, HI
+        // static constexpr float baseTau[3] = {0.03125f, 0.00125f, 0.0002f};  // LO, MID, HI
+        const float minRate = 1.f / (baseTau[0] * std::pow(2.f, -5.f));  // Max Tau -> Min Rate
+        const float maxRate = 1.f / (baseTau[2] * std::pow(2.f, 5.f));   // Min Tau -> Max Rate
 
         std::string getDisplayValueString() override {
             if (!module) {
@@ -148,10 +150,10 @@ struct Integral : rack::Module {
     Integral() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
 
-        configParam<IntegrationRateQuantity>(RATE_PARAM, -4.f, 4.f, 0.f, "Integration rate", "");
+        configParam<IntegrationRateQuantity>(RATE_PARAM, -5.f, 5.f, 0.f, "Integration rate", "");
         configParam<DecayTimeQuantity>(LEAK_PARAM, 0.f, 1.f, 0.f, "Decay time");
 
-        configParam(INIT_PARAM, 0.f, 10.f, 5.f, "Init value", "V");
+        configParam(INIT_PARAM, -10.f, 10.f, 10.f, "Init value", "V");
         configButton(INIT_BUTTON_PARAM, "Init");
         getParamQuantity(INIT_BUTTON_PARAM)->description =
             "Adds value of the Init knob to the input\n"
@@ -163,7 +165,7 @@ struct Integral : rack::Module {
         configParam(LEAK_CV_PARAM, -1.f, 1.f, 0.f, "Leak CV", "%", 0.f, 100.f);
         configButton(GATE_PARAM, "Integrate on gate low/high");
 
-        configSwitch(CLIP_PARAM, 0.f, 1.f, 1.f, "Clip", {"Fold", "Clip"});
+        configSwitch(CLIP_PARAM, 0.f, 2.f, 2.f, "Clip", {"Reset", "Fold", "Clip"});
         configButton(RESET_PARAM, "Reset");
 
         configInput(RATE_CV_INPUT, "Rate CV");
@@ -218,15 +220,15 @@ struct Integral : rack::Module {
 
         float rate = params[RATE_PARAM].getValue();
         rate += (inputs[RATE_CV_INPUT].isConnected()
-                     ? params[RATE_CV_PARAM].getValue() * inputs[RATE_CV_INPUT].getVoltage() / 5.f
+                     ? params[RATE_CV_PARAM].getValue() * inputs[RATE_CV_INPUT].getVoltage() / 2.f
                      : 0.f);
         const float effectiveTau = IntegrationRateQuantity::baseTau[rangeSel] * std::pow(2.f, -rate);
 
         float leakPos = params[LEAK_PARAM].getValue();
-        if (inputs[LEAK_CV_INPUT].isConnected())
-            leakPos = clamp(leakPos +
-                                params[LEAK_CV_PARAM].getValue() * inputs[LEAK_CV_INPUT].getVoltage() / 5.f,
-                            0.f, 1.f);
+        if (inputs[LEAK_CV_INPUT].isConnected()) {
+            float leakCV = params[LEAK_CV_PARAM].getValue() * inputs[LEAK_CV_INPUT].getVoltage() / 10.f;
+            leakPos = clamp(leakPos + leakCV, 0.f, 1.f);
+        }
 
         const float tauLeak = DecayTimeQuantity::getTimeConstantForValue(leakPos);
 
@@ -255,12 +257,14 @@ struct Integral : rack::Module {
 
         float clipValueVolt = 5.f * (clipValue + 1);
         const int clipSel = (int)std::round(params[CLIP_PARAM].getValue());
-        if (clipSel == 1) {
+        if (clipSel == 2) {
             y = clamp(y, -clipValueVolt, clipValueVolt);
+        } else if (clipSel == 0 && abs(y) > clipValueVolt) {
+            y = 0.f;
         }
 
         float outputValue = y;
-        if (clipSel == 0) {
+        if (clipSel == 1) {
             outputValue = fold(y, -clipValueVolt, clipValueVolt);
         }
         outputs[OUT_OUTPUT].setVoltage(outputValue);
@@ -304,7 +308,7 @@ struct IntegralWidget : rack::ModuleWidget {
         addParam(createParamCentered<RoundBlackKnob>(Vec(67.5, 104.35), module, Integral::INIT_PARAM));
 
         addParam(createParamCentered<CKSSThree>(Vec(16.54, 162.66), m, Integral::RANGE_PARAM));
-        addParam(createParamCentered<CKSS>(Vec(54.74, 162.66), m, Integral::CLIP_PARAM));
+        addParam(createParamCentered<CKSSThree>(Vec(54.74, 162.66), m, Integral::CLIP_PARAM));
 
         addParam(createParamCentered<Trimpot>(Vec(15.f, 203.79), module, Integral::RATE_CV_PARAM));
         addParam(createLightParamCentered<VCVLightButton<MediumSimpleLight<GoldLight>>>(Vec(45, 203.79), module, Integral::GATE_PARAM, Integral::GATE_LIGHT));

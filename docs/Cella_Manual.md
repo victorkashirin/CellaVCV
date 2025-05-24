@@ -23,7 +23,7 @@ Adding an accent to the envelope means that the peak point of the envelope will 
 
 <img src="images/AccentChart.png" alt="Cella Rich Accents" style="height: 200px;">
 
-#### **Key features / controls**
+### **Key features / controls**
 
 * **ATTACK** and **DECAY** set the rise and fall times of the envelope, ranging from 1ms to 10s.
 * **SHAPE** interpolates between a linear and an exponential envelope.
@@ -31,21 +31,21 @@ Adding an accent to the envelope means that the peak point of the envelope will 
 * **LEVEL** sets the baseline amplitude of the envelope (0%–100%, corresponding to 0V–10V).
 * **ACCENT** sets the maximum amplitude of the accent added to the baseline. Note that this amplitude is applied to the remaining amplitude headroom after the baseline is set. For example, if the baseline amplitude is set to 60% (peaking at 6V), an ACCENT level of 100% will add up to 4V of additional peak amplitude. With an ACCENT level of 50%, the maximum accent amplitude will be 2V, and the peak envelope will be at 8V (BASELINE \+ ACCENT).
 
-#### **Inputs**
+### **Inputs**
 
 * **Ascending/Descending button/input** in the center of the module sets the direction of change for the stepped accent: either from the lowest to highest level or vice versa.
 * **TRIG** accepts triggers and activates the envelope.
 * **ACCENT** accepts triggers, gates, and any CV signal between 0V and 10V. A high input at the ACCENT tells the module to generate an accent, and the incoming signal modulates the accent level, allowing for any desired accent pattern.
 * **ATT** and **DEC** allow modulation of Attack and Decay.
 
-#### **Outputs**
+### **Outputs**
 
 * **ACC** outputs the current accent level. Note that this output is not scaled by the ACCENT knob, allowing external signal modulation while the ACCENT knob is set to zero.
 * **ENV** outputs the resulting envelope.
 
 A unique feature of the Rich module is its tolerance for delay between the signal and accent triggers. In most modules, even a delay of 1 sample between the envelope trigger and accent trigger results in a missed accent. Such delays can occur if the number of cables between the clock source and trigger inputs differs, as each cable delays the signal by one sample. By default, Rich captures an accent trigger even if it occurs 5 samples before or after the envelope trigger. This window can be increased to ±10 samples or switched off in the context menu.
 
-#### **Context Menu Options**
+### **Context Menu Options**
 
 * **Attack Curve:** Choose between Logarithmic or Exponential curves for the attack section of the envelope.
 * **Exponent Function:** Choose between quadratic, cubic, and quartic functions for snappier envelopes.
@@ -67,7 +67,7 @@ While you can use this module for filtering sound sources, it is best suited for
 
 Under the hood, the module uses the DSP core from Audible Instruments' Liquid Filter but adds the option to use an 18dB 3-pole filter output, which was used by Rob Hordijk in his TwinPeak filter.
 
-#### **Controls**
+### **Controls**
 
 Here we’ll explain only non-obvious parameters:
 
@@ -78,7 +78,7 @@ Here we’ll explain only non-obvious parameters:
 * **XFM-B**  controls how much of the output from filter B is sent to modulate cut-off frequency of filter A.
 * Input to **FM-A CV** is normalled to input **FM-B CV**, so you can use one cable to modulate both filters.
 
-#### **Basic Use**
+### **Basic Use**
 
 <img src="images/TwinPeaksExample.png" alt="Twin Peaks Example" style="height: 380px;">
 
@@ -92,7 +92,7 @@ Send any stepped output to the input – for example, from VCV’s random module
 
 Bezier is a smooth random voltage generator that uses Bezier curves for interpolation between consecutive values. These curves allow the generation of lines with various characteristics, from smooth to spiky, using a limited set of parameters. The functionality is heavily inspired by the module *Random Bezier Waves* / *ADDAC507*, which **ADDAC** designed in collaboration with Rijnder Kamerbeek aka **Monotrail**.
 
-#### **General Algorithm**
+### **General Algorithm**
 
 1. **Random Value Generation**: At a frequency defined by the **FREQ** parameter, a new random value between \-5V and 5V is generated. Each time this value is generated, a trigger signal is sent to the **TRIG** port. By default, the random value is drawn from a uniform distribution, meaning there is no bias in the distribution of the values. Alternatively, it can be drawn from a normal distribution, which tends to generate values closer to the midpoint rather than the extremes. This behavior can be adjusted via the context menu.
 2. **Interpolation**: The module interpolates between the previous value and the newly generated one according to the curve parameterized by the **CURVE** knob. When the knob is set to the 12 o'clock position, the interpolation is linear. Turning it fully clockwise results in a rounded curve, while turning it fully counterclockwise produces a spiked shape. The result of the interpolation is output through the **OUT** port, while an inverted signal (relative to the **OFFSET**) is sent to the **OUT–** port. Additionally, the **GATE** output continuously sends a signal equal to the maximum value between 0 and the generated curve.
@@ -104,13 +104,13 @@ Additional Details:
 * The generated signal can be scaled using the **LEVEL** knob, which attenuates the signal from 0% to 100%.
 * The frequency cannot be synchronized with the outside clock.
 
-#### **Modulation**
+### **Modulation**
 
 Both the frequency and level can be modulated with an external signal. By default, modulation is sampled and applied only when a new random value is generated. However, this behavior can be modified via context menu switches, allowing continuous modulation of frequency and/or level.
 
 Frequency modulation is unrestricted, while level modulation, when applied externally, is typically clipped to the 0% to 100% range. This clipping behavior can also be adjusted in the context menu.
 
-#### **Clipping**
+### **Clipping**
 
 Since the output is limited to the \-5V to 5V range, applying an offset may cause the resulting curve to clip. This clipping is handled differently based on the selected mode:
 
@@ -118,7 +118,7 @@ Since the output is limited to the \-5V to 5V range, applying an offset may caus
 * **FOLD**: The curve folds back from the clipping point.
 * **WRAP**: The curve jumps to the opposite limit and continues from there.
 
-#### **Context Menu Options**
+### **Context Menu Options**
 
 * **Continuous Level Modulation / Continuous Frequency Modulation**: When off, modulation signal is sampled only when a new random value is drawn. When on, modulation is applied continuously.
 * **Asymmetric Curve**: When enabled, the curve will have asymmetry, starting smoothly and ending spiky, or vice-versa, depending on the **CURVE** parameter.
@@ -140,7 +140,7 @@ Euler is a simple module designed to measure the rate of change of an incoming s
 
 If you feed square wave (see right image above), the resulting output would be short triggers of 10V and \-10V, which correspond to slope rising or falling vertically at 90° and \-90° angles, respectively.
 
-#### **Sensitivity and FREQ parameter**
+### **Sensitivity and FREQ parameter**
 
 Let’s clarify the function of the **FREQ** parameter in the Euler module:
 
@@ -163,9 +163,13 @@ Parameter **SMOOTH** applies smoothing over a set time period – up to 1 second
 
 <img src="images/Integral.png" alt="Cella - Integral" style="height: 380px;">
 
-The **Integral** module is a signal integrator. In simple terms, one can think of it like a bucket: it accumulates or "charges up" when a positive voltage is fed into its input, and it subtracts or "loses charge" when a negative voltage is applied. The output voltage reflects this accumulated total. If the input is zero, the output (ideally) remains constant, unless a "leak" is introduced.
+The **Integral** module is a signal integrator. In simple terms, one can think of it like a bucket: it accumulates or "charges up" when a positive voltage is fed into its input, and it subtracts or "loses charge" when a negative voltage is applied. The output voltage reflects this accumulated total. If the input is zero, the output remains constant, unless a "leak" is introduced.
 
-#### **Key Features / Controls**
+In other words, its like a memory cell: it can store the value, similar to flip-flop circuit or sample-and-hold, although value update mechanism is different.
+
+Integrator is a key component of analog computing circuits, including modelling of chaotic equations. It can also be used in cybernetic synthesis, see more in Nathan Ho's [post](https://nathan.ho.name/posts/cybernetic-synthesis/). But it can have many general applications, especially in generative music.
+
+### **Key Features / Controls**
 
 * **RATE:** This knob, in conjunction with the three-position rate range switch (see below), sets the integration rate in Hertz (Hz). This rate determines how many volts the output will change per second for a 1 Volt DC input. For example, if the effective rate is set to 1 Hz, a constant +1V input will cause the output to rise by 1V per second (assuming no leak). A -1V input would cause it to fall by 1V per second. Turning the knob clockwise increases this rate.
 
@@ -178,13 +182,14 @@ The **Integral** module is a signal integrator. In simple terms, one can think o
 *  **INIT Knob:** Sets the voltage value (0V to +10V) that is added to the input when the INIT button is pressed.
 
 *  **Rate Range Switch:** sets the coarse range for the integration **RATE** knob, determining the effective integration rate in Hz. The approximate rate ranges (with the rate knob from fully CCW to fully CW) and the rate at the center (default) position of the rate knob are:
-    *   **H:** 2 Hz to 512 Hz. (Center: 32 Hz)
-    *   **M:** 0.25 Hz to 64 Hz. (Center: 4 Hz)
-    *   **L:** 0.03 Hz to 8 Hz. (Center: 0.5 Hz)
+    *   **H:** 25 Hz to 25.6 kHz. (Center: 800 Hz)
+    *   **M:** 0.125 Hz to 128 Hz. (Center: 4 Hz)
+    *   **L:** 6.25 mHz to 6.4 Hz. (Center: 0.2 Hz)
 
 *  **Clip Behavior Switch:** Determines the behavior of the output signal when it reaches its maximum or minimum voltage limits (configurable via the context menu, ±5V or ±10V).
     *   **CLIP:** The output signal is hard-clipped; it will not exceed the set voltage limits.
     *   **FOLD:** When the output attempts to exceed a limit, it "folds" back, reversing direction and staying within the voltage boundaries.
+    *   **RESET:** When the output reaches the limit, integration state resets to 0V.
 
 *  **Gate Input & Mode Button:**
     *   **Gate Input:** Accepts a gate or trigger signal to control when integration occurs.
@@ -208,7 +213,7 @@ The **Integral** module is a signal integrator. In simple terms, one can think o
 
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in the popular DAW.
 
-#### **Key Features / Controls**
+### **Key Features / Controls**
 
 * **PITCH I-IV**: Sets the pitch for each of the four resonators. The pitch can be adjusted from -54 to +54 semitones relative to middle C (C4).
 * **GAIN I-IV**: Controls the amplitude (gain) for each resonator, ranging from 0% to 100%.
@@ -217,12 +222,12 @@ The **Integral** module is a signal integrator. In simple terms, one can think o
 * **AMP**: Sets the overall amplitude of the output signal.
 * **MIX**: Blends the dry input signal with the wet resonated signal.
 
-#### **Inputs**
+### **Inputs**
 
 * **IN**: Accepts the incoming audio signal to be processed by the resonators.
 * **PITCH I-IV**: Accepts 1V/octave pitch control signals for each resonator. The first input is polyphonic: first four channels will be routed to respective resonators' pithes.
 
-#### **Outputs**
+### **Outputs**
 
 * **WET**: Outputs the wet (resonated) signal. This output is polyphonic, where outputs from four resonators occupy channels 1-4.
 * **OUT**: Outputs the final mixed signal, combining the dry input and wet resonated signals.
@@ -233,7 +238,7 @@ The **Integral** module is a signal integrator. In simple terms, one can think o
 
 **Bytebeat** is a bytebeat evaluator that allows users to create complex audio signals using bytebeat expressions. The module features several parameters and inputs to modulate the bytebeat expressions in real-time. It also supports various bit-depth of the output.
 
-#### **Bytebeat Expressions**
+### **Bytebeat Expressions**
 
 Bytebeat expression is a simple C-compatible code that generates audio waveforms based on combination of various operators, integer values and the value of a time variable `t`.
 
@@ -249,7 +254,7 @@ Supported operators:
 For comprehensive introduction to bytebeats I recommend [Beginners Guide by The Tuesday Night Machines](https://nightmachines.tv/downloads/Bytebeats_Beginners_Guide_TTNM_v1-5.pdf).
 You can also find and test a lot of bytebeats online [here](https://dollchan.net/bytebeat/) and [here](https://bytebeat.demozoo.org/).
 
-#### **Key Features / Controls**
+### **Key Features / Controls**
 * **Editor**: Bytebeat editor. If multiline option is off, expression is submitted with **Enter**, otherwise with **Shift+Enter**.
 * **FREQ**: Sets the base frequency of the bytebeat expression. Defaults to traditional 8000 Hz.
 * Parameters **a**, **b**, **c**: Adjustable parameters that you can use within bytebeat expression, from range [0, 128].
@@ -257,25 +262,25 @@ You can also find and test a lot of bytebeats online [here](https://dollchan.net
 * **RUN**: Button to start/stop the bytebeat generation.
 * **RESET**: Button to reset the bytebeat sequence.
 
-#### **Inputs**
+### **Inputs**
 * **a CV**, **b CV**, **c CV**: CV input for parameters **a**, **b**, **c**.
 * **RUN**: CV input to start/stop the bytebeat generation.
 * **RESET**: CV input to reset the bytebeat sequence, sets **t** to 0.
 * **CLOCK**: Clock input to synchronize the bytebeat generation. When cable is connected, **FREQ** sets clock multiplier.
 
-#### **Outputs**
+### **Outputs**
 
 * **Audio**: Audio output of the bytebeat expression.
 
-#### **Lights**
+### **Lights**
 * **ERR** lights up if entered expression is incorrect.
 * **MOD** lights up if expression has been modified but not submitted.
 
-#### Context Menu Options
+### Context Menu Options
 - **Output Range**: Select the output voltage range from options -2.5V..2.5V, -5V..5V, 0..5V, 0..10V.
 - **Multiline**: Enable or disable multiline mode for the bytebeat expression input.
 
-#### **Example Bytebeat Expressions**
+### **Example Bytebeat Expressions**
 * `t*(42&t>>10)`
 * `t+(t&t^t>>6)-t*(t>>9&(t%16?2:6)&t>>9)`
 * `(t|(t>>9|t>>7))*t&(t>>11|t>>9)`
@@ -295,7 +300,7 @@ Cognitive Shift is an advanced 8-bit digital shift register module for VCV Rack.
 
 Main differentiator from other implementations is the ability to output clocks, triggers or gates per each step without merging consecutive values together, and yet allow for self-patching. This was inspised by shift register behaviour of "Double Knot" instrument by Lorre Mill.
 
-## Core Concept: The Shift Register
+### Core Concept: The Shift Register
 
 At its heart, Cognitive Shift is an 8-bit memory bank.
 
@@ -304,7 +309,7 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
 3.  **Shifting:** The determined input bit becomes the new state of Bit 1. The previous state of Bit 1 moves to Bit 2, Bit 2 moves to Bit 3, and so on, up to Bit 7 moving to Bit 8. The previous state of Bit 8 is discarded.
 4.  **Output:** The state of each of the 8 bits (0 or 1) is available at the individual **BIT 1-8** outputs and is used to generate the various DAC-based CV outputs.
 
-## Features
+### Features
 
 *   8-bit digital shift register.
 *   Clock-driven operation via the **CLOCK** input.
@@ -324,9 +329,9 @@ At its heart, Cognitive Shift is an 8-bit memory bank.
 *   Intelligent self-patching detection for stable feedback loops.
 *   Context menu options for Bit Output Mode, Logic Type selection, and Input Override behavior.
 
-## Operational Details
+### Operational Details
 
-### Input Logic Determination
+#### Input Logic Determination
 
 On each rising edge of the **CLOCK** input, Cognitive Shift determines the next bit (Bit 1) to enter the shift register using the following priority-based logic:
 
@@ -349,7 +354,7 @@ On each rising edge of the **CLOCK** input, Cognitive Shift determines the next 
 
 **Note:** Inputs (**DATA**, **LOGIC**, **XOR**) influence the determination process only when cables are connected. Unconnected inputs are effectively ignored.
 
-### Logic Types (Context Menu)
+#### Logic Types (Context Menu)
 
 The logic type determines how the **LOGIC** input combines with the DATA input bit. This can be configured via the context menu "Logic types":
 
@@ -365,7 +370,7 @@ Selecting different logic types allows the creation of diverse and complex patte
 **Tip**: you can see currently selected logic type in the tooltip if you hover mouse over LOGIC port.
 
 
-### Bit Output Modes (Context Menu)
+#### Bit Output Modes (Context Menu)
 
 You can change how the individual **BIT 1-8** outputs behave by right-clicking the module panel and selecting an option under "Bit output mode":
 
@@ -373,7 +378,7 @@ You can change how the individual **BIT 1-8** outputs behave by right-clicking t
 *   **Gates:** When a bit is High, its output jack emits a constant high voltage of +10V. When the bit is Low, the output is 0V. Note that consecutive positive bits generate one long gate rather than few individual ones.
 *   **Triggers:** When a bit is High *and* a **CLOCK** pulse arrives, its output jack emits a short trigger pulse.
 
-## Self-Patching
+### Self-Patching
 
 Cognitive Shift is designed to handle self-patching gracefully. This means you can connect one of its own outputs (e.g., **BIT 3**) to one of its inputs (e.g., **DATA**, **XOR**, **LOGIC**) without causing instability common in digital feedback loops.
 
@@ -390,7 +395,7 @@ Self-patching allows Cognitive Shift to generate complex, evolving, and often ps
 **Important disclaimer**
 Due to complex logic of handling self-patching, stacked cables on DATA, XOR and LOGIC won't be handled properly. If you need to merge few sources of data, program LOGIC input to `OR` mode.
 
-## Patch Ideas
+### Patch Ideas
 
 *   **Basic Sequencer:** Use **BIT 1-8** outputs (in Gate mode) to trigger drum sounds or envelopes for an 8-step sequence. Manually enter patterns with **WRITE**/**ERASE**, or feed a gate pattern into **DATA**.
 *   **CV Sequencer:** Use the **DAC** outputs to generate stepped CV sequences for pitch or modulation.
@@ -434,12 +439,12 @@ The way the connected audio inputs are interpreted and processed depends on the 
 
 **Why Mode Matters:** The selected mode directly influences the final loudness value. Because the ITU-R BS.1770 standard sums the energy from both channels for stereo analysis (but only uses the single channel for mono), processing the same mono audio signal in 'Stereo' mode will typically result in a reading approximately 3 LUFS higher than processing it in 'Mono' mode. For uncorrelated stereo signal that difference might be higher or lower.
 
-## Controls
+### Controls
 
 *   **Reset Button**: Manually resets all integrated, maximum, and historical measurements when clicked.
 *   **Target Loudness**: Sets the target loudness level in LUFS (Loudness Units Full Scale), ranging from -36 LUFS to 0 LUFS (default: -23 LUFS). This primarily affects the visualization on the Momentary Loudness bar, indicating levels below (white) or above (red) the target. On **Loud**, target loudness can be adjusted with a slider in the context menu.
 
-## Measurements & Displays
+### Measurements & Displays
 
 The module features a large display area showing several loudness metrics:
 
@@ -461,7 +466,7 @@ The module features a large display area showing several loudness metrics:
 
 9.  **TRUE PEAK MAX (TPMAX)**: Displays the maximum true peak level (accounting for inter-sample peaks) recorded on either channel since the last reset. The value turns red if it exceeds -0.5 dBTP, indicating potential clipping after D/A conversion.
 
-## Context Menu
+### Context Menu
 
 Right-clicking the panel opens the context menu, which includes:
 
