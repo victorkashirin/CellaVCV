@@ -15,3 +15,4 @@ extern Model *modelCognitiveShift;
 extern Model *modelLoudnessMeter;
 extern Model *modelLoud;
 extern Model *modelIntegral;
+extern Model *model2Step;

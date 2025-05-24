@@ -126,6 +126,16 @@
         "Utility",
         "Sample and hold"
       ]
+    },
+    {
+      "slug": "2Step",
+      "name": "2Step",
+      "description": "Utility module with 2-step CV generator",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#2step",
+      "keywords": "cv sequencer",
+      "tags": [
+        "Utility"
+      ]
     }
   ]
 }
