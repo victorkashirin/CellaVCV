@@ -126,6 +126,18 @@
         "Utility",
         "Sample and hold"
       ]
+    },
+    {
+      "slug": "2State",
+      "name": "2State",
+      "description": "Combination of dual constant CV generator and a voltage-controlled switch",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#2state",
+      "keywords": "cv sequencer triple latch",
+      "tags": [
+        "Utility",
+        "Switch",
+        "Sequencer"
+      ]
     }
   ]
 }

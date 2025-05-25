@@ -478,3 +478,48 @@ Right-clicking the panel opens the context menu, which includes:
 *   **Short-Term Loudness**:
     *   **Enabled (Default)**: Calculates and displays Short-Term Loudness and PSR.
     *   **Disabled**: Disables Short-Term Loudness and PSR calculations and display. This can slightly reduce CPU usage if these metrics are not needed.
+
+
+# **2State**
+
+<img src="images/2State.png" alt="Cella - 2STATE" style="height: 380px;">
+
+**2State** is a triple voltage-controlled switch, allowing you to define two distinct voltage levels per channel and switch between them using gate signals or manual buttons. Each section can operate in either a momentary 'GATE' mode or a 'LATCH' mode, where a trigger toggles the output state. Its cascading gate input behavior allows for synchronized control across multiple sections.
+
+### **Key Features / Controls**
+
+*   **LOW** and **HIGH** knobs: For each of the three identical sections, these knobs set the two possible output voltage levels. The range of these voltages (e.g., -10V to +10V, 0V to +5V) is configured globally via the context menu.
+    *   When the controlling gate is OFF (or the section is latched to its 'low' state), the output voltage is determined by the **LOW** knob.
+    *   When the controlling gate is ON (or the section is latched to its 'high' state), the output voltage is determined by the **HIGH** knob.
+*   **GATE** button: A momentary button on each section that, when pressed, manually forces its section's gate state to ON.
+*   **LATCH** switch: Toggles the operational mode for each section:
+    *   **OFF**: The output directly follows the state of the incoming gate signal (or **GATE** button press). When the gate is high, it outputs the voltage set by the **HIGH** knob; when low, it outputs the voltage set by the **LOW** knob.
+    *   **ON** (default): Each rising edge of the gate signal (or **GATE** button press) toggles the output state between the voltage set by the **LOW** knob and the voltage set by the **HIGH** knob.
+
+### **Inputs**
+
+*   **GATE**: Accepts a gate or trigger signal. A voltage of 2V or higher is interpreted as "ON".
+    *   **Cascading Gate Behavior**: If a section's own **GATE** input (jack or button) is not actively receiving a signal, it will then check the **GATE** inputs/buttons of the preceding sections. If *any* preceding section's input (jack or button) is active, the current section will also activate. For example, if you send a gate to the top section's **GATE** input, and the middle and bottom sections' **GATE** inputs are unconnected, all three sections will respond to the top input.
+
+### **Outputs**
+
+*   **OUT**: Outputs the active voltage, determined by the state of the **GATE** input (or **GATE** button) and the selected **LATCH** mode, using the voltages defined by the **LOW** and **HIGH** knobs.
+
+### **Context Menu Options**
+
+*   **Range**: Sets the global voltage range for all **LOW** and **HIGH** knobs across all three sections. This option controls how the knob positions map to the actual output voltages. Available ranges include:
+    *   `+/-10V`: Knobs map from -10V to +10V.
+    *   `+/-5V`: Knobs map from -5V to +5V.
+    *   `+/-3V`: Knobs map from -3V to +3V.
+    *   `+/-2V`: Knobs map from -2V to +2V.
+    *   `+/-1V`: Knobs map from -1V to +1V.
+    *   `0V-10V`: Knobs map from 0V to +10V.
+    *   `0V-5V`: Knobs map from 0V to +5V.
+    *   `0V-3V`: Knobs map from 0V to +3V.
+    *   `0V-2V`: Knobs map from 0V to +2V.
+    *   `0V-1V`: Knobs map from 0V to +1V.
+
+### **Patch Ideas**
+*   **Simple A/B Switch:** Use a single section to switch between two fixed voltage levels for pitch or modulation, triggered by a gate sequence.
+*   **Triggered CV Sequencer:** In **LATCH** mode, feed a series of triggers into the **GATE** input. Set the **LOW** and **HIGH** knobs to different values.
+*   **Cascading Rhythms:** Utilize the cascading gate behavior by feeding a single gate into the top section's **GATE** input and leaving the other sections' inputs unpatched. Then, use different **LATCH** settings for each section to create complex polyrhythmic or evolving sequences from a single clock source.
