@@ -51,12 +51,12 @@ struct TwoStep : Module {
         configSwitch(LATCH1_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
         configSwitch(LATCH2_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
         configSwitch(LATCH3_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
-        configParam(LOW1_PARAM, -10.0f, 10.0f, 0.0f, "Low 1");
-        configParam(HIGH1_PARAM, -10.0f, 10.0f, 0.0f, "High 1");
-        configParam(LOW2_PARAM, -10.0f, 10.0f, 0.0f, "Low 2");
-        configParam(HIGH2_PARAM, -10.0f, 10.0f, 0.0f, "High 2");
-        configParam(LOW3_PARAM, -10.0f, 10.0f, 0.0f, "Low 3");
-        configParam(HIGH3_PARAM, -10.0f, 10.0f, 0.0f, "High 3");
+        configParam(LOW1_PARAM, -10.0f, 10.0f, 0.0f, "Low 1", "V");
+        configParam(HIGH1_PARAM, -10.0f, 10.0f, 0.0f, "High 1", "V");
+        configParam(LOW2_PARAM, -10.0f, 10.0f, 0.0f, "Low 2", "V");
+        configParam(HIGH2_PARAM, -10.0f, 10.0f, 0.0f, "High 2", "V");
+        configParam(LOW3_PARAM, -10.0f, 10.0f, 0.0f, "Low 3", "V");
+        configParam(HIGH3_PARAM, -10.0f, 10.0f, 0.0f, "High 3", "V");
         configInput(GATE1_INPUT, "Gate 1");
         configInput(GATE2_INPUT, "Gate 2");
         configInput(GATE3_INPUT, "Gate 3");
@@ -123,8 +123,8 @@ struct TwoStep : Module {
                 highLightOn = gate == true;
             }
 
-            lights[LOW1_LIGHT + i].setBrightness(lowLightOn);
-            lights[HIGH1_LIGHT + i].setBrightness(highLightOn);
+            lights[LOW1_LIGHT + i].setBrightness(lowLightOn*0.5f);
+            lights[HIGH1_LIGHT + i].setBrightness(highLightOn*0.5f);
         }
     }
 };
