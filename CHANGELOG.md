@@ -4,6 +4,7 @@
 
 New modules:
 * Integral - signal integrator.
+* 2State - combination of dual constant CV generator and a voltage-controlled switch.
 
 Updates:
 * Resonators - fix highpass filter cutoff setting, use cubic interpolation.

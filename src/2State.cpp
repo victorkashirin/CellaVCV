@@ -62,9 +62,9 @@ struct TwoState : Module {
         configButton(GATE1_PARAM, "Gate 1");
         configButton(GATE2_PARAM, "Gate 2");
         configButton(GATE3_PARAM, "Gate 3");
-        configSwitch(LATCH1_PARAM, 0.0f, 1.0f, 0.0f, "Latch 1", {"Disabled", "Enabled"});
-        configSwitch(LATCH2_PARAM, 0.0f, 1.0f, 0.0f, "Latch 2", {"Disabled", "Enabled"});
-        configSwitch(LATCH3_PARAM, 0.0f, 1.0f, 0.0f, "Latch 3", {"Disabled", "Enabled"});
+        configSwitch(LATCH1_PARAM, 0.0f, 1.0f, 1.0f, "Latch 1", {"Disabled", "Enabled"});
+        configSwitch(LATCH2_PARAM, 0.0f, 1.0f, 1.0f, "Latch 2", {"Disabled", "Enabled"});
+        configSwitch(LATCH3_PARAM, 0.0f, 1.0f, 1.0f, "Latch 3", {"Disabled", "Enabled"});
         configParam<RangeQuantity>(LOW1_PARAM, -1.0f, 1.0f, 0.0f, "Low 1", "V");
         configParam<RangeQuantity>(HIGH1_PARAM, -1.0f, 1.0f, 0.0f, "High 1", "V");
         configParam<RangeQuantity>(LOW2_PARAM, -1.0f, 1.0f, 0.0f, "Low 2", "V");
