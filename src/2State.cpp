@@ -44,6 +44,7 @@ struct TwoState : Module {
     int rangeIndex = 0;
 
     bool latchEnabledByDefault = true;
+    bool cascadingEnabled = true;
 
     float rangeSelect[10][2] = {
         {0.f, 10.f},
@@ -126,7 +127,7 @@ struct TwoState : Module {
             if (gateInput || buttonPressed) {
                 gate = true;
             }
-            else if (i > 0) {
+            else if (i > 0 && cascadingEnabled) {
                 for (int j = i - 1; j >= 0; j--) {
                     if (inputs[GATE1_INPUT + j].isConnected()) {
                         gate = inputs[GATE1_INPUT + j].getVoltage() >= 2.0f;
@@ -182,6 +183,7 @@ struct TwoState : Module {
 		json_object_set_new(rootJ, "latched_states", a);
         json_object_set_new(rootJ, "rangeIndex", json_integer(rangeIndex));
         json_object_set_new(rootJ, "latchEnabledByDefault", json_boolean(latchEnabledByDefault));
+        json_object_set_new(rootJ, "cascadingEnabled", json_boolean(cascadingEnabled));
         return rootJ;
     }
 
@@ -202,6 +204,10 @@ struct TwoState : Module {
         json_t* latchEnabledByDefaultJ = json_object_get(rootJ, "latchEnabledByDefault");
         if (latchEnabledByDefaultJ) {
             latchEnabledByDefault = json_is_true(latchEnabledByDefaultJ);
+        }
+        json_t* cascadingEnabledJ = json_object_get(rootJ, "cascadingEnabled");
+        if (cascadingEnabledJ) {
+            cascadingEnabled = json_is_true(cascadingEnabledJ);
         }
     }
 };
@@ -272,6 +278,8 @@ struct TwoStateWidget : ModuleWidget {
                                                   "0V-1V"}, &module->rangeIndex));
         menu->addChild(createIndexPtrSubmenuItem("Default mode",
                                                  {"Gate", "Latch"}, &module->latchEnabledByDefault));
+        menu->addChild(createIndexPtrSubmenuItem("Cascading",
+                                                 {"Disabled", "Enabled"}, &module->cascadingEnabled));
     }
 };
 

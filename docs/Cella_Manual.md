@@ -499,7 +499,7 @@ Right-clicking the panel opens the context menu, which includes:
 ### **Inputs**
 
 *   **GATE**: Accepts a gate or trigger signal. A voltage of 2V or higher is interpreted as "ON".
-    *   **Cascading Gate Behavior**: If a section's own **GATE** input (jack or button) is not actively receiving a signal, it will then check the **GATE** inputs/buttons of the preceding sections. If *any* preceding section's input (jack or button) is active, the current section will also activate. For example, if you send a gate to the top section's **GATE** input, and the middle and bottom sections' **GATE** inputs are unconnected, all three sections will respond to the top input.
+    *   **Cascading Gate Behavior**: If a section's own **GATE** input (jack or button) is not actively receiving a signal, it will then check the **GATE** inputs/buttons of the preceding sections. If *any* preceding section's input (jack or button) is active, the current section will also activate. For example, if you send a gate to the top section's **GATE** input, and the middle and bottom sections' **GATE** inputs are unconnected, all three sections will respond to the top input. This behavior can be disabled via context menu.
 
 ### **Outputs**
 
@@ -518,6 +518,8 @@ Right-clicking the panel opens the context menu, which includes:
     *   `0V-3V`: Knobs map from 0V to +3V.
     *   `0V-2V`: Knobs map from 0V to +2V.
     *   `0V-1V`: Knobs map from 0V to +1V.
+*  **Default mode**: defines default operation mode after reset/initialisation, either `Gate` or `Latch`.
+*  **Cascading**: enable/disable cascading behavior. Enabled by default.
 
 ### **Patch Ideas**
 *   **Simple A/B Switch:** Use a single section to switch between two fixed voltage levels for pitch or modulation, triggered by a gate sequence.
