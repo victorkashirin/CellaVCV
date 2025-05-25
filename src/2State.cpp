@@ -43,6 +43,8 @@ struct TwoState : Module {
     bool latchedStates[3] = {false, false, false};
     int rangeIndex = 0;
 
+    bool latchEnabledByDefault = true;
+
     float rangeSelect[10][2] = {
         {0.f, 10.f},
         {0.f, 5.f},
@@ -77,6 +79,12 @@ struct TwoState : Module {
         configOutput(OUT1_OUTPUT, "Out 1");
         configOutput(OUT2_OUTPUT, "Out 2");
         configOutput(OUT3_OUTPUT, "Out 3");
+    }
+
+    void onReset() override {
+        for (int i = 0; i < 3; i++) {
+            params[LATCH1_PARAM + i].setValue(latchEnabledByDefault ? 1.0f : 0.0f);
+        }
     }
 
     struct RangeQuantity : rack::ParamQuantity {
@@ -171,8 +179,9 @@ struct TwoState : Module {
 			for (int c = 0; c < 3; ++c) {
 				json_array_append_new(a, json_boolean(latchedStates[c]));
 			}
-			json_object_set_new(rootJ, "latched_states", a);
+		json_object_set_new(rootJ, "latched_states", a);
         json_object_set_new(rootJ, "rangeIndex", json_integer(rangeIndex));
+        json_object_set_new(rootJ, "latchEnabledByDefault", json_boolean(latchEnabledByDefault));
         return rootJ;
     }
 
@@ -189,6 +198,10 @@ struct TwoState : Module {
         json_t* rangeIndexJ = json_object_get(rootJ, "rangeIndex");
         if (rangeIndexJ) {
             rangeIndex = json_integer_value(rangeIndexJ);
+        }
+        json_t* latchEnabledByDefaultJ = json_object_get(rootJ, "latchEnabledByDefault");
+        if (latchEnabledByDefaultJ) {
+            latchEnabledByDefault = json_is_true(latchEnabledByDefaultJ);
         }
     }
 };
@@ -245,6 +258,7 @@ struct TwoStateWidget : ModuleWidget {
         TwoState *module = dynamic_cast<TwoState *>(this->module);
         assert(module);
         menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Settings"));
         menu->addChild(createIndexPtrSubmenuItem("Range",
                                                  {"+/-10V",
                                                   "+/-5V",
@@ -256,6 +270,8 @@ struct TwoStateWidget : ModuleWidget {
                                                   "0V-3V",
                                                   "0V-2V", 
                                                   "0V-1V"}, &module->rangeIndex));
+        menu->addChild(createIndexPtrSubmenuItem("Default mode",
+                                                 {"Gate", "Latch"}, &module->latchEnabledByDefault));
     }
 };
 
