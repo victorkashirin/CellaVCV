@@ -107,9 +107,7 @@ struct TwoState : Module {
     }
 
     void process(const ProcessArgs &args) override {
-        // Process each step
         for (int i = 0; i < 3; i++) {
-            // Get gate input, cascading from above if not connected
             bool gate = false;
             bool buttonPressed = params[GATE1_PARAM + i].getValue() > 0.0f;
             bool gateInput = inputs[GATE1_INPUT + i].isConnected() && inputs[GATE1_INPUT + i].getVoltage() >= 2.0f;
@@ -117,36 +115,36 @@ struct TwoState : Module {
             bool lowLightOn = false;
             bool highLightOn = false;
             
-            // Check if this input is connected
             if (gateInput || buttonPressed) {
                 gate = true;
             }
-            // If neither input nor button, cascade from above input
             else if (i > 0) {
-                // Check all inputs above this one
                 for (int j = i - 1; j >= 0; j--) {
                     if (inputs[GATE1_INPUT + j].isConnected()) {
                         gate = inputs[GATE1_INPUT + j].getVoltage() >= 2.0f;
+                        
+                    }
+                    if (params[GATE1_PARAM + j].getValue() > 0.0f) {
+                        gate = true;
+                        
+                    }
+                    if (gate) {
                         break;
                     }
                 }
             }
 
-            // Handle latch mode
             bool latchEnabled = params[LATCH1_PARAM + i].getValue() > 0.0f;
             if (latchEnabled) {
-                // Check for button press or input trigger
                 if (trigger[i].process(gate)) {
                     latchedStates[i] = !latchedStates[i];
                 }
-                // Output based on latched state
                 outputs[OUT1_OUTPUT + i].setVoltage(
                     latchedStates[i] ? 
                     scaleValue(params[HIGH1_PARAM + i].getValue()) : 
                     scaleValue(params[LOW1_PARAM + i].getValue())
                 );
             } else {
-                // Direct mode - output high value when gate is high
                 outputs[OUT1_OUTPUT + i].setVoltage(
                     gate ? 
                     scaleValue(params[HIGH1_PARAM + i].getValue()) : 
