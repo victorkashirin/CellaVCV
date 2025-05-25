@@ -41,6 +41,20 @@ struct TwoState : Module {
 
     dsp::SchmittTrigger trigger[3];
     bool latchedStates[3] = {false, false, false};
+    int rangeIndex = 0;
+
+    float rangeSelect[10][2] = {
+        {0.f, 10.f},
+        {0.f, 5.f},
+        {0.f, 3.f},
+        {0.f, 2.f},
+        {0.f, 1.f},
+        {1.f, 5.f},
+        {1.f, 2.5f},
+        {1.f, 1.5f},
+        {1.f, 1.f},
+        {1.f, 0.5f},
+    };
 
   
     TwoState() {
@@ -48,15 +62,15 @@ struct TwoState : Module {
         configButton(GATE1_PARAM, "Gate 1");
         configButton(GATE2_PARAM, "Gate 2");
         configButton(GATE3_PARAM, "Gate 3");
-        configSwitch(LATCH1_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
-        configSwitch(LATCH2_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
-        configSwitch(LATCH3_PARAM, 0.0f, 1.0f, 0.0f, "Latch", {"Disabled", "Enabled"});
-        configParam(LOW1_PARAM, -10.0f, 10.0f, 0.0f, "Low 1", "V");
-        configParam(HIGH1_PARAM, -10.0f, 10.0f, 0.0f, "High 1", "V");
-        configParam(LOW2_PARAM, -10.0f, 10.0f, 0.0f, "Low 2", "V");
-        configParam(HIGH2_PARAM, -10.0f, 10.0f, 0.0f, "High 2", "V");
-        configParam(LOW3_PARAM, -10.0f, 10.0f, 0.0f, "Low 3", "V");
-        configParam(HIGH3_PARAM, -10.0f, 10.0f, 0.0f, "High 3", "V");
+        configSwitch(LATCH1_PARAM, 0.0f, 1.0f, 0.0f, "Latch 1", {"Disabled", "Enabled"});
+        configSwitch(LATCH2_PARAM, 0.0f, 1.0f, 0.0f, "Latch 2", {"Disabled", "Enabled"});
+        configSwitch(LATCH3_PARAM, 0.0f, 1.0f, 0.0f, "Latch 3", {"Disabled", "Enabled"});
+        configParam<RangeQuantity>(LOW1_PARAM, -1.0f, 1.0f, 0.0f, "Low 1", "V");
+        configParam<RangeQuantity>(HIGH1_PARAM, -1.0f, 1.0f, 0.0f, "High 1", "V");
+        configParam<RangeQuantity>(LOW2_PARAM, -1.0f, 1.0f, 0.0f, "Low 2", "V");
+        configParam<RangeQuantity>(HIGH2_PARAM, -1.0f, 1.0f, 0.0f, "High 2", "V");
+        configParam<RangeQuantity>(LOW3_PARAM, -1.0f, 1.0f, 0.0f, "Low 3", "V");
+        configParam<RangeQuantity>(HIGH3_PARAM, -1.0f, 1.0f, 0.0f, "High 3", "V");
         configInput(GATE1_INPUT, "Gate 1");
         configInput(GATE2_INPUT, "Gate 2");
         configInput(GATE3_INPUT, "Gate 3");
@@ -65,7 +79,32 @@ struct TwoState : Module {
         configOutput(OUT3_OUTPUT, "Out 3");
     }
 
-    
+    struct RangeQuantity : rack::ParamQuantity {
+
+        float getDisplayValue() override {
+            if (!module) {
+                return rack::ParamQuantity::getDisplayValue();
+            }
+
+            float knobValue = getValue();
+            TwoState* twoStateModule = dynamic_cast<TwoState*>(module);
+            if (!twoStateModule) {
+                return rack::ParamQuantity::getDisplayValue();  // Fallback if cast fails
+            }
+            int rangeIndex = twoStateModule->rangeIndex;
+            float rangeOffset = twoStateModule->rangeSelect[rangeIndex][0];
+            float rangeScale = twoStateModule->rangeSelect[rangeIndex][1];
+            float displayValue = (rangeOffset + knobValue) * rangeScale;
+            return displayValue;
+        }
+    };
+
+    float scaleValue(float value) {
+        int rangeIndex = this->rangeIndex;
+        float rangeOffset = this->rangeSelect[rangeIndex][0];
+        float rangeScale = this->rangeSelect[rangeIndex][1];
+        return (value + rangeOffset) * rangeScale;
+    }
 
     void process(const ProcessArgs &args) override {
         // Process each step
@@ -103,15 +142,15 @@ struct TwoState : Module {
                 // Output based on latched state
                 outputs[OUT1_OUTPUT + i].setVoltage(
                     latchedStates[i] ? 
-                    params[HIGH1_PARAM + i].getValue() : 
-                    params[LOW1_PARAM + i].getValue()
+                    scaleValue(params[HIGH1_PARAM + i].getValue()) : 
+                    scaleValue(params[LOW1_PARAM + i].getValue())
                 );
             } else {
                 // Direct mode - output high value when gate is high
                 outputs[OUT1_OUTPUT + i].setVoltage(
                     gate ? 
-                    params[HIGH1_PARAM + i].getValue() : 
-                    params[LOW1_PARAM + i].getValue()
+                    scaleValue(params[HIGH1_PARAM + i].getValue()) : 
+                    scaleValue(params[LOW1_PARAM + i].getValue())
                 );
             }
 
@@ -135,6 +174,7 @@ struct TwoState : Module {
 				json_array_append_new(a, json_boolean(latchedStates[c]));
 			}
 			json_object_set_new(rootJ, "latched_states", a);
+        json_object_set_new(rootJ, "rangeIndex", json_integer(rangeIndex));
         return rootJ;
     }
 
@@ -147,6 +187,10 @@ struct TwoState : Module {
                     latchedStates[c] = true;
                 }
             }
+        }
+        json_t* rangeIndexJ = json_object_get(rootJ, "rangeIndex");
+        if (rangeIndexJ) {
+            rangeIndex = json_integer_value(rangeIndexJ);
         }
     }
 };
@@ -197,6 +241,23 @@ struct TwoStateWidget : ModuleWidget {
         addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step), module, TwoState::HIGH2_LIGHT));
         addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step * 2), module, TwoState::LOW3_LIGHT));
         addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step * 2), module, TwoState::HIGH3_LIGHT));
+    }
+
+    void appendContextMenu(Menu *menu) override {
+        TwoState *module = dynamic_cast<TwoState *>(this->module);
+        assert(module);
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexPtrSubmenuItem("Range",
+                                                 {"+/-10V",
+                                                  "+/-5V",
+                                                  "+/-3V",
+                                                  "+/-2V",
+                                                  "+/-1V",
+                                                  "0V-10V",
+                                                  "0V-5V",
+                                                  "0V-3V",
+                                                  "0V-2V", 
+                                                  "0V-1V"}, &module->rangeIndex));
     }
 };
 
