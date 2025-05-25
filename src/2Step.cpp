@@ -30,12 +30,17 @@ struct TwoStep : Module {
         OUTPUTS_LEN
     };
     enum LightId {
+        LOW1_LIGHT,
+        LOW2_LIGHT,
+        LOW3_LIGHT,
+        HIGH1_LIGHT,
+        HIGH2_LIGHT,
+        HIGH3_LIGHT,
         LIGHTS_LEN
     };
 
     dsp::SchmittTrigger trigger[3];
     bool latchedStates[3] = {false, false, false};
-    bool lastGates[3] = {false, false, false};
 
   
     TwoStep() {
@@ -67,13 +72,14 @@ struct TwoStep : Module {
         for (int i = 0; i < 3; i++) {
             // Get gate input, cascading from above if not connected
             bool gate = false;
+            bool buttonPressed = params[GATE1_PARAM + i].getValue() > 0.0f;
+            bool gateInput = inputs[GATE1_INPUT + i].isConnected() && inputs[GATE1_INPUT + i].getVoltage() >= 2.0f;
+
+            bool lowLightOn = false;
+            bool highLightOn = false;
             
             // Check if this input is connected
-            if (inputs[GATE1_INPUT + i].isConnected()) {
-                gate = inputs[GATE1_INPUT + i].getVoltage() >= 2.0f;
-            }
-            // If not connected, check button
-            else if (params[GATE1_PARAM + i].getValue() > 0.0f) {
+            if (gateInput || buttonPressed) {
                 gate = true;
             }
             // If neither input nor button, cascade from above input
@@ -90,8 +96,8 @@ struct TwoStep : Module {
             // Handle latch mode
             bool latchEnabled = params[LATCH1_PARAM + i].getValue() > 0.0f;
             if (latchEnabled) {
-                // Toggle state on rising edge
-                if (gate && !lastGates[i]) {
+                // Check for button press or input trigger
+                if (trigger[i].process(gate)) {
                     latchedStates[i] = !latchedStates[i];
                 }
                 // Output based on latched state
@@ -109,8 +115,16 @@ struct TwoStep : Module {
                 );
             }
 
-            // Store current gate state for edge detection
-            lastGates[i] = gate;
+            if (latchEnabled) {
+                lowLightOn = latchedStates[i] == false;
+                highLightOn = latchedStates[i] == true;
+            } else {
+                lowLightOn = gate == false;
+                highLightOn = gate == true;
+            }
+
+            lights[LOW1_LIGHT + i].setBrightness(lowLightOn);
+            lights[HIGH1_LIGHT + i].setBrightness(highLightOn);
         }
     }
 };
@@ -123,7 +137,7 @@ struct TwoStepWidget : ModuleWidget {
         float col1 = 15.f;
         float col2 = 45.f;
         float row1 = 53.4f;
-        float row2 = 104.36f;
+        float row2 = 102.55f;
         float step = 113.35f;
 
         float buttonRow = 33.12f;
@@ -153,6 +167,15 @@ struct TwoStepWidget : ModuleWidget {
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2), module, TwoStep::OUT1_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step), module, TwoStep::OUT2_OUTPUT));
         addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step * 2), module, TwoStep::OUT3_OUTPUT));
+
+        float lightRow = 82.34f;
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow), module, TwoStep::LOW1_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow), module, TwoStep::HIGH1_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step), module, TwoStep::LOW2_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step), module, TwoStep::HIGH2_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step * 2), module, TwoStep::LOW3_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step * 2), module, TwoStep::HIGH3_LIGHT));
+        
     }
 };
 
