@@ -128,13 +128,15 @@
       ]
     },
     {
-      "slug": "2Step",
-      "name": "2Step",
-      "description": "Utility module with 2-step CV generator",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#2step",
-      "keywords": "cv sequencer",
+      "slug": "2State",
+      "name": "2State",
+      "description": "Combination of dual constant CV generator and a switch",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#2state",
+      "keywords": "cv sequencer triple latch",
       "tags": [
-        "Utility"
+        "Utility",
+        "Switch",
+        "Sequencer"
       ]
     }
   ]

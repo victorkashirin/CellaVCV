@@ -1,7 +1,7 @@
 #include "components.hpp"
 #include "plugin.hpp"
 
-struct TwoStep : Module {
+struct TwoState : Module {
     enum ParamId {
         GATE1_PARAM,
         GATE2_PARAM,
@@ -43,7 +43,7 @@ struct TwoStep : Module {
     bool latchedStates[3] = {false, false, false};
 
   
-    TwoStep() {
+    TwoState() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
         configButton(GATE1_PARAM, "Gate 1");
         configButton(GATE2_PARAM, "Gate 2");
@@ -127,12 +127,34 @@ struct TwoStep : Module {
             lights[HIGH1_LIGHT + i].setBrightness(highLightOn*0.5f);
         }
     }
+
+    json_t* dataToJson() override {
+        json_t* rootJ = json_object();
+        json_t* a = json_array();
+			for (int c = 0; c < 3; ++c) {
+				json_array_append_new(a, json_boolean(latchedStates[c]));
+			}
+			json_object_set_new(rootJ, "latched_states", a);
+        return rootJ;
+    }
+
+    void dataFromJson(json_t* rootJ) override {
+        json_t* latchedStatesJ = json_object_get(rootJ, "latched_states");
+        if (latchedStatesJ && json_array_size(latchedStatesJ) == 3) {
+            for (int c = 0; c < 3; ++c) {
+                json_t* ls = json_array_get(latchedStatesJ, c);
+                if (ls && json_is_true(ls)) {
+                    latchedStates[c] = true;
+                }
+            }
+        }
+    }
 };
 
-struct TwoStepWidget : ModuleWidget {
-    TwoStepWidget(TwoStep *module) {
+struct TwoStateWidget : ModuleWidget {
+    TwoStateWidget(TwoState *module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/2Step.svg"), asset::plugin(pluginInstance, "res/2Step-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/2State.svg"), asset::plugin(pluginInstance, "res/2State-dark.svg")));
 
         float col1 = 15.f;
         float col2 = 45.f;
@@ -144,39 +166,38 @@ struct TwoStepWidget : ModuleWidget {
         float buttonCol1 = 7.25f;
         float buttonCol2 = 37.25;
 
-        addParam(createParamCentered<Trimpot>(Vec(col1, row1), module, TwoStep::LOW1_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col2, row1), module, TwoStep::HIGH1_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step), module, TwoStep::LOW2_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step), module, TwoStep::HIGH2_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step * 2), module, TwoStep::LOW3_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step * 2), module, TwoStep::HIGH3_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1), module, TwoState::LOW1_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1), module, TwoState::HIGH1_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step), module, TwoState::LOW2_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step), module, TwoState::HIGH2_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col1, row1 + step * 2), module, TwoState::LOW3_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(col2, row1 + step * 2), module, TwoState::HIGH3_PARAM));
 
-        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow), module, TwoStep::GATE1_PARAM));
-        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow + step), module, TwoStep::GATE2_PARAM));
-        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow + step * 2), module, TwoStep::GATE3_PARAM));
+        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow), module, TwoState::GATE1_PARAM));
+        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow + step), module, TwoState::GATE2_PARAM));
+        addParam(createParamCentered<VCVButtonTiny>(Vec(buttonCol1, buttonRow + step * 2), module, TwoState::GATE3_PARAM));
 
-        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow), module, TwoStep::LATCH1_PARAM));
-        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow + step), module, TwoStep::LATCH2_PARAM));
-        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow + step * 2), module, TwoStep::LATCH3_PARAM));
+        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow), module, TwoState::LATCH1_PARAM));
+        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow + step), module, TwoState::LATCH2_PARAM));
+        addParam(createParamCentered<VCVSwitchTiny>(Vec(buttonCol2, buttonRow + step * 2), module, TwoState::LATCH3_PARAM));
 
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2), module, TwoStep::GATE1_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step), module, TwoStep::GATE2_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step * 2), module, TwoStep::GATE3_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2), module, TwoState::GATE1_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step), module, TwoState::GATE2_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(col1, row2 + step * 2), module, TwoState::GATE3_INPUT));
 
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2), module, TwoStep::OUT1_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step), module, TwoStep::OUT2_OUTPUT));
-        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step * 2), module, TwoStep::OUT3_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2), module, TwoState::OUT1_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step), module, TwoState::OUT2_OUTPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(col2, row2 + step * 2), module, TwoState::OUT3_OUTPUT));
 
         float lightRow = 82.34f;
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow), module, TwoStep::LOW1_LIGHT));
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow), module, TwoStep::HIGH1_LIGHT));
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step), module, TwoStep::LOW2_LIGHT));
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step), module, TwoStep::HIGH2_LIGHT));
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step * 2), module, TwoStep::LOW3_LIGHT));
-        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step * 2), module, TwoStep::HIGH3_LIGHT));
-        
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow), module, TwoState::LOW1_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow), module, TwoState::HIGH1_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step), module, TwoState::LOW2_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step), module, TwoState::HIGH2_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col1, lightRow + step * 2), module, TwoState::LOW3_LIGHT));
+        addChild(createLightCentered<SmallLight<YellowLight>>(Vec(col2, lightRow + step * 2), module, TwoState::HIGH3_LIGHT));
     }
 };
 
-Model *model2Step = createModel<TwoStep, TwoStepWidget>("2Step");
+Model *model2State = createModel<TwoState, TwoStateWidget>("2State");
