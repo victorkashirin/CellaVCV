@@ -62,8 +62,8 @@ struct VintageSpectrumAnalyzer : Module {
         // Param ranges – users asked upper: ‑40…0 dB, lower: ‑120…‑60 dB
         configParam(UPPER_PARAM, -40.f, 0.f, 0.f, "Top", " dB");
         configParam(LOWER_PARAM, -120.f, -60.f, -30.f, "Bottom", " dB");
-        configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
-        configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
+        configParam(FALL_DELAY_PARAM, 0.01f, 2.f, 0.5f, "Fall Delay", "s");
+        configParam(PEAK_FALL_DELAY_PARAM, 0.01f, 3.f, 1.f, "Peak Fall Delay", "s");
 
         configInput(IN_L_INPUT, "Left");
         configInput(IN_R_INPUT, "Right");
