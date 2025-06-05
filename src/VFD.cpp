@@ -5,7 +5,7 @@
 // • Added *configurable* display window: two knobs set the **upper** (‑40…0 dB) and
 //   **lower** (‑120…‑60 dB) limits. Default window is −30…0 dB as before.
 // • Analyzer and renderer now respect those limits when clipping and normalising.
-// • UI: two small trim‑knobs appear at the bottom of the module labelled “TOP” and “BOTTOM”.
+// • UI: two small trim‑knobs appear at the bottom of the module labelled "TOP" and "BOTTOM".
 //
 // Everything still lives in ONE file for easy drop‑in use.
 
@@ -29,6 +29,8 @@ struct VintageSpectrumAnalyzer : Module {
     enum ParamIds {
         UPPER_PARAM,  // display ceiling (‑40…0 dB)
         LOWER_PARAM,  // display floor   (‑120…‑60 dB)
+        FALL_DELAY_PARAM,      // fall delay time
+        PEAK_FALL_DELAY_PARAM, // peak fall delay time
         NUM_PARAMS
     };
     enum InputIds { IN_L_INPUT,
@@ -38,9 +40,9 @@ struct VintageSpectrumAnalyzer : Module {
     // ------------------------------------------------------------------
     // Constants & parameters
     // ------------------------------------------------------------------
-    static constexpr int FFT_SIZE = 2048;  // 46 ms @ 44.1 kHz
+    static constexpr int FFT_SIZE = 2048;  // 46 ms @ 44.1 kHz
     static constexpr int NUM_BANDS = 13;
-    static constexpr float INPUT_GAIN = 0.1f;  // Scale ±10 V to roughly ±1 V‑peak
+    static constexpr float INPUT_GAIN = 0.1f;  // Scale ±10 V to roughly ±1 V‑peak
 
     // Mid‑frequency labels (geometric means of one‑third‑octave edges)
 
@@ -51,6 +53,7 @@ struct VintageSpectrumAnalyzer : Module {
     std::vector<float> window;              // Hann window values
     std::vector<float> capture;             // Rolling capture buffer (windowed signal)
     std::array<float, NUM_BANDS> bandDb{};  // Bar heights in dB (raw, unclamped)
+    std::array<float, NUM_BANDS> bandPeaks{}; // Peak levels for each band
     int writePos = 0;                       // Cursor into capture[]
 
     VintageSpectrumAnalyzer() {
@@ -59,6 +62,8 @@ struct VintageSpectrumAnalyzer : Module {
         // Param ranges – users asked upper: ‑40…0 dB, lower: ‑120…‑60 dB
         configParam(UPPER_PARAM, -40.f, 0.f, 0.f, "Top", " dB");
         configParam(LOWER_PARAM, -120.f, -60.f, -30.f, "Bottom", " dB");
+        configParam(FALL_DELAY_PARAM, 0.1f, 2.f, 0.5f, "Fall Delay", "s");
+        configParam(PEAK_FALL_DELAY_PARAM, 0.1f, 2.f, 1.f, "Peak Fall Delay", "s");
 
         configInput(IN_L_INPUT, "Left");
         configInput(IN_R_INPUT, "Right");
@@ -90,6 +95,45 @@ struct VintageSpectrumAnalyzer : Module {
             writePos = 0;
             analyzeFFT(args.sampleRate);
         }
+
+        // 3) Apply exponential decay to peaks between FFT updates
+        float deltaTime = args.sampleTime;
+        float peakFallDelay = std::max(0.001f, params[PEAK_FALL_DELAY_PARAM].getValue());
+        float peakDecay = std::exp(-deltaTime / peakFallDelay);
+
+        for (int b = 0; b < NUM_BANDS; b++) {
+            // Convert current bandDb to normalized range for comparison
+            const float topDb = params[UPPER_PARAM].getValue();
+            const float bottomDb = params[LOWER_PARAM].getValue();
+            const float rangeDb = topDb - bottomDb;
+            
+            float currentDb = clamp(bandDb[b], bottomDb, topDb);
+            float currentLevel = (currentDb - bottomDb) / rangeDb;
+            
+            // Update peak if current level is higher
+            if (currentLevel >= bandPeaks[b]) {
+                bandPeaks[b] = currentLevel;
+            } else {
+                // Apply decay to peak
+                bandPeaks[b] *= peakDecay;
+                if (bandPeaks[b] < 1e-6f) bandPeaks[b] = 0.f;
+            }
+            
+            // Clamp peak to valid range
+            bandPeaks[b] = clamp(bandPeaks[b], 0.f, 1.f);
+        }
+
+        // 4) Apply fall delay to main levels when no input
+        if (!lCon && !rCon) {
+            float fallDelay = std::max(0.001f, params[FALL_DELAY_PARAM].getValue());
+            float fallDecay = std::exp(-deltaTime / fallDelay);
+            
+            for (int b = 0; b < NUM_BANDS; b++) {
+                bandDb[b] *= fallDecay;
+                // Prevent levels from going too negative
+                bandDb[b] = std::max(bandDb[b], -120.0f);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -119,6 +163,11 @@ struct VintageSpectrumAnalyzer : Module {
             sampleRate * 0.5f  // Nyquist upper edge
         };
 
+        // Decay parameters for level updates
+        float fallDelay = std::max(0.001f, params[FALL_DELAY_PARAM].getValue());
+        float deltaTime = (float)FFT_SIZE / sampleRate;  // Time between FFT calculations
+        float fallDecay = std::exp(-deltaTime / fallDelay);
+
         for (int b = 0; b < NUM_BANDS; ++b) {
             float fLo = edges[b];
             float fHi = edges[b + 1];
@@ -130,8 +179,14 @@ struct VintageSpectrumAnalyzer : Module {
                 sum += mag[k];
             float avgMag = sum / (binHi - binLo);
 
-            float db = 20.f * std::log10(avgMag + 1e-12f);
-            bandDb[b] = db;  // store raw; clipping done in renderer
+            float newDb = 20.f * std::log10(avgMag + 1e-12f);
+
+            // Update main level (fast attack, exponential decay)
+            if (newDb >= bandDb[b]) {
+                bandDb[b] = newDb;  // Fast attack
+            } else {
+                bandDb[b] = bandDb[b] * fallDecay + newDb * (1.0f - fallDecay);  // Smooth decay
+            }
         }
     }
 };
@@ -174,7 +229,7 @@ struct VFDCustomDisplay : LedDisplay {
             db = clamp(db, bottomDb, topDb);
             float norm = (db - bottomDb) / rangeDb;
             float level = norm;
-            float peak = level;
+            float peakNorm = module->bandPeaks[b]; // bandPeaks now stores normalized values directly
             float x = bandMargin + b * bandWidth;
 
             // Calculate dot grid dimensions
@@ -201,10 +256,10 @@ struct VFDCustomDisplay : LedDisplay {
             }
 
             // Draw peak indicator
-            if (peak > 0.0f) {
+            if (peakNorm > 0.0f) {
                 nvgFillColor(args.vg, peakColor);
-                float peakY = box.size.y - (box.size.y * peak);
-                int r = rows - ceil(peak * rows);
+                float peakY = box.size.y - (box.size.y * peakNorm);
+                int r = rows - ceil(peakNorm * rows);
                 float dy = yStart + r * (dotRadius * 2 + dotSpacing);
                 for (int c = 0; c < cols; c++) {
                     float dx = xStart + c * (dotRadius * 2 + dotSpacing);
@@ -317,6 +372,18 @@ struct AnalyzerDisplay : Widget {
             nvgRect(args.vg, x, y, barW, barH);
             nvgFill(args.vg);
 
+            // Draw peak indicator
+            float peakNorm = module->bandPeaks[i]; // bandPeaks now stores normalized values directly
+            if (peakNorm > 0.0f) {
+                float peakH = 2.0f; // Peak indicator height
+                float peakY = margin + (barAreaH - peakNorm * barAreaH) - peakH;
+                NVGcolor peakColor = nvgRGB(0xff, 0x30, 0x30);
+                nvgBeginPath(args.vg);
+                nvgFillColor(args.vg, peakColor);
+                nvgRect(args.vg, x, peakY, barW, peakH);
+                nvgFill(args.vg);
+            }
+
             // frequency label
             nvgFontSize(args.vg, 8.f);
             if (font) nvgFontFaceId(args.vg, font->handle);
@@ -353,6 +420,8 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         const float knobY = 25 + display->box.size.y + 15.f;
         addParam(createParamCentered<Trimpot>(Vec(45, knobY), module, VintageSpectrumAnalyzer::UPPER_PARAM));
         addParam(createParamCentered<Trimpot>(Vec(105, knobY), module, VintageSpectrumAnalyzer::LOWER_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(165, knobY), module, VintageSpectrumAnalyzer::FALL_DELAY_PARAM));
+        addParam(createParamCentered<Trimpot>(Vec(225, knobY), module, VintageSpectrumAnalyzer::PEAK_FALL_DELAY_PARAM));
         // labels could be in SVG panel – TOP and BOTTOM
 
         // Inputs
