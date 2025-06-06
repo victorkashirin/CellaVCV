@@ -66,10 +66,6 @@ namespace VFDConfig {
     };
 }
 
-// Labels for frequency bands
-static constexpr std::array<const char*, VFDConfig::NUM_BANDS> FREQUENCY_LABELS = {
-    "32", "50", "80", "125", "200", "315", "500", "1k", "2k", "4k", "8k", "16k"
-};
 
 template <typename T>
 static inline T clamp(T v, T lo, T hi) {
@@ -151,7 +147,7 @@ struct VintageSpectrumAnalyzer : Module {
         initializeDSP();
     }
 
-private:
+
     void configureParameters() {
         configParam(UPPER_PARAM, VFDConfig::UPPER_DB_MIN, VFDConfig::UPPER_DB_MAX, 
                    VFDConfig::UPPER_DB_DEFAULT, "Top", " dB");
@@ -178,7 +174,7 @@ private:
         }
     }
 
-public:
+
     void process(const ProcessArgs& args) override {
         float inputSignal = getInputSignal();
         processWindowedInput(inputSignal);
@@ -186,7 +182,7 @@ public:
         handleNoInputDecay(args);
     }
 
-private:
+
     float getInputSignal() {
         float in = 0.f;
         bool lCon = inputs[IN_L_INPUT].isConnected();
@@ -302,8 +298,7 @@ private:
         return sum / (binHi - binLo);
     }
 
-public:
-    // Public accessors for display widgets
+
     float getBandDb(int band) const { 
         return bands[band].dbLevel; 
     }
@@ -335,7 +330,6 @@ struct DisplayGrid {
         yStart = 2 * VFDConfig::BAND_MARGIN + 1.5f;
     }
 
-private:
     int calculateColumns(float availableWidth) {
         int cols = static_cast<int>((availableWidth + VFDConfig::DOT_SPACING) /
                                    (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING));
@@ -362,7 +356,6 @@ struct VFDCustomDisplay : LedDisplay {
         nvgRestore(args.vg);
     }
 
-private:
     void drawBands(NVGcontext* vg) {
         size_t numBands = VFDConfig::NUM_BANDS;
         const float totalWidth = box.size.x - 2 * VFDConfig::BAND_MARGIN;
@@ -471,7 +464,6 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         addInputs(module);
     }
 
-private:
     void addDisplay(VintageSpectrumAnalyzer* module) {
         VFDCustomDisplay* display = new VFDCustomDisplay();
         display->module = module;
