@@ -151,6 +151,7 @@ struct VintageSpectrumAnalyzer : Module {
     
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
+    bool alphaMode = false;  // New: Alpha mode for transparency-based visualization
 
     VintageSpectrumAnalyzer() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -330,6 +331,7 @@ struct VintageSpectrumAnalyzer : Module {
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
+        json_object_set_new(rootJ, "alphaMode", json_boolean(alphaMode));
         return rootJ;
     }
     
@@ -337,6 +339,11 @@ struct VintageSpectrumAnalyzer : Module {
         json_t* displayModeJ = json_object_get(rootJ, "displayMode");
         if (displayModeJ) {
             displayMode = static_cast<DisplayMode>(json_integer_value(displayModeJ));
+        }
+        
+        json_t* alphaModeJ = json_object_get(rootJ, "alphaMode");
+        if (alphaModeJ) {
+            alphaMode = json_boolean_value(alphaModeJ);
         }
     }
 };
@@ -419,14 +426,19 @@ struct VFDCustomDisplay : LedDisplay {
         DisplayGrid grid(availableWidth, box.size.y - 3 * VFDConfig::BAND_MARGIN, xOffset);
         grid.xStart += VFDConfig::BAND_MARGIN;
         
+        // Calculate alpha for this band
+        float levelAlpha = calculateAlpha(level);
+        float peakAlpha = calculateAlpha(peakLevel);
+        
+        // Draw inactive dots with normal color (not affected by level)
         drawDotGrid(vg, grid, VFDConfig::INACTIVE_COLOR);
         
         if (level > 0.0f) {
-            drawActiveDots(vg, grid, level);
+            drawActiveDots(vg, grid, level, levelAlpha);
         }
         
         if (peakLevel > 0.0f) {
-            drawPeakIndicator(vg, grid, peakLevel);
+            drawPeakIndicator(vg, grid, peakLevel, peakAlpha);
         }
     }
     
@@ -453,7 +465,11 @@ struct VFDCustomDisplay : LedDisplay {
         // Start from bottom with margin
         float startY = barY;
         
-        // Draw all segments (inactive background)
+        // Calculate alpha for this band
+        float levelAlpha = calculateAlpha(level);
+        float peakAlpha = calculateAlpha(peakLevel);
+        
+        // Draw all segments (inactive background) with normal color (not affected by level)
         nvgFillColor(vg, VFDConfig::INACTIVE_COLOR);
         for (int i = 0; i < numSegments; i++) {
             float segY = startY + i * (segmentHeight + segmentSpacing);
@@ -470,19 +486,10 @@ struct VFDCustomDisplay : LedDisplay {
                 int segmentIndex = numSegments - 1 - i; // Start from bottom
                 float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
                 
-                // Glow effect for active segment
-                // NVGpaint paint = nvgRadialGradient(vg, barX + barWidth/2, segY + segmentHeight/2, 0.0f, barWidth * 0.8f,
-                //                                  nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 100),
-                //                                  nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0));
-                // nvgBeginPath(vg);
-                // nvgRect(vg, barX - 2, segY - 1, barWidth + 4, segmentHeight + 2);
-                // nvgFillPaint(vg, paint);
-                // nvgFill(vg);
-                
-                // Core active segment
+                // Core active segment with alpha
                 nvgBeginPath(vg);
                 nvgRect(vg, barX, segY, barWidth, segmentHeight);
-                nvgFillColor(vg, VFDConfig::ACTIVE_COLOR);
+                nvgFillColor(vg, createAlphaColor(VFDConfig::ACTIVE_COLOR, levelAlpha));
                 nvgFill(vg);
             }
         }
@@ -499,7 +506,7 @@ struct VFDCustomDisplay : LedDisplay {
             float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
             nvgBeginPath(vg);
             nvgRect(vg, barX, segY, barWidth, segmentHeight);
-            nvgFillColor(vg, VFDConfig::PEAK_COLOR);
+            nvgFillColor(vg, createAlphaColor(VFDConfig::PEAK_COLOR, peakAlpha));
             nvgFill(vg);
         }
     }
@@ -518,7 +525,7 @@ struct VFDCustomDisplay : LedDisplay {
         }
     }
     
-    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level) {
+    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, float levelAlpha) {
         float activeHeight = box.size.y * level;
         
         for (int c = 0; c < grid.columns; c++) {
@@ -527,16 +534,16 @@ struct VFDCustomDisplay : LedDisplay {
                 
                 if (box.size.y - dy <= activeHeight) {
                     float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
-                    drawActiveDot(vg, dx, dy);
+                    drawActiveDot(vg, dx, dy, levelAlpha);
                 }
             }
         }
     }
     
-    void drawActiveDot(NVGcontext* vg, float x, float y) {
-        // Glow effect
+    void drawActiveDot(NVGcontext* vg, float x, float y, float levelAlpha) {
+        // Glow effect with alpha
         NVGpaint paint = nvgRadialGradient(vg, x, y, 0.0f, VFDConfig::DOT_RADIUS * 3, 
-                                          nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 100), 
+                                          nvgTransRGBA(VFDConfig::ACTIVE_COLOR, static_cast<unsigned char>(levelAlpha * 100)), 
                                           nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0.0f));
         nvgBeginPath(vg);
         nvgCircle(vg, x, y, 3 * VFDConfig::DOT_RADIUS);
@@ -546,12 +553,12 @@ struct VFDCustomDisplay : LedDisplay {
         // Core dot
         nvgBeginPath(vg);
         nvgCircle(vg, x, y, VFDConfig::DOT_RADIUS);
-        nvgFillColor(vg, VFDConfig::ACTIVE_COLOR);
+        nvgFillColor(vg, createAlphaColor(VFDConfig::ACTIVE_COLOR, levelAlpha));
         nvgFill(vg);
     }
     
-    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel) {
-        nvgFillColor(vg, VFDConfig::PEAK_COLOR);
+    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel, float peakAlpha) {
+        nvgFillColor(vg, createAlphaColor(VFDConfig::PEAK_COLOR, peakAlpha));
         int peakRow = grid.rows - ceil(peakLevel * grid.rows);
         float dy = grid.yStart + peakRow * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
         
@@ -561,6 +568,22 @@ struct VFDCustomDisplay : LedDisplay {
             nvgCircle(vg, dx, dy, VFDConfig::DOT_RADIUS);
             nvgFill(vg);
         }
+    }
+
+    // Helper function to calculate alpha based on magnitude and alpha mode
+    float calculateAlpha(float normalizedLevel) {
+        if (!module || !module->alphaMode) {
+            return 1.0f; // Full opacity when alpha mode is off
+        }
+        
+        // In alpha mode: 0 magnitude = 100% transparency, max magnitude = 0% transparency
+        // So alpha = normalizedLevel (0.0 = fully transparent, 1.0 = fully opaque)
+        return clamp(normalizedLevel, 0.0f, 1.0f);
+    }
+    
+    // Helper function to create alpha-adjusted color
+    NVGcolor createAlphaColor(NVGcolor baseColor, float alpha) {
+        return nvgTransRGBA(baseColor, static_cast<unsigned char>(alpha * 255));
     }
 };
 
@@ -625,6 +648,14 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         menu->addChild(createCheckMenuItem("Bars", "",
             [=]() { return module->displayMode == DisplayMode::BARS; },
             [=]() { module->displayMode = DisplayMode::BARS; }
+        ));
+        
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Alpha Mode"));
+        
+        menu->addChild(createCheckMenuItem("Alpha Mode", "",
+            [=]() { return module->alphaMode; },
+            [=]() { module->alphaMode = !module->alphaMode; }
         ));
     }
 };
