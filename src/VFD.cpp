@@ -40,20 +40,23 @@ namespace VFDConfig {
     // UI Layout Constants
     static constexpr float DISPLAY_WIDTH = 496.0f;
     static constexpr float DISPLAY_HEIGHT = 280.0f;
-    static constexpr float DISPLAY_Y_OFFSET = 25.0f;
+    static constexpr float DISPLAY_Y_OFFSET = 26.0f;
     static constexpr float KNOB_Y_OFFSET = 15.0f;
     static constexpr float KNOB_BASE_X = 45.0f;
     static constexpr float KNOB_SPACING = 60.0f;
     static constexpr float JACK_X = 12.0f;
     static constexpr float JACK_SPACING = 35.0f;
     
-    // Display Constants
+    // Display Constants - Dots Mode
     static constexpr float DOT_RADIUS = 2.0f;
     static constexpr float DOT_SPACING = 2.0f;
     static constexpr float BAND_MARGIN = 3.0f;
     static constexpr int MIN_COLUMNS = 3;
     static constexpr int MAX_COLUMNS = 100;
-    static constexpr float BAR_PEAK_LINE_WIDTH = 1.0f;
+    
+    // Display Constants - Bars Mode
+    static constexpr int BAR_SEGMENTS = 30;  // Number of segments in bar mode
+    static constexpr float BAR_SEGMENT_HEIGHT = 4.5f;  // Height of each bar segment
     
     // Colors
     static const NVGcolor ACTIVE_COLOR = nvgRGB(0x93, 0xEA, 0xFF);
@@ -430,19 +433,30 @@ struct VFDCustomDisplay : LedDisplay {
     void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
         float barX = xOffset + VFDConfig::BAND_MARGIN;
         float barWidth = availableWidth;
-        float barHeight = box.size.y - 3 * VFDConfig::BAND_MARGIN;
+        float barHeight = box.size.y - 4 * VFDConfig::BAND_MARGIN; // Extra margin for bottom
         float barY = 2 * VFDConfig::BAND_MARGIN + 1.5f;
         
-        // Calculate number of horizontal segments based on dot grid rows
-        DisplayGrid grid(availableWidth, barHeight, xOffset);
-        int numSegments = grid.rows;
-        float segmentHeight = VFDConfig::DOT_RADIUS * 2;
-        float segmentSpacing = VFDConfig::DOT_SPACING;
+        // Use configured values directly
+        int numSegments = VFDConfig::BAR_SEGMENTS;
+        float segmentHeight = VFDConfig::BAR_SEGMENT_HEIGHT;
+        
+        // Calculate spacing to fit segments with bottom margin
+        float totalSegmentHeight = numSegments * segmentHeight;
+        float availableSpacing = barHeight - totalSegmentHeight;
+        float segmentSpacing = availableSpacing / (numSegments - 1);
+        
+        // Ensure minimum spacing
+        if (segmentSpacing < 0.5f) {
+            segmentSpacing = 0.5f;
+        }
+        
+        // Start from bottom with margin
+        float startY = barY;
         
         // Draw all segments (inactive background)
         nvgFillColor(vg, VFDConfig::INACTIVE_COLOR);
         for (int i = 0; i < numSegments; i++) {
-            float segY = barY + i * (segmentHeight + segmentSpacing);
+            float segY = startY + i * (segmentHeight + segmentSpacing);
             nvgBeginPath(vg);
             nvgRect(vg, barX, segY, barWidth, segmentHeight);
             nvgFill(vg);
@@ -454,16 +468,16 @@ struct VFDCustomDisplay : LedDisplay {
             
             for (int i = 0; i < activeSegments && i < numSegments; i++) {
                 int segmentIndex = numSegments - 1 - i; // Start from bottom
-                float segY = barY + segmentIndex * (segmentHeight + segmentSpacing);
+                float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
                 
                 // Glow effect for active segment
-                NVGpaint paint = nvgRadialGradient(vg, barX + barWidth/2, segY + segmentHeight/2, 0.0f, barWidth * 0.8f,
-                                                 nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 100),
-                                                 nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0));
-                nvgBeginPath(vg);
-                nvgRect(vg, barX - 2, segY - 1, barWidth + 4, segmentHeight + 2);
-                nvgFillPaint(vg, paint);
-                nvgFill(vg);
+                // NVGpaint paint = nvgRadialGradient(vg, barX + barWidth/2, segY + segmentHeight/2, 0.0f, barWidth * 0.8f,
+                //                                  nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 100),
+                //                                  nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0));
+                // nvgBeginPath(vg);
+                // nvgRect(vg, barX - 2, segY - 1, barWidth + 4, segmentHeight + 2);
+                // nvgFillPaint(vg, paint);
+                // nvgFill(vg);
                 
                 // Core active segment
                 nvgBeginPath(vg);
@@ -482,7 +496,7 @@ struct VFDCustomDisplay : LedDisplay {
             int currentActiveSegment = numSegments - static_cast<int>(std::ceil(level * numSegments));
             peakSegment = std::min(peakSegment, currentActiveSegment);
             
-            float segY = barY + peakSegment * (segmentHeight + segmentSpacing);
+            float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
             nvgBeginPath(vg);
             nvgRect(vg, barX, segY, barWidth, segmentHeight);
             nvgFillColor(vg, VFDConfig::PEAK_COLOR);
