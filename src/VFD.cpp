@@ -17,7 +17,7 @@
 namespace VFDConfig {
     // DSP Constants
     static constexpr int FFT_SIZE = 2048;
-    static constexpr int NUM_BANDS = 13;
+    static constexpr int NUM_BANDS = 12;
     static constexpr float INPUT_GAIN = 0.1f;
     static constexpr float MIN_DELAY_TIME = 0.001f;
     static constexpr float NOISE_FLOOR_DB = -120.0f;
@@ -60,8 +60,8 @@ namespace VFDConfig {
     static const NVGcolor PEAK_COLOR = nvgRGB(0xFF, 0x30, 0x30);
     
     // Frequency band edges (Hz)
-    static constexpr std::array<float, NUM_BANDS> BAND_EDGES_LOW = {
-        13.f, 25.f, 40.f, 63.f, 100.f, 160.f, 250.f,
+    static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {
+        25.f, 40.f, 63.f, 100.f, 160.f, 250.f,
         500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f
     };
 }
@@ -260,10 +260,18 @@ struct VintageSpectrumAnalyzer : Module {
     
     std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges() {
         std::array<float, VFDConfig::NUM_BANDS + 1> edges;
-        for (int i = 0; i < VFDConfig::NUM_BANDS; ++i) {
-            edges[i] = VFDConfig::BAND_EDGES_LOW[i];
+        
+        // First edge: geometric mean between first center and a reasonable low frequency
+        edges[0] = std::sqrt(VFDConfig::BAND_CENTERS[0] * (VFDConfig::BAND_CENTERS[0] / 2.0f));
+        
+        // Middle edges: geometric mean between adjacent centers
+        for (int i = 1; i < VFDConfig::NUM_BANDS; ++i) {
+            edges[i] = std::sqrt(VFDConfig::BAND_CENTERS[i-1] * VFDConfig::BAND_CENTERS[i]);
         }
-        edges[VFDConfig::NUM_BANDS] = APP->engine->getSampleRate() * 0.5f;  // Nyquist
+        
+        // Last edge: Nyquist frequency
+        edges[VFDConfig::NUM_BANDS] = APP->engine->getSampleRate() * 0.5f;
+        
         return edges;
     }
     
