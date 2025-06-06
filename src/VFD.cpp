@@ -26,13 +26,13 @@ namespace VFDConfig {
     // Parameter Ranges
     static constexpr float UPPER_DB_MIN = -40.0f;
     static constexpr float UPPER_DB_MAX = 0.0f;
-    static constexpr float UPPER_DB_DEFAULT = 0.0f;
+    static constexpr float UPPER_DB_DEFAULT = -12.0f;
     static constexpr float LOWER_DB_MIN = -120.0f;
     static constexpr float LOWER_DB_MAX = -60.0f;
-    static constexpr float LOWER_DB_DEFAULT = -30.0f;
+    static constexpr float LOWER_DB_DEFAULT = -100.0f;
     static constexpr float FALL_DELAY_MIN = 0.01f;
     static constexpr float FALL_DELAY_MAX = 2.0f;
-    static constexpr float FALL_DELAY_DEFAULT = 0.5f;
+    static constexpr float FALL_DELAY_DEFAULT = 0.01f;
     static constexpr float PEAK_FALL_DELAY_MIN = 0.01f;
     static constexpr float PEAK_FALL_DELAY_MAX = 3.0f;
     static constexpr float PEAK_FALL_DELAY_DEFAULT = 1.0f;
