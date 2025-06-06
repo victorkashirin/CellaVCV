@@ -53,6 +53,7 @@ namespace VFDConfig {
     static constexpr float BAND_MARGIN = 3.0f;
     static constexpr int MIN_COLUMNS = 3;
     static constexpr int MAX_COLUMNS = 100;
+    static constexpr float BAR_PEAK_LINE_WIDTH = 1.0f;
     
     // Colors
     static const NVGcolor ACTIVE_COLOR = nvgRGB(0x93, 0xEA, 0xFF);
@@ -66,6 +67,11 @@ namespace VFDConfig {
     };
 }
 
+// Display Modes
+enum class DisplayMode {
+    DOTS,
+    BARS
+};
 
 template <typename T>
 static inline T clamp(T v, T lo, T hi) {
@@ -139,6 +145,9 @@ struct VintageSpectrumAnalyzer : Module {
     std::vector<float> capture;
     std::array<SpectrumBand, VFDConfig::NUM_BANDS> bands;
     int writePos = 0;
+    
+    // Display state
+    DisplayMode displayMode = DisplayMode::DOTS;
 
     VintageSpectrumAnalyzer() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -314,6 +323,19 @@ struct VintageSpectrumAnalyzer : Module {
     float getBandPeak(int band) const { 
         return bands[band].peakLevel; 
     }
+    
+    json_t* dataToJson() override {
+        json_t* rootJ = json_object();
+        json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
+        return rootJ;
+    }
+    
+    void dataFromJson(json_t* rootJ) override {
+        json_t* displayModeJ = json_object_get(rootJ, "displayMode");
+        if (displayModeJ) {
+            displayMode = static_cast<DisplayMode>(json_integer_value(displayModeJ));
+        }
+    }
 };
 
 // ============================================================================
@@ -383,6 +405,14 @@ struct VFDCustomDisplay : LedDisplay {
         float xOffset = VFDConfig::BAND_MARGIN + bandIndex * bandWidth;
         float availableWidth = bandWidth - VFDConfig::BAND_MARGIN * 2;
         
+        if (module->displayMode == DisplayMode::DOTS) {
+            drawDotsMode(vg, level, peakLevel, xOffset, availableWidth);
+        } else {
+            drawBarsMode(vg, level, peakLevel, xOffset, availableWidth);
+        }
+    }
+    
+    void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
         DisplayGrid grid(availableWidth, box.size.y - 3 * VFDConfig::BAND_MARGIN, xOffset);
         grid.xStart += VFDConfig::BAND_MARGIN;
         
@@ -394,6 +424,69 @@ struct VFDCustomDisplay : LedDisplay {
         
         if (peakLevel > 0.0f) {
             drawPeakIndicator(vg, grid, peakLevel);
+        }
+    }
+    
+    void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
+        float barX = xOffset + VFDConfig::BAND_MARGIN;
+        float barWidth = availableWidth;
+        float barHeight = box.size.y - 3 * VFDConfig::BAND_MARGIN;
+        float barY = 2 * VFDConfig::BAND_MARGIN + 1.5f;
+        
+        // Calculate number of horizontal segments based on dot grid rows
+        DisplayGrid grid(availableWidth, barHeight, xOffset);
+        int numSegments = grid.rows;
+        float segmentHeight = VFDConfig::DOT_RADIUS * 2;
+        float segmentSpacing = VFDConfig::DOT_SPACING;
+        
+        // Draw all segments (inactive background)
+        nvgFillColor(vg, VFDConfig::INACTIVE_COLOR);
+        for (int i = 0; i < numSegments; i++) {
+            float segY = barY + i * (segmentHeight + segmentSpacing);
+            nvgBeginPath(vg);
+            nvgRect(vg, barX, segY, barWidth, segmentHeight);
+            nvgFill(vg);
+        }
+        
+        // Draw active segments
+        if (level > 0.0f) {
+            int activeSegments = static_cast<int>(std::ceil(level * numSegments));
+            
+            for (int i = 0; i < activeSegments && i < numSegments; i++) {
+                int segmentIndex = numSegments - 1 - i; // Start from bottom
+                float segY = barY + segmentIndex * (segmentHeight + segmentSpacing);
+                
+                // Glow effect for active segment
+                NVGpaint paint = nvgRadialGradient(vg, barX + barWidth/2, segY + segmentHeight/2, 0.0f, barWidth * 0.8f,
+                                                 nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 100),
+                                                 nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0));
+                nvgBeginPath(vg);
+                nvgRect(vg, barX - 2, segY - 1, barWidth + 4, segmentHeight + 2);
+                nvgFillPaint(vg, paint);
+                nvgFill(vg);
+                
+                // Core active segment
+                nvgBeginPath(vg);
+                nvgRect(vg, barX, segY, barWidth, segmentHeight);
+                nvgFillColor(vg, VFDConfig::ACTIVE_COLOR);
+                nvgFill(vg);
+            }
+        }
+        
+        // Draw peak segment
+        if (peakLevel > 0.0f) {
+            int peakSegment = numSegments - 1 - static_cast<int>(std::floor(peakLevel * numSegments));
+            peakSegment = clamp(peakSegment, 0, numSegments - 1);
+            
+            // Ensure peak is never below current level
+            int currentActiveSegment = numSegments - static_cast<int>(std::ceil(level * numSegments));
+            peakSegment = std::min(peakSegment, currentActiveSegment);
+            
+            float segY = barY + peakSegment * (segmentHeight + segmentSpacing);
+            nvgBeginPath(vg);
+            nvgRect(vg, barX, segY, barWidth, segmentHeight);
+            nvgFillColor(vg, VFDConfig::PEAK_COLOR);
+            nvgFill(vg);
         }
     }
     
@@ -501,6 +594,24 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
                                                module, VintageSpectrumAnalyzer::IN_L_INPUT));
         addInput(createInputCentered<PJ301MPort>(Vec(VFDConfig::JACK_X + VFDConfig::JACK_SPACING, jackY), 
                                                module, VintageSpectrumAnalyzer::IN_R_INPUT));
+    }
+    
+    void appendContextMenu(Menu* menu) override {
+        VintageSpectrumAnalyzer* module = dynamic_cast<VintageSpectrumAnalyzer*>(this->module);
+        if (!module) return;
+        
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Display Mode"));
+        
+        menu->addChild(createCheckMenuItem("Dots", "",
+            [=]() { return module->displayMode == DisplayMode::DOTS; },
+            [=]() { module->displayMode = DisplayMode::DOTS; }
+        ));
+        
+        menu->addChild(createCheckMenuItem("Bars", "",
+            [=]() { return module->displayMode == DisplayMode::BARS; },
+            [=]() { module->displayMode = DisplayMode::BARS; }
+        ));
     }
 };
 
