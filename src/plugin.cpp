@@ -16,6 +16,5 @@ void init(Plugin *p) {
     p->addModel(modelLoud);
     p->addModel(modelIntegral);
     p->addModel(model2State);
-    p->addModel(modelVFDFreqAnalyzer);
-    p->addModel(modelVintageSpectrumAnalyzer);
+    p->addModel(modelSpectrum);
 }

@@ -1,14 +1,3 @@
-// Vintage Spectrum Analyzer – single‑file VCV Rack 2.0 module  (dynamic‑range)
-// MIT‑licensed example code – drop this file into your plugin's src/ folder as plugin.cpp
-// -----------------------------------------------------------------------------
-// CHANGE‑LOG 2025‑04‑29 (3rd rev)
-// • Added *configurable* display window: two knobs set the **upper** (‑40…0 dB) and
-//   **lower** (‑120…‑60 dB) limits. Default window is −30…0 dB as before.
-// • Analyzer and renderer now respect those limits when clipping and normalising.
-// • UI: two small trim‑knobs appear at the bottom of the module labelled "TOP" and "BOTTOM".
-//
-// Everything still lives in ONE file for easy drop‑in use.
-
 #include "plugin.hpp"
 
 // ============================================================================
@@ -132,10 +121,16 @@ struct DisplayRange {
     }
 };
 
+struct VFDQuantity : ParamQuantity {
+    std::string getDisplayValueString() override {
+        return rack::string::f("%0.2f", getDisplayValue());
+    }
+};
+
 // ============================================================================
 //  Module
 // ============================================================================
-struct VintageSpectrumAnalyzer : Module {
+struct Spectrum : Module {
     enum ParamIds {
         UPPER_PARAM,
         LOWER_PARAM,
@@ -159,7 +154,7 @@ struct VintageSpectrumAnalyzer : Module {
     bool alphaMode = false;   // New: Alpha mode for transparency-based visualization
     bool showLabels = false;  // Show frequency labels for each band
 
-    VintageSpectrumAnalyzer() {
+    Spectrum() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
         configureParameters();
         configureInputs();
@@ -167,14 +162,14 @@ struct VintageSpectrumAnalyzer : Module {
     }
 
     void configureParameters() {
-        configParam(UPPER_PARAM, VFDConfig::UPPER_DB_MIN, VFDConfig::UPPER_DB_MAX,
-                    VFDConfig::UPPER_DB_DEFAULT, "Top", " dB");
-        configParam(LOWER_PARAM, VFDConfig::LOWER_DB_MIN, VFDConfig::LOWER_DB_MAX,
-                    VFDConfig::LOWER_DB_DEFAULT, "Bottom", " dB");
-        configParam(FALL_DELAY_PARAM, VFDConfig::FALL_DELAY_MIN, VFDConfig::FALL_DELAY_MAX,
-                    VFDConfig::FALL_DELAY_DEFAULT, "Fall Delay", "s");
-        configParam(PEAK_FALL_DELAY_PARAM, VFDConfig::PEAK_FALL_DELAY_MIN, VFDConfig::PEAK_FALL_DELAY_MAX,
-                    VFDConfig::PEAK_FALL_DELAY_DEFAULT, "Peak Fall Delay", "s");
+        configParam<VFDQuantity>(UPPER_PARAM, VFDConfig::UPPER_DB_MIN, VFDConfig::UPPER_DB_MAX,
+                                 VFDConfig::UPPER_DB_DEFAULT, "Top", " dB");
+        configParam<VFDQuantity>(LOWER_PARAM, VFDConfig::LOWER_DB_MIN, VFDConfig::LOWER_DB_MAX,
+                                 VFDConfig::LOWER_DB_DEFAULT, "Bottom", " dB");
+        configParam<VFDQuantity>(FALL_DELAY_PARAM, VFDConfig::FALL_DELAY_MIN, VFDConfig::FALL_DELAY_MAX,
+                                 VFDConfig::FALL_DELAY_DEFAULT, "Fall Delay", "s");
+        configParam<VFDQuantity>(PEAK_FALL_DELAY_PARAM, VFDConfig::PEAK_FALL_DELAY_MIN, VFDConfig::PEAK_FALL_DELAY_MAX,
+                                 VFDConfig::PEAK_FALL_DELAY_DEFAULT, "Peak Fall Delay", "s");
     }
 
     void configureInputs() {
@@ -394,7 +389,7 @@ struct DisplayGrid {
 //  VFD Display Widget
 // ============================================================================
 struct VFDCustomDisplay : LedDisplay {
-    VintageSpectrumAnalyzer* module;
+    Spectrum* module;
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1 || !module) return;
@@ -634,21 +629,28 @@ struct VFDCustomDisplay : LedDisplay {
     }
 };
 
+struct VFDSlider : ui::Slider {
+    VFDSlider(ParamQuantity* qnt) {
+        quantity = qnt;
+        box.size.x = 200.0f;
+    }
+    ~VFDSlider() {}
+};
+
 // ============================================================================
 //  Module Widget
 // ============================================================================
-struct VintageSpectrumAnalyzerWidget : ModuleWidget {
-    VintageSpectrumAnalyzerWidget(VintageSpectrumAnalyzer* module) {
+struct SpectrumWidget : ModuleWidget {
+    SpectrumWidget(Spectrum* module) {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/VFDFreqAnalyzer.svg"),
                              asset::plugin(pluginInstance, "res/VFDFreqAnalyzer-dark.svg")));
 
         addDisplay(module);
-        // addControls(module);
         addInputs(module);
     }
 
-    void addDisplay(VintageSpectrumAnalyzer* module) {
+    void addDisplay(Spectrum* module) {
         VFDCustomDisplay* display = new VFDCustomDisplay();
         display->module = module;
         display->box.pos = Vec(VFDConfig::DISPLAY_X_OFFSET, VFDConfig::DISPLAY_Y_OFFSET);
@@ -656,31 +658,18 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         addChild(display);
     }
 
-    void addControls(VintageSpectrumAnalyzer* module) {
-        const float knobY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + VFDConfig::KNOB_Y_OFFSET;
-
-        addParam(createParamCentered<Trimpot>(Vec(VFDConfig::KNOB_BASE_X, knobY),
-                                              module, VintageSpectrumAnalyzer::UPPER_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(VFDConfig::KNOB_BASE_X + VFDConfig::KNOB_SPACING, knobY),
-                                              module, VintageSpectrumAnalyzer::LOWER_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(VFDConfig::KNOB_BASE_X + 2 * VFDConfig::KNOB_SPACING, knobY),
-                                              module, VintageSpectrumAnalyzer::FALL_DELAY_PARAM));
-        addParam(createParamCentered<Trimpot>(Vec(VFDConfig::KNOB_BASE_X + 3 * VFDConfig::KNOB_SPACING, knobY),
-                                              module, VintageSpectrumAnalyzer::PEAK_FALL_DELAY_PARAM));
-    }
-
-    void addInputs(VintageSpectrumAnalyzer* module) {
+    void addInputs(Spectrum* module) {
         const float knobY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + VFDConfig::KNOB_Y_OFFSET;
         const float jackY = knobY + 18.f;
 
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X, jackY),
-                                                       module, VintageSpectrumAnalyzer::IN_L_INPUT));
+                                                       module, Spectrum::IN_L_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X + VFDConfig::JACK_SPACING, jackY),
-                                                       module, VintageSpectrumAnalyzer::IN_R_INPUT));
+                                                       module, Spectrum::IN_R_INPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
-        VintageSpectrumAnalyzer* module = dynamic_cast<VintageSpectrumAnalyzer*>(this->module);
+        Spectrum* module = dynamic_cast<Spectrum*>(this->module);
         if (!module) return;
 
         menu->addChild(new MenuSeparator);
@@ -699,7 +688,12 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         menu->addChild(createMenuLabel("Frequency Labels"));
 
         menu->addChild(createCheckMenuItem("Show Labels", "", [=]() { return module->showLabels; }, [=]() { module->showLabels = !module->showLabels; }));
+
+        menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::UPPER_PARAM)));
+        menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::LOWER_PARAM)));
+        menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::FALL_DELAY_PARAM)));
+        menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::PEAK_FALL_DELAY_PARAM)));
     }
 };
 
-Model* modelVintageSpectrumAnalyzer = createModel<VintageSpectrumAnalyzer, VintageSpectrumAnalyzerWidget>("VintageSpectrumAnalyzer");
+Model* modelSpectrum = createModel<Spectrum, SpectrumWidget>("Spectrum");

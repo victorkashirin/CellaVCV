@@ -140,23 +140,10 @@
       ]
     },
     {
-      "slug": "VFDFreqAnalyzer",
-      "name": "VFDFreqAnalyzer",
-      "description": "Smooth random voltage generator that uses Bezier curves",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#bezier",
-      "keywords": "rnd curve smooth",
-      "tags": [
-        "Utility",
-        "LFO",
-        "Random",
-        "Slew limiter"
-      ]
-    },
-    {
-      "slug": "VintageSpectrumAnalyzer",
-      "name": "VintageSpectrumAnalyzer",
-      "description": "Smooth random voltage generator that uses Bezier curves",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#bezier",
+      "slug": "Spectrum",
+      "name": "Spectrum",
+      "description": "Spectrum Analyzer",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
       "keywords": "rnd curve smooth",
       "tags": [
         "Utility",
