@@ -39,9 +39,10 @@ static constexpr float PEAK_FALL_DELAY_DEFAULT = 1.0f;
 
 // UI Layout Constants
 static constexpr float DISPLAY_WIDTH = 496.0f;
-static constexpr float DISPLAY_HEIGHT = 280.0f;
+static constexpr float DISPLAY_X_OFFSET = 0.0f;
+static constexpr float DISPLAY_HEIGHT = 320.0f;
 static constexpr float DISPLAY_Y_OFFSET = 26.0f;
-static constexpr float KNOB_Y_OFFSET = 15.0f;
+static constexpr float KNOB_Y_OFFSET = 0.0f;
 static constexpr float KNOB_BASE_X = 45.0f;
 static constexpr float KNOB_SPACING = 60.0f;
 static constexpr float JACK_X = 12.0f;
@@ -643,14 +644,14 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
                              asset::plugin(pluginInstance, "res/VFDFreqAnalyzer-dark.svg")));
 
         addDisplay(module);
-        addControls(module);
+        // addControls(module);
         addInputs(module);
     }
 
     void addDisplay(VintageSpectrumAnalyzer* module) {
         VFDCustomDisplay* display = new VFDCustomDisplay();
         display->module = module;
-        display->box.pos = Vec(0.0, VFDConfig::DISPLAY_Y_OFFSET);
+        display->box.pos = Vec(VFDConfig::DISPLAY_X_OFFSET, VFDConfig::DISPLAY_Y_OFFSET);
         display->box.size = Vec(VFDConfig::DISPLAY_WIDTH, VFDConfig::DISPLAY_HEIGHT);
         addChild(display);
     }
@@ -670,12 +671,12 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
 
     void addInputs(VintageSpectrumAnalyzer* module) {
         const float knobY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + VFDConfig::KNOB_Y_OFFSET;
-        const float jackY = knobY + 28.f;
+        const float jackY = knobY + 18.f;
 
-        addInput(createInputCentered<PJ301MPort>(Vec(VFDConfig::JACK_X, jackY),
-                                                 module, VintageSpectrumAnalyzer::IN_L_INPUT));
-        addInput(createInputCentered<PJ301MPort>(Vec(VFDConfig::JACK_X + VFDConfig::JACK_SPACING, jackY),
-                                                 module, VintageSpectrumAnalyzer::IN_R_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X, jackY),
+                                                       module, VintageSpectrumAnalyzer::IN_L_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X + VFDConfig::JACK_SPACING, jackY),
+                                                       module, VintageSpectrumAnalyzer::IN_R_INPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
