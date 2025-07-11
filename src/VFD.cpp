@@ -58,6 +58,9 @@ static constexpr int MAX_COLUMNS = 100;
 static constexpr int BAR_SEGMENTS = 30;            // Number of segments in bar mode
 static constexpr float BAR_SEGMENT_HEIGHT = 4.5f;  // Height of each bar segment
 
+// Label Constants
+static constexpr float LABEL_HEIGHT = 12.0f;  // Space reserved for frequency labels
+
 // Colors
 static const NVGcolor ACTIVE_COLOR = nvgRGB(0x93, 0xEA, 0xFF);
 static const NVGcolor INACTIVE_COLOR = nvgRGB(0x20, 0x20, 0x20);
@@ -152,7 +155,8 @@ struct VintageSpectrumAnalyzer : Module {
 
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
-    bool alphaMode = false;  // New: Alpha mode for transparency-based visualization
+    bool alphaMode = false;   // New: Alpha mode for transparency-based visualization
+    bool showLabels = false;  // Show frequency labels for each band
 
     VintageSpectrumAnalyzer() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -329,6 +333,7 @@ struct VintageSpectrumAnalyzer : Module {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
         json_object_set_new(rootJ, "alphaMode", json_boolean(alphaMode));
+        json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         return rootJ;
     }
 
@@ -341,6 +346,11 @@ struct VintageSpectrumAnalyzer : Module {
         json_t* alphaModeJ = json_object_get(rootJ, "alphaMode");
         if (alphaModeJ) {
             alphaMode = json_boolean_value(alphaModeJ);
+        }
+
+        json_t* showLabelsJ = json_object_get(rootJ, "showLabels");
+        if (showLabelsJ) {
+            showLabels = json_boolean_value(showLabelsJ);
         }
     }
 };
@@ -358,13 +368,13 @@ struct DisplayGrid {
 
     DisplayGrid(float availableWidth, float availableHeight, float xOffset) {
         columns = calculateColumns(availableWidth);
-        rows = calculateRows(availableHeight);
+        rows = calculateRows(availableHeight) + 1;
 
         gridWidth = columns * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING) - VFDConfig::DOT_SPACING;
         gridHeight = rows * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING) - VFDConfig::DOT_SPACING;
 
         xStart = xOffset + (availableWidth - gridWidth) / 2;
-        yStart = 2 * VFDConfig::BAND_MARGIN + 1.5f;
+        yStart = 2 * VFDConfig::BAND_MARGIN;
     }
 
     int calculateColumns(float availableWidth) {
@@ -390,6 +400,9 @@ struct VFDCustomDisplay : LedDisplay {
 
         nvgSave(args.vg);
         drawBands(args.vg);
+        if (module->showLabels) {
+            drawFrequencyLabels(args.vg);
+        }
         nvgRestore(args.vg);
     }
 
@@ -420,7 +433,7 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
-        DisplayGrid grid(availableWidth, box.size.y - 3 * VFDConfig::BAND_MARGIN, xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
+        DisplayGrid grid(availableWidth, getAvailableDisplayHeight(), xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
         // Calculate alpha for this band
         float levelAlpha = calculateAlpha(level);
@@ -441,7 +454,7 @@ struct VFDCustomDisplay : LedDisplay {
     void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
         float barX = xOffset + VFDConfig::BAND_MARGIN;
         float barWidth = availableWidth;
-        float barHeight = box.size.y - 4 * VFDConfig::BAND_MARGIN;  // Extra margin for bottom
+        float barHeight = getAvailableDisplayHeight();
         float barY = 2 * VFDConfig::BAND_MARGIN + 1.5f;
 
         // Use configured values directly
@@ -522,13 +535,13 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, float levelAlpha) {
-        float activeHeight = box.size.y * level;
+        float activeHeight = getAvailableDisplayHeight() * level;
 
         for (int c = 0; c < grid.columns; c++) {
             for (int r = 0; r < grid.rows; r++) {
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
 
-                if (box.size.y - dy <= activeHeight) {
+                if (grid.yStart + grid.gridHeight - dy <= activeHeight) {
                     float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                     drawActiveDot(vg, dx, dy, levelAlpha);
                 }
@@ -580,6 +593,43 @@ struct VFDCustomDisplay : LedDisplay {
     // Helper function to create alpha-adjusted color
     NVGcolor createAlphaColor(NVGcolor baseColor, float alpha) {
         return nvgTransRGBA(baseColor, static_cast<unsigned char>(alpha * 255));
+    }
+
+    // Helper function to get available display height (accounting for labels)
+    float getAvailableDisplayHeight() {
+        float totalHeight = box.size.y - 3 * VFDConfig::BAND_MARGIN;
+        if (module && module->showLabels) {
+            totalHeight -= VFDConfig::LABEL_HEIGHT;
+        }
+        return totalHeight;
+    }
+
+    void drawFrequencyLabels(NVGcontext* vg) {
+        size_t numBands = VFDConfig::NUM_BANDS;
+        const float totalWidth = box.size.x - 2 * VFDConfig::BAND_MARGIN;
+        const float bandWidth = totalWidth / numBands;
+
+        // Set up text style
+        nvgFontSize(vg, 9.0f);
+        nvgFontFaceId(vg, 0);
+        nvgFillColor(vg, nvgRGB(180, 180, 180));  // Light gray color
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+
+        for (size_t b = 0; b < numBands; b++) {
+            float xCenter = VFDConfig::BAND_MARGIN + (b + 0.5f) * bandWidth;
+            float yPos = box.size.y - VFDConfig::LABEL_HEIGHT;  // Position in label area
+
+            // Format frequency label
+            float freq = VFDConfig::BAND_CENTERS[b];
+            char label[16];
+            if (freq >= 1000.0f) {
+                snprintf(label, sizeof(label), "%.0fk", freq / 1000.0f);
+            } else {
+                snprintf(label, sizeof(label), "%.0f", freq);
+            }
+
+            nvgText(vg, xCenter, yPos, label, NULL);
+        }
     }
 };
 
@@ -643,6 +693,11 @@ struct VintageSpectrumAnalyzerWidget : ModuleWidget {
         menu->addChild(createMenuLabel("Alpha Mode"));
 
         menu->addChild(createCheckMenuItem("Alpha Mode", "", [=]() { return module->alphaMode; }, [=]() { module->alphaMode = !module->alphaMode; }));
+
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Frequency Labels"));
+
+        menu->addChild(createCheckMenuItem("Show Labels", "", [=]() { return module->showLabels; }, [=]() { module->showLabels = !module->showLabels; }));
     }
 };
 
