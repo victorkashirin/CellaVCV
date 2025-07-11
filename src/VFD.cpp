@@ -420,8 +420,7 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
-        DisplayGrid grid(availableWidth, box.size.y - 3 * VFDConfig::BAND_MARGIN, xOffset);
-        grid.xStart += VFDConfig::BAND_MARGIN;
+        DisplayGrid grid(availableWidth, box.size.y - 3 * VFDConfig::BAND_MARGIN, xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
         // Calculate alpha for this band
         float levelAlpha = calculateAlpha(level);
