@@ -31,11 +31,6 @@ static constexpr float DISPLAY_WIDTH = 496.0f;
 static constexpr float DISPLAY_X_OFFSET = 0.0f;
 static constexpr float DISPLAY_HEIGHT = 320.0f;
 static constexpr float DISPLAY_Y_OFFSET = 26.0f;
-static constexpr float KNOB_Y_OFFSET = 0.0f;
-static constexpr float KNOB_BASE_X = 45.0f;
-static constexpr float KNOB_SPACING = 60.0f;
-static constexpr float JACK_X = 12.0f;
-static constexpr float JACK_SPACING = 35.0f;
 
 // Display Constants - Dots Mode
 static constexpr float DOT_RADIUS = 2.0f;
@@ -51,11 +46,6 @@ static constexpr float BAR_SEGMENT_HEIGHT = 4.5f;  // Height of each bar segment
 // Label Constants
 static constexpr float LABEL_HEIGHT = 12.0f;  // Space reserved for frequency labels
 
-// Colors
-static const NVGcolor ACTIVE_COLOR = nvgRGB(0x93, 0xEA, 0xFF);
-static const NVGcolor INACTIVE_COLOR = nvgRGB(0x20, 0x20, 0x20);
-static const NVGcolor PEAK_COLOR = nvgRGB(0xFF, 0x30, 0x30);
-
 // Frequency band edges (Hz)
 static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {
     25.f, 40.f, 63.f, 100.f, 160.f, 250.f,
@@ -67,6 +57,41 @@ enum class DisplayMode {
     DOTS,
     BARS
 };
+
+// Theme System
+enum class Theme {
+    CLASSIC,
+    WARM,
+    COOL
+};
+
+struct ThemeColors {
+    NVGcolor active;
+    NVGcolor inactive;
+    NVGcolor peak;
+};
+
+// Predefined themes
+static const std::array<ThemeColors, 3> THEMES = {
+    {// CLASSIC (original colors)
+     {nvgRGB(0x93, 0xEA, 0xFF), nvgRGB(0x20, 0x20, 0x20), nvgRGB(0xFF, 0x30, 0x30)},
+     // WARM
+     {nvgRGB(0xFF, 0xB3, 0x47), nvgRGB(0x2A, 0x1A, 0x10), nvgRGB(0xFF, 0x47, 0x47)},
+     // COOL
+     {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x10, 0x2A, 0x1A), nvgRGB(0xFF, 0x87, 0x47)}}};
+
+// Theme-based color functions
+static NVGcolor getActiveColor(Theme theme) {
+    return THEMES[static_cast<int>(theme)].active;
+}
+
+static NVGcolor getInactiveColor(Theme theme) {
+    return THEMES[static_cast<int>(theme)].inactive;
+}
+
+static NVGcolor getPeakColor(Theme theme) {
+    return THEMES[static_cast<int>(theme)].peak;
+}
 
 template <typename T>
 static inline T clamp(T v, T lo, T hi) {
@@ -151,8 +176,9 @@ struct Spectrum : Module {
 
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
-    bool alphaMode = false;   // New: Alpha mode for transparency-based visualization
-    bool showLabels = false;  // Show frequency labels for each band
+    bool alphaMode = false;
+    bool showLabels = false;
+    Theme currentTheme = Theme::CLASSIC;
 
     Spectrum() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -191,7 +217,7 @@ struct Spectrum : Module {
         float inputSignal = getInputSignal();
         processWindowedInput(inputSignal);
         updateDecayAndPeaks(args);
-        handleNoInputDecay(args);
+        // handleNoInputDecay(args);
     }
 
     float getInputSignal() {
@@ -317,19 +343,12 @@ struct Spectrum : Module {
         return sum / (binHi - binLo);
     }
 
-    float getBandDb(int band) const {
-        return bands[band].dbLevel;
-    }
-
-    float getBandPeak(int band) const {
-        return bands[band].peakLevel;
-    }
-
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
         json_object_set_new(rootJ, "alphaMode", json_boolean(alphaMode));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
+        json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
         return rootJ;
     }
 
@@ -347,6 +366,11 @@ struct Spectrum : Module {
         json_t* showLabelsJ = json_object_get(rootJ, "showLabels");
         if (showLabelsJ) {
             showLabels = json_boolean_value(showLabelsJ);
+        }
+
+        json_t* currentThemeJ = json_object_get(rootJ, "currentTheme");
+        if (currentThemeJ) {
+            currentTheme = static_cast<Theme>(json_integer_value(currentThemeJ));
         }
     }
 };
@@ -415,8 +439,8 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawSingleBand(NVGcontext* vg, size_t bandIndex, float bandWidth, const DisplayRange& range) {
-        float level = range.normalizeDb(module->getBandDb(bandIndex));
-        float peakLevel = module->getBandPeak(bandIndex);
+        float level = range.normalizeDb(module->bands[bandIndex].dbLevel);
+        float peakLevel = module->bands[bandIndex].peakLevel;
 
         float xOffset = VFDConfig::BAND_MARGIN + bandIndex * bandWidth;
         float availableWidth = bandWidth - VFDConfig::BAND_MARGIN * 2;
@@ -436,7 +460,7 @@ struct VFDCustomDisplay : LedDisplay {
         float peakAlpha = calculateAlpha(peakLevel);
 
         // Draw inactive dots with normal color (not affected by level)
-        drawDotGrid(vg, grid, VFDConfig::INACTIVE_COLOR);
+        drawDotGrid(vg, grid, getInactiveColor(module->currentTheme));
 
         if (level > 0.0f) {
             drawActiveDots(vg, grid, level, levelAlpha);
@@ -494,7 +518,7 @@ struct VFDCustomDisplay : LedDisplay {
                 // Core active segment with alpha
                 nvgBeginPath(vg);
                 nvgRect(vg, barX, segY, barWidth, segmentHeight);
-                nvgFillColor(vg, createAlphaColor(VFDConfig::ACTIVE_COLOR, levelAlpha));
+                nvgFillColor(vg, createAlphaColor(getActiveColor(module->currentTheme), levelAlpha));
                 nvgFill(vg);
             }
         }
@@ -511,7 +535,7 @@ struct VFDCustomDisplay : LedDisplay {
             float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
             nvgBeginPath(vg);
             nvgRect(vg, barX, segY, barWidth, segmentHeight);
-            nvgFillColor(vg, createAlphaColor(VFDConfig::PEAK_COLOR, peakAlpha));
+            nvgFillColor(vg, createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
             nvgFill(vg);
         }
     }
@@ -546,10 +570,13 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawActiveDot(NVGcontext* vg, float x, float y, float levelAlpha) {
+        if (!module) return;
+
         // Glow effect with alpha
+        NVGcolor activeColor = getActiveColor(module->currentTheme);
         NVGpaint paint = nvgRadialGradient(vg, x, y, 0.0f, VFDConfig::DOT_RADIUS * 3,
-                                           nvgTransRGBA(VFDConfig::ACTIVE_COLOR, static_cast<unsigned char>(levelAlpha * 100)),
-                                           nvgTransRGBA(VFDConfig::ACTIVE_COLOR, 0.0f));
+                                           nvgTransRGBA(activeColor, static_cast<unsigned char>(levelAlpha * 100)),
+                                           nvgTransRGBA(activeColor, 0.0f));
         nvgBeginPath(vg);
         nvgCircle(vg, x, y, 3 * VFDConfig::DOT_RADIUS);
         nvgFillPaint(vg, paint);
@@ -558,12 +585,12 @@ struct VFDCustomDisplay : LedDisplay {
         // Core dot
         nvgBeginPath(vg);
         nvgCircle(vg, x, y, VFDConfig::DOT_RADIUS);
-        nvgFillColor(vg, createAlphaColor(VFDConfig::ACTIVE_COLOR, levelAlpha));
+        nvgFillColor(vg, createAlphaColor(activeColor, levelAlpha));
         nvgFill(vg);
     }
 
     void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel, float peakAlpha) {
-        nvgFillColor(vg, createAlphaColor(VFDConfig::PEAK_COLOR, peakAlpha));
+        nvgFillColor(vg, createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
         int peakRow = grid.rows - ceil(peakLevel * grid.rows);
         float dy = grid.yStart + peakRow * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
 
@@ -659,12 +686,11 @@ struct SpectrumWidget : ModuleWidget {
     }
 
     void addInputs(Spectrum* module) {
-        const float knobY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + VFDConfig::KNOB_Y_OFFSET;
-        const float jackY = knobY + 18.f;
+        const float jackY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + 18.f;
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X, jackY),
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f, jackY),
                                                        module, Spectrum::IN_L_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(VFDConfig::JACK_X + VFDConfig::JACK_SPACING, jackY),
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f + 35.f, jackY),
                                                        module, Spectrum::IN_R_INPUT));
     }
 
@@ -683,6 +709,13 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(createMenuLabel("Alpha Mode"));
 
         menu->addChild(createCheckMenuItem("Alpha Mode", "", [=]() { return module->alphaMode; }, [=]() { module->alphaMode = !module->alphaMode; }));
+
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Theme"));
+
+        menu->addChild(createCheckMenuItem("Classic", "", [=]() { return module->currentTheme == Theme::CLASSIC; }, [=]() { module->currentTheme = Theme::CLASSIC; }));
+        menu->addChild(createCheckMenuItem("Warm", "", [=]() { return module->currentTheme == Theme::WARM; }, [=]() { module->currentTheme = Theme::WARM; }));
+        menu->addChild(createCheckMenuItem("Cool", "", [=]() { return module->currentTheme == Theme::COOL; }, [=]() { module->currentTheme = Theme::COOL; }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Frequency Labels"));
