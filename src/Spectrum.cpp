@@ -47,23 +47,15 @@ static constexpr float BAR_SEGMENT_HEIGHT = 4.5f;  // Height of each bar segment
 static constexpr float LABEL_HEIGHT = 12.0f;  // Space reserved for frequency labels
 
 // Frequency band edges (Hz)
-static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {
-    25.f, 40.f, 63.f, 100.f, 160.f, 250.f,
-    500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
+static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {25.f,  40.f,   63.f,   100.f,  160.f,  250.f,
+                                                              500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
 }  // namespace VFDConfig
 
 // Display Modes
-enum class DisplayMode {
-    DOTS,
-    BARS
-};
+enum class DisplayMode { DOTS, BARS };
 
 // Theme System
-enum class Theme {
-    CLASSIC,
-    WARM,
-    COOL
-};
+enum class Theme { CLASSIC, WARM, COOL };
 
 struct ThemeColors {
     NVGcolor active;
@@ -81,17 +73,11 @@ static const std::array<ThemeColors, 3> THEMES = {
      {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x10, 0x2A, 0x1A), nvgRGB(0xFF, 0x87, 0x47)}}};
 
 // Theme-based color functions
-static NVGcolor getActiveColor(Theme theme) {
-    return THEMES[static_cast<int>(theme)].active;
-}
+static NVGcolor getActiveColor(Theme theme) { return THEMES[static_cast<int>(theme)].active; }
 
-static NVGcolor getInactiveColor(Theme theme) {
-    return THEMES[static_cast<int>(theme)].inactive;
-}
+static NVGcolor getInactiveColor(Theme theme) { return THEMES[static_cast<int>(theme)].inactive; }
 
-static NVGcolor getPeakColor(Theme theme) {
-    return THEMES[static_cast<int>(theme)].peak;
-}
+static NVGcolor getPeakColor(Theme theme) { return THEMES[static_cast<int>(theme)].peak; }
 
 template <typename T>
 static inline T clamp(T v, T lo, T hi) {
@@ -136,9 +122,7 @@ struct DisplayRange {
     float bottomDb;
     float rangeDb;
 
-    DisplayRange(float top, float bottom) : topDb(top), bottomDb(bottom) {
-        rangeDb = topDb - bottomDb;
-    }
+    DisplayRange(float top, float bottom) : topDb(top), bottomDb(bottom) { rangeDb = topDb - bottomDb; }
 
     float normalizeDb(float db) const {
         float clampedDb = clamp(db, bottomDb, topDb);
@@ -147,25 +131,15 @@ struct DisplayRange {
 };
 
 struct VFDQuantity : ParamQuantity {
-    std::string getDisplayValueString() override {
-        return rack::string::f("%0.2f", getDisplayValue());
-    }
+    std::string getDisplayValueString() override { return rack::string::f("%0.2f", getDisplayValue()); }
 };
 
 // ============================================================================
 //  Module
 // ============================================================================
 struct Spectrum : Module {
-    enum ParamIds {
-        UPPER_PARAM,
-        LOWER_PARAM,
-        FALL_DELAY_PARAM,
-        PEAK_FALL_DELAY_PARAM,
-        NUM_PARAMS
-    };
-    enum InputIds { IN_L_INPUT,
-                    IN_R_INPUT,
-                    NUM_INPUTS };
+    enum ParamIds { UPPER_PARAM, LOWER_PARAM, FALL_DELAY_PARAM, PEAK_FALL_DELAY_PARAM, NUM_PARAMS };
+    enum InputIds { IN_L_INPUT, IN_R_INPUT, NUM_INPUTS };
 
     // DSP state
     dsp::RealFFT fft{VFDConfig::FFT_SIZE};
@@ -298,7 +272,8 @@ struct Spectrum : Module {
     std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges() {
         std::array<float, VFDConfig::NUM_BANDS + 1> edges;
 
-        // First edge: geometric mean between first center and a reasonable low frequency
+        // First edge: geometric mean between first center and a reasonable low
+        // frequency
         edges[0] = std::sqrt(VFDConfig::BAND_CENTERS[0] * (VFDConfig::BAND_CENTERS[0] / 2.0f));
 
         // Middle edges: geometric mean between adjacent centers
@@ -319,20 +294,18 @@ struct Spectrum : Module {
     }
 
     void updateBandLevels(const std::vector<float>& magnitudes,
-                          const std::array<float, VFDConfig::NUM_BANDS + 1>& edges,
-                          int specBins, float fallDecay) {
+                          const std::array<float, VFDConfig::NUM_BANDS + 1>& edges, int specBins, float fallDecay) {
         float sampleRate = APP->engine->getSampleRate();
 
         for (int b = 0; b < VFDConfig::NUM_BANDS; ++b) {
-            float avgMagnitude = calculateBandMagnitude(magnitudes, edges[b], edges[b + 1],
-                                                        specBins, sampleRate);
+            float avgMagnitude = calculateBandMagnitude(magnitudes, edges[b], edges[b + 1], specBins, sampleRate);
             float newDb = 20.f * std::log10(avgMagnitude + VFDConfig::DENORMAL_THRESHOLD);
             bands[b].updateLevel(newDb, fallDecay);
         }
     }
 
-    float calculateBandMagnitude(const std::vector<float>& magnitudes, float fLo, float fHi,
-                                 int specBins, float sampleRate) {
+    float calculateBandMagnitude(const std::vector<float>& magnitudes, float fLo, float fHi, int specBins,
+                                 float sampleRate) {
         int binLo = clamp<int>(std::floor(fLo * VFDConfig::FFT_SIZE / sampleRate), 0, specBins - 1);
         int binHi = clamp<int>(std::ceil(fHi * VFDConfig::FFT_SIZE / sampleRate), binLo + 1, specBins);
 
@@ -453,7 +426,8 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
-        DisplayGrid grid(availableWidth, getAvailableDisplayHeight(), xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
+        DisplayGrid grid(availableWidth, getAvailableDisplayHeight(),
+                         xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
         // Calculate alpha for this band
         float levelAlpha = calculateAlpha(level);
@@ -498,9 +472,9 @@ struct VFDCustomDisplay : LedDisplay {
         float levelAlpha = calculateAlpha(level);
         float peakAlpha = calculateAlpha(peakLevel);
 
-        // Draw all segments (inactive background) with normal color (not affected by level)
-        // nvgFillColor(vg, VFDConfig::INACTIVE_COLOR);
-        // for (int i = 0; i < numSegments; i++) {
+        // Draw all segments (inactive background) with normal color (not affected
+        // by level) nvgFillColor(vg, VFDConfig::INACTIVE_COLOR); for (int i = 0; i
+        // < numSegments; i++) {
         //     float segY = startY + i * (segmentHeight + segmentSpacing);
         //     nvgBeginPath(vg);
         //     nvgRect(vg, barX, segY, barWidth, segmentHeight);
@@ -608,8 +582,9 @@ struct VFDCustomDisplay : LedDisplay {
             return 1.0f;  // Full opacity when alpha mode is off
         }
 
-        // In alpha mode: 0 magnitude = 100% transparency, max magnitude = 0% transparency
-        // So alpha = normalizedLevel (0.0 = fully transparent, 1.0 = fully opaque)
+        // In alpha mode: 0 magnitude = 100% transparency, max magnitude = 0%
+        // transparency So alpha = normalizedLevel (0.0 = fully transparent, 1.0 =
+        // fully opaque)
         return sqrt(clamp(normalizedLevel, 0.0f, 1.0f));
     }
 
@@ -688,10 +663,8 @@ struct SpectrumWidget : ModuleWidget {
     void addInputs(Spectrum* module) {
         const float jackY = VFDConfig::DISPLAY_Y_OFFSET + VFDConfig::DISPLAY_HEIGHT + 18.f;
 
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f, jackY),
-                                                       module, Spectrum::IN_L_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f + 35.f, jackY),
-                                                       module, Spectrum::IN_R_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f, jackY), module, Spectrum::IN_L_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f + 35.f, jackY), module, Spectrum::IN_R_INPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -701,26 +674,36 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Display Mode"));
 
-        menu->addChild(createCheckMenuItem("Dots", "", [=]() { return module->displayMode == DisplayMode::DOTS; }, [=]() { module->displayMode = DisplayMode::DOTS; }));
+        menu->addChild(createCheckMenuItem(
+            "Dots", "", [=]() { return module->displayMode == DisplayMode::DOTS; },
+            [=]() { module->displayMode = DisplayMode::DOTS; }));
 
-        menu->addChild(createCheckMenuItem("Bars", "", [=]() { return module->displayMode == DisplayMode::BARS; }, [=]() { module->displayMode = DisplayMode::BARS; }));
+        menu->addChild(createCheckMenuItem(
+            "Bars", "", [=]() { return module->displayMode == DisplayMode::BARS; },
+            [=]() { module->displayMode = DisplayMode::BARS; }));
 
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("Alpha Mode"));
+        menu->addChild(createMenuLabel("Other visual"));
 
-        menu->addChild(createCheckMenuItem("Alpha Mode", "", [=]() { return module->alphaMode; }, [=]() { module->alphaMode = !module->alphaMode; }));
+        menu->addChild(createCheckMenuItem(
+            "Alpha Mode", "", [=]() { return module->alphaMode; }, [=]() { module->alphaMode = !module->alphaMode; }));
+
+        menu->addChild(createCheckMenuItem(
+            "Show Labels", "", [=]() { return module->showLabels; },
+            [=]() { module->showLabels = !module->showLabels; }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Theme"));
 
-        menu->addChild(createCheckMenuItem("Classic", "", [=]() { return module->currentTheme == Theme::CLASSIC; }, [=]() { module->currentTheme = Theme::CLASSIC; }));
-        menu->addChild(createCheckMenuItem("Warm", "", [=]() { return module->currentTheme == Theme::WARM; }, [=]() { module->currentTheme = Theme::WARM; }));
-        menu->addChild(createCheckMenuItem("Cool", "", [=]() { return module->currentTheme == Theme::COOL; }, [=]() { module->currentTheme = Theme::COOL; }));
-
-        menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("Frequency Labels"));
-
-        menu->addChild(createCheckMenuItem("Show Labels", "", [=]() { return module->showLabels; }, [=]() { module->showLabels = !module->showLabels; }));
+        menu->addChild(createCheckMenuItem(
+            "Classic", "", [=]() { return module->currentTheme == Theme::CLASSIC; },
+            [=]() { module->currentTheme = Theme::CLASSIC; }));
+        menu->addChild(createCheckMenuItem(
+            "Warm", "", [=]() { return module->currentTheme == Theme::WARM; },
+            [=]() { module->currentTheme = Theme::WARM; }));
+        menu->addChild(createCheckMenuItem(
+            "Cool", "", [=]() { return module->currentTheme == Theme::COOL; },
+            [=]() { module->currentTheme = Theme::COOL; }));
 
         menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::UPPER_PARAM)));
         menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::LOWER_PARAM)));
