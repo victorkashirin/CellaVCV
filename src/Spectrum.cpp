@@ -260,10 +260,13 @@ struct Spectrum : Module {
         const int specBins = VFDConfig::FFT_SIZE / 2 + 1;
         std::vector<float> magnitudes(specBins);
 
-        for (int k = 0; k < specBins; ++k) {
+        magnitudes[0] = std::fabs(output[0]);
+        magnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(output[1]);
+
+        for (int k = 1; k < VFDConfig::FFT_SIZE / 2; ++k) {
             float re = output[2 * k];
             float im = output[2 * k + 1];
-            magnitudes[k] = std::sqrt(re * re + im * im);
+            magnitudes[k] = std::hypot(re, im);
         }
 
         return {magnitudes, specBins};
