@@ -527,16 +527,14 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, float levelAlpha) {
-        float activeHeight = getAvailableDisplayHeight() * level;
+        int activeRows = clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
+        int firstActiveRow = grid.rows - activeRows;
 
         for (int c = 0; c < grid.columns; c++) {
-            for (int r = 0; r < grid.rows; r++) {
+            for (int r = firstActiveRow; r < grid.rows; r++) {
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
-
-                if (grid.yStart + grid.gridHeight - dy <= activeHeight) {
-                    float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
-                    drawActiveDot(vg, dx, dy, levelAlpha);
-                }
+                float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
+                drawActiveDot(vg, dx, dy, levelAlpha);
             }
         }
     }
