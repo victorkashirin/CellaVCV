@@ -6,6 +6,7 @@
 namespace VFDConfig {
 // DSP Constants
 static constexpr int FFT_SIZE = 2048;
+static constexpr int SPEC_BINS = FFT_SIZE / 2 + 1;
 static constexpr int NUM_BANDS = 12;
 static constexpr float INPUT_GAIN = 0.1f;
 static constexpr float MIN_DELAY_TIME = 0.001f;
@@ -145,6 +146,8 @@ struct Spectrum : Module {
     dsp::RealFFT fft{VFDConfig::FFT_SIZE};
     std::vector<float> window;
     std::vector<float> capture;
+    std::vector<float> fftOutput;
+    std::vector<float> magnitudes;
     std::array<SpectrumBand, VFDConfig::NUM_BANDS> bands;
     int writePos = 0;
 
@@ -180,6 +183,8 @@ struct Spectrum : Module {
     void initializeDSP() {
         window.resize(VFDConfig::FFT_SIZE);
         capture.resize(VFDConfig::FFT_SIZE);
+        fftOutput.resize(VFDConfig::FFT_SIZE);
+        magnitudes.resize(VFDConfig::SPEC_BINS);
 
         // Generate Hann window
         for (int i = 0; i < VFDConfig::FFT_SIZE; ++i) {
@@ -241,35 +246,25 @@ struct Spectrum : Module {
     }
 
     void analyzeFFT() {
-        auto fftResult = performFFT();
-        std::vector<float> magnitudes = fftResult.first;
-        int specBins = fftResult.second;
+        performFFT();
         auto frequencyEdges = getFrequencyEdges();
         float fallDecay = calculateFallDecay();
 
-        updateBandLevels(magnitudes, frequencyEdges, specBins, fallDecay);
+        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay);
     }
 
-    std::pair<std::vector<float>, int> performFFT() {
-        std::vector<float> input(capture);
-        std::vector<float> output(VFDConfig::FFT_SIZE);
+    void performFFT() {
+        fft.rfft(capture.data(), fftOutput.data());
+        fft.scale(fftOutput.data());
 
-        fft.rfft(input.data(), output.data());
-        fft.scale(output.data());
-
-        const int specBins = VFDConfig::FFT_SIZE / 2 + 1;
-        std::vector<float> magnitudes(specBins);
-
-        magnitudes[0] = std::fabs(output[0]);
-        magnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(output[1]);
+        magnitudes[0] = std::fabs(fftOutput[0]);
+        magnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(fftOutput[1]);
 
         for (int k = 1; k < VFDConfig::FFT_SIZE / 2; ++k) {
-            float re = output[2 * k];
-            float im = output[2 * k + 1];
+            float re = fftOutput[2 * k];
+            float im = fftOutput[2 * k + 1];
             magnitudes[k] = std::hypot(re, im);
         }
-
-        return {magnitudes, specBins};
     }
 
     std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges() {
