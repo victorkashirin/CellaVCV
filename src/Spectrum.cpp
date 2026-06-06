@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 
 // ============================================================================
 //  Configuration & Constants
@@ -58,6 +59,9 @@ static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {25.f,  40.f,   63.
 
 // Display Modes
 enum class DisplayMode { DOTS, BARS };
+
+// Intensity Modes
+enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN };
 
 // Theme System
 enum class Theme { CLASSIC, WARM, COOL };
@@ -170,7 +174,7 @@ struct Spectrum : Module {
 
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
-    bool alphaMode = false;
+    IntensityMode intensityMode = IntensityMode::SOLID;
     bool showLabels = false;
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::CLASSIC;
@@ -358,7 +362,7 @@ struct Spectrum : Module {
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
-        json_object_set_new(rootJ, "alphaMode", json_boolean(alphaMode));
+        json_object_set_new(rootJ, "intensityMode", json_integer(static_cast<int>(intensityMode)));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
         json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
@@ -371,9 +375,9 @@ struct Spectrum : Module {
             displayMode = static_cast<DisplayMode>(json_integer_value(displayModeJ));
         }
 
-        json_t* alphaModeJ = json_object_get(rootJ, "alphaMode");
-        if (alphaModeJ) {
-            alphaMode = json_boolean_value(alphaModeJ);
+        json_t* intensityModeJ = json_object_get(rootJ, "intensityMode");
+        if (intensityModeJ) {
+            intensityMode = static_cast<IntensityMode>(json_integer_value(intensityModeJ));
         }
 
         json_t* showLabelsJ = json_object_get(rootJ, "showLabels");
@@ -432,6 +436,18 @@ struct DisplayGrid {
 // ============================================================================
 struct VFDCustomDisplay : LedDisplay {
     Spectrum* module;
+    std::array<float, VFDConfig::NUM_BANDS> ghostLevels = {};
+    std::chrono::steady_clock::time_point lastGhostUpdate = std::chrono::steady_clock::now();
+
+    struct IntensityStyle {
+        float levelAlpha = 1.0f;
+        float peakAlpha = 1.0f;
+        float inactiveAlpha = 1.0f;
+        float activeGlowAlpha = 0.0f;
+        float activeGlowRadius = VFDConfig::DOT_RADIUS * 3.0f;
+        float peakGlowAlpha = 0.0f;
+        float peakGlowRadius = VFDConfig::DOT_RADIUS * 3.0f;
+    };
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1 || !module) return;
@@ -450,6 +466,7 @@ struct VFDCustomDisplay : LedDisplay {
         const float bandWidth = totalWidth / numBands;
 
         DisplayRange range(module->params[0].getValue(), module->params[1].getValue());
+        updateGhostLevels(range);
 
         for (size_t b = 0; b < numBands; b++) {
             drawSingleBand(vg, b, bandWidth, range);
@@ -459,39 +476,65 @@ struct VFDCustomDisplay : LedDisplay {
     void drawSingleBand(NVGcontext* vg, size_t bandIndex, float bandWidth, const DisplayRange& range) {
         float level = range.normalizeDb(module->bands[bandIndex].getDbLevel());
         float peakLevel = module->bands[bandIndex].getPeakLevel();
+        float ghostLevel = ghostLevels[bandIndex];
 
         float xOffset = VFDConfig::BAND_MARGIN + bandIndex * bandWidth;
         float availableWidth = bandWidth - VFDConfig::BAND_MARGIN * 2;
 
         if (module->displayMode == DisplayMode::DOTS) {
-            drawDotsMode(vg, level, peakLevel, xOffset, availableWidth);
+            drawDotsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth);
         } else {
-            drawBarsMode(vg, level, peakLevel, xOffset, availableWidth);
+            drawBarsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth);
         }
     }
 
-    void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
+    void updateGhostLevels(const DisplayRange& range) {
+        auto now = std::chrono::steady_clock::now();
+        float deltaTime = std::chrono::duration<float>(now - lastGhostUpdate).count();
+        lastGhostUpdate = now;
+
+        deltaTime = clamp(deltaTime, 0.0f, 0.1f);
+        float ghostDecay = std::exp(-deltaTime / 0.9f);
+
+        for (size_t b = 0; b < VFDConfig::NUM_BANDS; ++b) {
+            float level = range.normalizeDb(module->bands[b].getDbLevel());
+            if (level >= ghostLevels[b]) {
+                ghostLevels[b] = level;
+            } else {
+                ghostLevels[b] *= ghostDecay;
+                if (ghostLevels[b] < VFDConfig::DENORMAL_THRESHOLD) {
+                    ghostLevels[b] = 0.0f;
+                }
+            }
+        }
+    }
+
+    void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float ghostLevel, float xOffset,
+                      float availableWidth) {
         DisplayGrid grid(availableWidth, getAvailableDisplayHeight(),
                          xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
-        // Calculate alpha for this band
-        float levelAlpha = calculateAlpha(level);
-        float peakAlpha = calculateAlpha(peakLevel);
+        IntensityStyle style = getIntensityStyle(level, peakLevel);
 
         if (module->showUnlitSegments) {
-            drawDotGrid(vg, grid, getInactiveColor(module->currentTheme));
+            drawDotGrid(vg, grid, createAlphaColor(getInactiveColor(module->currentTheme), style.inactiveAlpha));
+        }
+
+        if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
+            drawGhostDots(vg, grid, level, ghostLevel);
         }
 
         if (level > 0.0f) {
-            drawActiveDots(vg, grid, level, levelAlpha);
+            drawActiveDots(vg, grid, level, style);
         }
 
         if (peakLevel > 0.0f) {
-            drawPeakIndicator(vg, grid, peakLevel, peakAlpha);
+            drawPeakIndicator(vg, grid, peakLevel, style);
         }
     }
 
-    void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float xOffset, float availableWidth) {
+    void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float ghostLevel, float xOffset,
+                      float availableWidth) {
         float barX = xOffset + VFDConfig::BAND_MARGIN;
         float barWidth = availableWidth;
         float barHeight = getAvailableDisplayHeight();
@@ -514,24 +557,37 @@ struct VFDCustomDisplay : LedDisplay {
         // Start from bottom with margin
         float startY = barY;
 
-        // Calculate alpha for this band
-        float levelAlpha = calculateAlpha(level);
-        float peakAlpha = calculateAlpha(peakLevel);
+        IntensityStyle style = getIntensityStyle(level, peakLevel);
+        float activeBarGlowAlpha = 0.0f;
+        float peakBarGlowAlpha = 0.0f;
+        if (module->intensityMode == IntensityMode::GLOW) {
+            activeBarGlowAlpha = style.activeGlowAlpha;
+            peakBarGlowAlpha = style.peakGlowAlpha;
+        } else if (module->intensityMode == IntensityMode::ALPHA || module->intensityMode == IntensityMode::GHOST) {
+            activeBarGlowAlpha = style.activeGlowAlpha * 0.45f;
+            peakBarGlowAlpha = style.peakGlowAlpha * 0.45f;
+        }
 
         if (module->showUnlitSegments) {
-            drawBarScaffold(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing);
+            drawBarScaffold(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing,
+                            style.inactiveAlpha);
+        }
+
+        if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
+            drawGhostBars(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing, level, ghostLevel);
         }
 
         // Draw active segments
         if (level > 0.0f) {
             int activeSegments = static_cast<int>(std::ceil(level * numSegments));
+            NVGcolor activeColor = getActiveColor(module->currentTheme);
 
             for (int i = 0; i < activeSegments && i < numSegments; i++) {
                 int segmentIndex = numSegments - 1 - i;  // Start from bottom
                 float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
 
-                drawBarSegment(vg, barX, segY, barWidth, segmentHeight,
-                               createAlphaColor(getActiveColor(module->currentTheme), levelAlpha));
+                drawBarSegmentWithIntensity(vg, barX, segY, barWidth, segmentHeight, activeColor, style.levelAlpha,
+                                            activeBarGlowAlpha);
             }
         }
 
@@ -545,14 +601,14 @@ struct VFDCustomDisplay : LedDisplay {
             peakSegment = std::min(peakSegment, currentActiveSegment);
 
             float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
-            drawBarSegment(vg, barX, segY, barWidth, segmentHeight,
-                           createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
+            drawBarSegmentWithIntensity(vg, barX, segY, barWidth, segmentHeight, getPeakColor(module->currentTheme),
+                                        style.peakAlpha, peakBarGlowAlpha);
         }
     }
 
     void drawBarScaffold(NVGcontext* vg, float x, float width, float startY, int numSegments, float segmentHeight,
-                         float segmentSpacing) {
-        NVGcolor inactiveColor = getInactiveColor(module->currentTheme);
+                         float segmentSpacing, float inactiveAlpha) {
+        NVGcolor inactiveColor = createAlphaColor(getInactiveColor(module->currentTheme), inactiveAlpha);
         for (int i = 0; i < numSegments; i++) {
             float segY = startY + i * (segmentHeight + segmentSpacing);
             drawBarSegment(vg, x, segY, width, segmentHeight, inactiveColor);
@@ -564,6 +620,23 @@ struct VFDCustomDisplay : LedDisplay {
         nvgRect(vg, x, y, width, height);
         nvgFillColor(vg, color);
         nvgFill(vg);
+    }
+
+    void drawBarSegmentWithIntensity(NVGcontext* vg, float x, float y, float width, float height, NVGcolor color,
+                                     float alpha, float glowAlpha) {
+        if (glowAlpha > 0.0f) {
+            drawBarGlow(vg, x, y, width, height, color, glowAlpha);
+        }
+        drawBarSegment(vg, x, y, width, height, createAlphaColor(color, alpha));
+    }
+
+    void drawBarGlow(NVGcontext* vg, float x, float y, float width, float height, NVGcolor color, float alpha) {
+        drawBarSegment(vg, x - 7.0f, y - 4.0f, width + 14.0f, height + 8.0f,
+                       createAlphaColor(color, alpha * 0.18f));
+        drawBarSegment(vg, x - 4.5f, y - 2.5f, width + 9.0f, height + 5.0f,
+                       createAlphaColor(color, alpha * 0.28f));
+        drawBarSegment(vg, x - 2.5f, y - 1.5f, width + 5.0f, height + 3.0f,
+                       createAlphaColor(color, alpha * 0.42f));
     }
 
     void drawDotGrid(NVGcontext* vg, const DisplayGrid& grid, NVGcolor color) {
@@ -580,7 +653,45 @@ struct VFDCustomDisplay : LedDisplay {
         }
     }
 
-    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, float levelAlpha) {
+    void drawGhostDots(NVGcontext* vg, const DisplayGrid& grid, float level, float ghostLevel) {
+        int activeRows = clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
+        int ghostRows = clamp(static_cast<int>(std::ceil(ghostLevel * grid.rows)), 0, grid.rows);
+        int firstGhostRow = grid.rows - ghostRows;
+        int firstActiveRow = grid.rows - activeRows;
+        int trailRows = std::max(firstActiveRow - firstGhostRow, 1);
+        NVGcolor activeColor = getActiveColor(module->currentTheme);
+
+        for (int c = 0; c < grid.columns; c++) {
+            for (int r = firstGhostRow; r < firstActiveRow; r++) {
+                float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
+                float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
+                float rowFade = static_cast<float>(r - firstGhostRow + 1) / trailRows;
+
+                nvgBeginPath(vg);
+                nvgCircle(vg, dx, dy, VFDConfig::DOT_RADIUS);
+                nvgFillColor(vg, createAlphaColor(activeColor, 0.22f + 0.28f * rowFade));
+                nvgFill(vg);
+            }
+        }
+    }
+
+    void drawGhostBars(NVGcontext* vg, float x, float width, float startY, int numSegments, float segmentHeight,
+                       float segmentSpacing, float level, float ghostLevel) {
+        int activeSegments = clamp(static_cast<int>(std::ceil(level * numSegments)), 0, numSegments);
+        int ghostSegments = clamp(static_cast<int>(std::ceil(ghostLevel * numSegments)), 0, numSegments);
+        int trailSegments = std::max(ghostSegments - activeSegments, 1);
+        NVGcolor activeColor = getActiveColor(module->currentTheme);
+
+        for (int i = activeSegments; i < ghostSegments; i++) {
+            int segmentIndex = numSegments - 1 - i;
+            float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
+            float segmentFade = static_cast<float>(ghostSegments - i) / trailSegments;
+            drawBarSegment(vg, x, segY, width, segmentHeight,
+                           createAlphaColor(activeColor, 0.22f + 0.28f * segmentFade));
+        }
+    }
+
+    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, const IntensityStyle& style) {
         int activeRows = clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
         int firstActiveRow = grid.rows - activeRows;
 
@@ -588,59 +699,94 @@ struct VFDCustomDisplay : LedDisplay {
             for (int r = firstActiveRow; r < grid.rows; r++) {
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
-                drawActiveDot(vg, dx, dy, levelAlpha);
+                drawActiveDot(vg, dx, dy, style);
             }
         }
     }
 
-    void drawActiveDot(NVGcontext* vg, float x, float y, float levelAlpha) {
+    void drawActiveDot(NVGcontext* vg, float x, float y, const IntensityStyle& style) {
         if (!module) return;
 
-        // Glow effect with alpha
         NVGcolor activeColor = getActiveColor(module->currentTheme);
-        NVGpaint paint = nvgRadialGradient(vg, x, y, 0.0f, VFDConfig::DOT_RADIUS * 3,
-                                           nvgTransRGBA(activeColor, static_cast<unsigned char>(levelAlpha * 100)),
-                                           nvgTransRGBA(activeColor, 0.0f));
-        nvgBeginPath(vg);
-        nvgCircle(vg, x, y, 3 * VFDConfig::DOT_RADIUS);
-        nvgFillPaint(vg, paint);
-        nvgFill(vg);
+        drawDotGlow(vg, x, y, activeColor, style.activeGlowRadius, style.activeGlowAlpha);
 
         // Core dot
         nvgBeginPath(vg);
         nvgCircle(vg, x, y, VFDConfig::DOT_RADIUS);
-        nvgFillColor(vg, createAlphaColor(activeColor, levelAlpha));
+        nvgFillColor(vg, createAlphaColor(activeColor, style.levelAlpha));
         nvgFill(vg);
     }
 
-    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel, float peakAlpha) {
-        nvgFillColor(vg, createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
-        int peakRow = grid.rows - ceil(peakLevel * grid.rows);
+    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel, const IntensityStyle& style) {
+        NVGcolor peakColor = getPeakColor(module->currentTheme);
+        int peakRow = clamp(grid.rows - static_cast<int>(std::ceil(peakLevel * grid.rows)), 0, grid.rows - 1);
         float dy = grid.yStart + peakRow * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
 
         for (int c = 0; c < grid.columns; c++) {
             float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
+            drawDotGlow(vg, dx, dy, peakColor, style.peakGlowRadius, style.peakGlowAlpha);
             nvgBeginPath(vg);
             nvgCircle(vg, dx, dy, VFDConfig::DOT_RADIUS);
+            nvgFillColor(vg, createAlphaColor(peakColor, style.peakAlpha));
             nvgFill(vg);
         }
     }
 
-    // Helper function to calculate alpha based on magnitude and alpha mode
-    float calculateAlpha(float normalizedLevel) {
-        if (!module || !module->alphaMode) {
-            return 1.0f;  // Full opacity when alpha mode is off
+    void drawDotGlow(NVGcontext* vg, float x, float y, NVGcolor color, float radius, float alpha) {
+        if (alpha <= 0.0f) {
+            return;
         }
 
-        // In alpha mode: 0 magnitude = 100% transparency, max magnitude = 0%
-        // transparency So alpha = normalizedLevel (0.0 = fully transparent, 1.0 =
-        // fully opaque)
-        return sqrt(clamp(normalizedLevel, 0.0f, 1.0f));
+        NVGpaint paint = nvgRadialGradient(vg, x, y, 0.0f, radius, createAlphaColor(color, alpha),
+                                           createAlphaColor(color, 0.0f));
+        nvgBeginPath(vg);
+        nvgCircle(vg, x, y, radius);
+        nvgFillPaint(vg, paint);
+        nvgFill(vg);
+    }
+
+    IntensityStyle getIntensityStyle(float level, float peakLevel) {
+        IntensityStyle style;
+        float levelBrightness = std::sqrt(clamp(level, 0.0f, 1.0f));
+        float peakBrightness = std::sqrt(clamp(peakLevel, 0.0f, 1.0f));
+
+        switch (module->intensityMode) {
+            case IntensityMode::ALPHA:
+                style.levelAlpha = levelBrightness;
+                style.peakAlpha = peakBrightness;
+                style.activeGlowAlpha = 0.10f + 0.24f * levelBrightness;
+                style.peakGlowAlpha = 0.08f + 0.18f * peakBrightness;
+                break;
+            case IntensityMode::GLOW:
+                style.levelAlpha = 0.72f + 0.28f * levelBrightness;
+                style.peakAlpha = 0.82f + 0.18f * peakBrightness;
+                style.activeGlowAlpha = 0.34f + 0.18f * levelBrightness;
+                style.activeGlowRadius = VFDConfig::DOT_RADIUS * 5.0f;
+                style.peakGlowAlpha = 0.40f;
+                style.peakGlowRadius = VFDConfig::DOT_RADIUS * 4.0f;
+                break;
+            case IntensityMode::GHOST:
+                style.levelAlpha = 0.92f;
+                style.peakAlpha = 0.82f;
+                style.inactiveAlpha = 0.20f;
+                style.activeGlowAlpha = 100.0f / 255.0f;
+                style.peakGlowAlpha = 0.12f;
+                break;
+            case IntensityMode::CLEAN:
+                style.inactiveAlpha = 0.50f;
+                break;
+            case IntensityMode::SOLID:
+            default:
+                style.activeGlowAlpha = 100.0f / 255.0f;
+                break;
+        }
+
+        return style;
     }
 
     // Helper function to create alpha-adjusted color
     NVGcolor createAlphaColor(NVGcolor baseColor, float alpha) {
-        return nvgTransRGBA(baseColor, static_cast<unsigned char>(alpha * 255));
+        return nvgTransRGBA(baseColor, static_cast<unsigned char>(clamp(alpha, 0.0f, 1.0f) * 255.0f));
     }
 
     // Helper function to get available display height (accounting for labels)
@@ -731,8 +877,11 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Other visual"));
 
-        menu->addChild(createCheckMenuItem(
-            "Alpha Mode", "", [=]() { return module->alphaMode; }, [=]() { module->alphaMode = !module->alphaMode; }));
+        menu->addChild(createIndexSubmenuItem(
+            "Intensity Mode",
+            {"Solid", "Alpha", "Glow", "Ghost", "Clean"},
+            [=]() { return static_cast<size_t>(module->intensityMode); },
+            [=](size_t index) { module->intensityMode = static_cast<IntensityMode>(index); }));
 
         menu->addChild(createCheckMenuItem(
             "Show Labels", "", [=]() { return module->showLabels; },
