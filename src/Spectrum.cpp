@@ -1,5 +1,7 @@
 #include "plugin.hpp"
 
+#include <atomic>
+
 // ============================================================================
 //  Configuration & Constants
 // ============================================================================
@@ -89,32 +91,44 @@ static inline T clamp(T v, T lo, T hi) {
 //  DSP Helper Structures
 // ============================================================================
 struct SpectrumBand {
-    float dbLevel = VFDConfig::NOISE_FLOOR_DB;
-    float peakLevel = 0.0f;
+    // Written by the audio thread and read by the UI thread.
+    std::atomic<float> dbLevel;
+    std::atomic<float> peakLevel;
+
+    SpectrumBand() : dbLevel(VFDConfig::NOISE_FLOOR_DB), peakLevel(0.0f) {}
+
+    float getDbLevel() const { return dbLevel.load(std::memory_order_relaxed); }
+
+    void setDbLevel(float value) { dbLevel.store(value, std::memory_order_relaxed); }
+
+    float getPeakLevel() const { return peakLevel.load(std::memory_order_relaxed); }
 
     void updateLevel(float newDb, float fallDecay) {
-        if (newDb >= dbLevel) {
-            dbLevel = newDb;  // Fast attack
+        float currentDb = getDbLevel();
+        float updatedDb;
+        if (newDb >= currentDb) {
+            updatedDb = newDb;  // Fast attack
         } else {
-            dbLevel = dbLevel * fallDecay + newDb * (1.0f - fallDecay);
+            updatedDb = currentDb * fallDecay + newDb * (1.0f - fallDecay);
         }
 
         // Prevent excessive decay
-        if (dbLevel < VFDConfig::NOISE_FLOOR_DB) {
-            dbLevel = VFDConfig::NOISE_FLOOR_DB;
-        }
+        updatedDb = std::max(updatedDb, VFDConfig::NOISE_FLOOR_DB);
+        setDbLevel(updatedDb);
     }
 
     void updatePeak(float currentNormalized, float peakDecay) {
-        if (currentNormalized >= peakLevel) {
-            peakLevel = currentNormalized;
+        float currentPeak = getPeakLevel();
+        float updatedPeak;
+        if (currentNormalized >= currentPeak) {
+            updatedPeak = currentNormalized;
         } else {
-            peakLevel *= peakDecay;
-            if (peakLevel < VFDConfig::DENORMAL_THRESHOLD) {
-                peakLevel = 0.0f;
+            updatedPeak = currentPeak * peakDecay;
+            if (updatedPeak < VFDConfig::DENORMAL_THRESHOLD) {
+                updatedPeak = 0.0f;
             }
         }
-        peakLevel = clamp(peakLevel, 0.0f, 1.0f);
+        peakLevel.store(clamp(updatedPeak, 0.0f, 1.0f), std::memory_order_relaxed);
     }
 };
 
@@ -224,7 +238,7 @@ struct Spectrum : Module {
         float peakDecay = calculateDecay(args.sampleTime, params[PEAK_FALL_DELAY_PARAM].getValue());
 
         for (auto& band : bands) {
-            float currentNormalized = range.normalizeDb(band.dbLevel);
+            float currentNormalized = range.normalizeDb(band.getDbLevel());
             band.updatePeak(currentNormalized, peakDecay);
         }
     }
@@ -234,8 +248,8 @@ struct Spectrum : Module {
             float fallDecay = calculateDecay(args.sampleTime, params[FALL_DELAY_PARAM].getValue());
 
             for (auto& band : bands) {
-                band.dbLevel *= fallDecay;
-                band.dbLevel = std::max(band.dbLevel, VFDConfig::NOISE_FLOOR_DB);
+                float decayedDb = std::max(band.getDbLevel() * fallDecay, VFDConfig::NOISE_FLOOR_DB);
+                band.setDbLevel(decayedDb);
             }
         }
     }
@@ -410,8 +424,8 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawSingleBand(NVGcontext* vg, size_t bandIndex, float bandWidth, const DisplayRange& range) {
-        float level = range.normalizeDb(module->bands[bandIndex].dbLevel);
-        float peakLevel = module->bands[bandIndex].peakLevel;
+        float level = range.normalizeDb(module->bands[bandIndex].getDbLevel());
+        float peakLevel = module->bands[bandIndex].getPeakLevel();
 
         float xOffset = VFDConfig::BAND_MARGIN + bandIndex * bandWidth;
         float availableWidth = bandWidth - VFDConfig::BAND_MARGIN * 2;
