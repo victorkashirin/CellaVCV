@@ -51,6 +51,7 @@ static constexpr float BAR_SEGMENT_HEIGHT = 4.5f;  // Height of each bar segment
 
 // Label Constants
 static constexpr float LABEL_HEIGHT = 12.0f;  // Space reserved for frequency labels
+static constexpr float LABEL_FONT_SIZE = 9.0f;
 
 // Frequency band edges (Hz)
 static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {25.f,  40.f,   63.f,   100.f,  160.f,  250.f,
@@ -453,11 +454,15 @@ struct VFDCustomDisplay : LedDisplay {
         if (layer != 1 || !module) return;
 
         nvgSave(args.vg);
+        nvgScissor(args.vg, 0.0f, 0.0f, box.size.x, getBandClipBottomY());
         drawBands(args.vg);
-        if (module->showLabels) {
-            drawFrequencyLabels(args.vg);
-        }
         nvgRestore(args.vg);
+
+        if (module->showLabels) {
+            nvgSave(args.vg);
+            drawFrequencyLabels(args.vg);
+            nvgRestore(args.vg);
+        }
     }
 
     void drawBands(NVGcontext* vg) {
@@ -821,13 +826,15 @@ struct VFDCustomDisplay : LedDisplay {
         return nvgTransRGBA(baseColor, static_cast<unsigned char>(clamp(alpha, 0.0f, 1.0f) * 255.0f));
     }
 
+    float getLabelsTopY() const { return box.size.y - VFDConfig::LABEL_HEIGHT; }
+
+    float getLabelsBottomY() const { return getLabelsTopY() + VFDConfig::LABEL_FONT_SIZE; }
+
+    float getBandClipBottomY() const { return module && module->showLabels ? getLabelsTopY() : getLabelsBottomY(); }
+
     // Helper function to get available display height (accounting for labels)
-    float getAvailableDisplayHeight() {
-        float totalHeight = box.size.y - 3 * VFDConfig::BAND_MARGIN;
-        if (module && module->showLabels) {
-            totalHeight -= VFDConfig::LABEL_HEIGHT;
-        }
-        return totalHeight;
+    float getAvailableDisplayHeight() const {
+        return std::max(getBandClipBottomY() - 3 * VFDConfig::BAND_MARGIN, 0.0f);
     }
 
     void drawFrequencyLabels(NVGcontext* vg) {
@@ -836,7 +843,7 @@ struct VFDCustomDisplay : LedDisplay {
         const float bandWidth = totalWidth / numBands;
 
         // Set up text style
-        nvgFontSize(vg, 9.0f);
+        nvgFontSize(vg, VFDConfig::LABEL_FONT_SIZE);
         nvgFontFaceId(vg, 0);
         nvgFillColor(vg, nvgRGB(180, 180, 180));  // Light gray color
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
