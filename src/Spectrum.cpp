@@ -208,7 +208,7 @@ struct Spectrum : Module {
 
     void process(const ProcessArgs& args) override {
         float inputSignal = getInputSignal();
-        processWindowedInput(inputSignal);
+        processWindowedInput(inputSignal, args.sampleRate);
         updateDecayAndPeaks(args);
         // handleNoInputDecay(args);
     }
@@ -225,11 +225,11 @@ struct Spectrum : Module {
         return in * VFDConfig::INPUT_GAIN;
     }
 
-    void processWindowedInput(float input) {
+    void processWindowedInput(float input, float sampleRate) {
         capture[writePos] = input * window[writePos];
         if (++writePos >= VFDConfig::FFT_SIZE) {
             writePos = 0;
-            analyzeFFT();
+            analyzeFFT(sampleRate);
         }
     }
 
@@ -259,12 +259,12 @@ struct Spectrum : Module {
         return std::exp(-deltaTime / delay);
     }
 
-    void analyzeFFT() {
+    void analyzeFFT(float sampleRate) {
         performFFT();
-        auto frequencyEdges = getFrequencyEdges();
-        float fallDecay = calculateFallDecay();
+        auto frequencyEdges = getFrequencyEdges(sampleRate);
+        float fallDecay = calculateFallDecay(sampleRate);
 
-        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay);
+        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate);
     }
 
     void performFFT() {
@@ -281,7 +281,7 @@ struct Spectrum : Module {
         }
     }
 
-    std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges() {
+    std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges(float sampleRate) {
         std::array<float, VFDConfig::NUM_BANDS + 1> edges;
 
         // First edge: geometric mean between first center and a reasonable low
@@ -294,21 +294,20 @@ struct Spectrum : Module {
         }
 
         // Last edge: Nyquist frequency
-        edges[VFDConfig::NUM_BANDS] = APP->engine->getSampleRate() * 0.5f;
+        edges[VFDConfig::NUM_BANDS] = sampleRate * 0.5f;
 
         return edges;
     }
 
-    float calculateFallDecay() {
+    float calculateFallDecay(float sampleRate) {
         float fallDelay = std::max(VFDConfig::MIN_DELAY_TIME, params[FALL_DELAY_PARAM].getValue());
-        float deltaTime = static_cast<float>(VFDConfig::FFT_SIZE) / APP->engine->getSampleRate();
+        float deltaTime = static_cast<float>(VFDConfig::FFT_SIZE) / sampleRate;
         return std::exp(-deltaTime / fallDelay);
     }
 
     void updateBandLevels(const std::vector<float>& magnitudes,
-                          const std::array<float, VFDConfig::NUM_BANDS + 1>& edges, int specBins, float fallDecay) {
-        float sampleRate = APP->engine->getSampleRate();
-
+                          const std::array<float, VFDConfig::NUM_BANDS + 1>& edges, int specBins, float fallDecay,
+                          float sampleRate) {
         for (int b = 0; b < VFDConfig::NUM_BANDS; ++b) {
             float avgMagnitude = calculateBandMagnitude(magnitudes, edges[b], edges[b + 1], specBins, sampleRate);
             float newDb = 20.f * std::log10(avgMagnitude + VFDConfig::DENORMAL_THRESHOLD);
