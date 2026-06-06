@@ -172,6 +172,7 @@ struct Spectrum : Module {
     DisplayMode displayMode = DisplayMode::DOTS;
     bool alphaMode = false;
     bool showLabels = false;
+    bool showUnlitSegments = true;
     Theme currentTheme = Theme::CLASSIC;
 
     Spectrum() {
@@ -356,6 +357,7 @@ struct Spectrum : Module {
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
         json_object_set_new(rootJ, "alphaMode", json_boolean(alphaMode));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
+        json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
         json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
         return rootJ;
     }
@@ -374,6 +376,11 @@ struct Spectrum : Module {
         json_t* showLabelsJ = json_object_get(rootJ, "showLabels");
         if (showLabelsJ) {
             showLabels = json_boolean_value(showLabelsJ);
+        }
+
+        json_t* showUnlitSegmentsJ = json_object_get(rootJ, "showUnlitSegments");
+        if (showUnlitSegmentsJ) {
+            showUnlitSegments = json_boolean_value(showUnlitSegmentsJ);
         }
 
         json_t* currentThemeJ = json_object_get(rootJ, "currentTheme");
@@ -468,8 +475,9 @@ struct VFDCustomDisplay : LedDisplay {
         float levelAlpha = calculateAlpha(level);
         float peakAlpha = calculateAlpha(peakLevel);
 
-        // Draw inactive dots with normal color (not affected by level)
-        drawDotGrid(vg, grid, getInactiveColor(module->currentTheme));
+        if (module->showUnlitSegments) {
+            drawDotGrid(vg, grid, getInactiveColor(module->currentTheme));
+        }
 
         if (level > 0.0f) {
             drawActiveDots(vg, grid, level, levelAlpha);
@@ -507,14 +515,9 @@ struct VFDCustomDisplay : LedDisplay {
         float levelAlpha = calculateAlpha(level);
         float peakAlpha = calculateAlpha(peakLevel);
 
-        // Draw all segments (inactive background) with normal color (not affected
-        // by level) nvgFillColor(vg, VFDConfig::INACTIVE_COLOR); for (int i = 0; i
-        // < numSegments; i++) {
-        //     float segY = startY + i * (segmentHeight + segmentSpacing);
-        //     nvgBeginPath(vg);
-        //     nvgRect(vg, barX, segY, barWidth, segmentHeight);
-        //     nvgFill(vg);
-        // }
+        if (module->showUnlitSegments) {
+            drawBarScaffold(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing);
+        }
 
         // Draw active segments
         if (level > 0.0f) {
@@ -524,11 +527,8 @@ struct VFDCustomDisplay : LedDisplay {
                 int segmentIndex = numSegments - 1 - i;  // Start from bottom
                 float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
 
-                // Core active segment with alpha
-                nvgBeginPath(vg);
-                nvgRect(vg, barX, segY, barWidth, segmentHeight);
-                nvgFillColor(vg, createAlphaColor(getActiveColor(module->currentTheme), levelAlpha));
-                nvgFill(vg);
+                drawBarSegment(vg, barX, segY, barWidth, segmentHeight,
+                               createAlphaColor(getActiveColor(module->currentTheme), levelAlpha));
             }
         }
 
@@ -542,11 +542,25 @@ struct VFDCustomDisplay : LedDisplay {
             peakSegment = std::min(peakSegment, currentActiveSegment);
 
             float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
-            nvgBeginPath(vg);
-            nvgRect(vg, barX, segY, barWidth, segmentHeight);
-            nvgFillColor(vg, createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
-            nvgFill(vg);
+            drawBarSegment(vg, barX, segY, barWidth, segmentHeight,
+                           createAlphaColor(getPeakColor(module->currentTheme), peakAlpha));
         }
+    }
+
+    void drawBarScaffold(NVGcontext* vg, float x, float width, float startY, int numSegments, float segmentHeight,
+                         float segmentSpacing) {
+        NVGcolor inactiveColor = getInactiveColor(module->currentTheme);
+        for (int i = 0; i < numSegments; i++) {
+            float segY = startY + i * (segmentHeight + segmentSpacing);
+            drawBarSegment(vg, x, segY, width, segmentHeight, inactiveColor);
+        }
+    }
+
+    void drawBarSegment(NVGcontext* vg, float x, float y, float width, float height, NVGcolor color) {
+        nvgBeginPath(vg);
+        nvgRect(vg, x, y, width, height);
+        nvgFillColor(vg, color);
+        nvgFill(vg);
     }
 
     void drawDotGrid(NVGcontext* vg, const DisplayGrid& grid, NVGcolor color) {
@@ -724,6 +738,10 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(createCheckMenuItem(
             "Show Labels", "", [=]() { return module->showLabels; },
             [=]() { module->showLabels = !module->showLabels; }));
+
+        menu->addChild(createCheckMenuItem(
+            "Show Unlit Segments", "", [=]() { return module->showUnlitSegments; },
+            [=]() { module->showUnlitSegments = !module->showUnlitSegments; }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Theme"));
