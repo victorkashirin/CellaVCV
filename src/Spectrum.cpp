@@ -515,21 +515,22 @@ struct VFDCustomDisplay : LedDisplay {
                          xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
         IntensityStyle style = getIntensityStyle(level, peakLevel);
+        int peakRow = peakLevel > 0.0f ? getPeakRow(grid, peakLevel, level) : -1;
 
         if (module->showUnlitSegments) {
             drawDotGrid(vg, grid, createAlphaColor(getInactiveColor(module->currentTheme), style.inactiveAlpha));
         }
 
         if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
-            drawGhostDots(vg, grid, level, ghostLevel);
+            drawGhostDots(vg, grid, level, ghostLevel, peakRow);
         }
 
         if (level > 0.0f) {
-            drawActiveDots(vg, grid, level, style);
+            drawActiveDots(vg, grid, level, style, peakRow);
         }
 
-        if (peakLevel > 0.0f) {
-            drawPeakIndicator(vg, grid, peakLevel, style);
+        if (peakRow >= 0) {
+            drawPeakIndicator(vg, grid, peakRow, style);
         }
     }
 
@@ -568,13 +569,16 @@ struct VFDCustomDisplay : LedDisplay {
             peakBarGlowAlpha = style.peakGlowAlpha * 0.45f;
         }
 
+        int peakSegment = peakLevel > 0.0f ? getPeakSegment(numSegments, peakLevel, level) : -1;
+
         if (module->showUnlitSegments) {
             drawBarScaffold(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing,
                             style.inactiveAlpha);
         }
 
         if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
-            drawGhostBars(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing, level, ghostLevel);
+            drawGhostBars(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing, level, ghostLevel,
+                          peakSegment);
         }
 
         // Draw active segments
@@ -584,6 +588,9 @@ struct VFDCustomDisplay : LedDisplay {
 
             for (int i = 0; i < activeSegments && i < numSegments; i++) {
                 int segmentIndex = numSegments - 1 - i;  // Start from bottom
+                if (segmentIndex == peakSegment) {
+                    continue;
+                }
                 float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
 
                 drawBarSegmentWithIntensity(vg, barX, segY, barWidth, segmentHeight, activeColor, style.levelAlpha,
@@ -592,14 +599,7 @@ struct VFDCustomDisplay : LedDisplay {
         }
 
         // Draw peak segment
-        if (peakLevel > 0.0f) {
-            int peakSegment = numSegments - 1 - static_cast<int>(std::floor(peakLevel * numSegments));
-            peakSegment = clamp(peakSegment, 0, numSegments - 1);
-
-            // Ensure peak is never below current level
-            int currentActiveSegment = numSegments - static_cast<int>(std::ceil(level * numSegments));
-            peakSegment = std::min(peakSegment, currentActiveSegment);
-
+        if (peakSegment >= 0) {
             float segY = startY + peakSegment * (segmentHeight + segmentSpacing);
             drawBarSegmentWithIntensity(vg, barX, segY, barWidth, segmentHeight, getPeakColor(module->currentTheme),
                                         style.peakAlpha, peakBarGlowAlpha);
@@ -653,8 +653,32 @@ struct VFDCustomDisplay : LedDisplay {
         }
     }
 
-    void drawGhostDots(NVGcontext* vg, const DisplayGrid& grid, float level, float ghostLevel) {
-        int activeRows = clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
+    int getActiveRows(const DisplayGrid& grid, float level) {
+        return clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
+    }
+
+    int getPeakRow(const DisplayGrid& grid, float peakLevel, float level) {
+        int peakRow = clamp(grid.rows - static_cast<int>(std::ceil(peakLevel * grid.rows)), 0, grid.rows - 1);
+        int activeRows = getActiveRows(grid, level);
+        if (activeRows > 0) {
+            peakRow = std::min(peakRow, grid.rows - activeRows);
+        }
+        return peakRow;
+    }
+
+    int getPeakSegment(int numSegments, float peakLevel, float level) {
+        int peakSegment = numSegments - 1 - static_cast<int>(std::floor(peakLevel * numSegments));
+        peakSegment = clamp(peakSegment, 0, numSegments - 1);
+
+        int activeSegments = clamp(static_cast<int>(std::ceil(level * numSegments)), 0, numSegments);
+        if (activeSegments > 0) {
+            peakSegment = std::min(peakSegment, numSegments - activeSegments);
+        }
+        return peakSegment;
+    }
+
+    void drawGhostDots(NVGcontext* vg, const DisplayGrid& grid, float level, float ghostLevel, int skipRow) {
+        int activeRows = getActiveRows(grid, level);
         int ghostRows = clamp(static_cast<int>(std::ceil(ghostLevel * grid.rows)), 0, grid.rows);
         int firstGhostRow = grid.rows - ghostRows;
         int firstActiveRow = grid.rows - activeRows;
@@ -663,6 +687,9 @@ struct VFDCustomDisplay : LedDisplay {
 
         for (int c = 0; c < grid.columns; c++) {
             for (int r = firstGhostRow; r < firstActiveRow; r++) {
+                if (r == skipRow) {
+                    continue;
+                }
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 float rowFade = static_cast<float>(r - firstGhostRow + 1) / trailRows;
@@ -676,7 +703,7 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawGhostBars(NVGcontext* vg, float x, float width, float startY, int numSegments, float segmentHeight,
-                       float segmentSpacing, float level, float ghostLevel) {
+                       float segmentSpacing, float level, float ghostLevel, int skipSegment) {
         int activeSegments = clamp(static_cast<int>(std::ceil(level * numSegments)), 0, numSegments);
         int ghostSegments = clamp(static_cast<int>(std::ceil(ghostLevel * numSegments)), 0, numSegments);
         int trailSegments = std::max(ghostSegments - activeSegments, 1);
@@ -684,6 +711,9 @@ struct VFDCustomDisplay : LedDisplay {
 
         for (int i = activeSegments; i < ghostSegments; i++) {
             int segmentIndex = numSegments - 1 - i;
+            if (segmentIndex == skipSegment) {
+                continue;
+            }
             float segY = startY + segmentIndex * (segmentHeight + segmentSpacing);
             float segmentFade = static_cast<float>(ghostSegments - i) / trailSegments;
             drawBarSegment(vg, x, segY, width, segmentHeight,
@@ -691,12 +721,15 @@ struct VFDCustomDisplay : LedDisplay {
         }
     }
 
-    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, const IntensityStyle& style) {
-        int activeRows = clamp(static_cast<int>(std::ceil(level * grid.rows)), 0, grid.rows);
+    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, const IntensityStyle& style, int skipRow) {
+        int activeRows = getActiveRows(grid, level);
         int firstActiveRow = grid.rows - activeRows;
 
         for (int c = 0; c < grid.columns; c++) {
             for (int r = firstActiveRow; r < grid.rows; r++) {
+                if (r == skipRow) {
+                    continue;
+                }
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 drawActiveDot(vg, dx, dy, style);
@@ -717,9 +750,8 @@ struct VFDCustomDisplay : LedDisplay {
         nvgFill(vg);
     }
 
-    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, float peakLevel, const IntensityStyle& style) {
+    void drawPeakIndicator(NVGcontext* vg, const DisplayGrid& grid, int peakRow, const IntensityStyle& style) {
         NVGcolor peakColor = getPeakColor(module->currentTheme);
-        int peakRow = clamp(grid.rows - static_cast<int>(std::ceil(peakLevel * grid.rows)), 0, grid.rows - 1);
         float dy = grid.yStart + peakRow * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
 
         for (int c = 0; c < grid.columns; c++) {
