@@ -719,15 +719,11 @@ struct SpectrumWidget : ModuleWidget {
         if (!module) return;
 
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("Display Mode"));
-
-        menu->addChild(createCheckMenuItem(
-            "Dots", "", [=]() { return module->displayMode == DisplayMode::DOTS; },
-            [=]() { module->displayMode = DisplayMode::DOTS; }));
-
-        menu->addChild(createCheckMenuItem(
-            "Bars", "", [=]() { return module->displayMode == DisplayMode::BARS; },
-            [=]() { module->displayMode = DisplayMode::BARS; }));
+        menu->addChild(createIndexSubmenuItem(
+            "Display Mode",
+            {"Dots", "Bars"},
+            [=]() { return static_cast<size_t>(module->displayMode); },
+            [=](size_t index) { module->displayMode = static_cast<DisplayMode>(index); }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Other visual"));
@@ -744,17 +740,11 @@ struct SpectrumWidget : ModuleWidget {
             [=]() { module->showUnlitSegments = !module->showUnlitSegments; }));
 
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("Theme"));
-
-        menu->addChild(createCheckMenuItem(
-            "Classic", "", [=]() { return module->currentTheme == Theme::CLASSIC; },
-            [=]() { module->currentTheme = Theme::CLASSIC; }));
-        menu->addChild(createCheckMenuItem(
-            "Warm", "", [=]() { return module->currentTheme == Theme::WARM; },
-            [=]() { module->currentTheme = Theme::WARM; }));
-        menu->addChild(createCheckMenuItem(
-            "Cool", "", [=]() { return module->currentTheme == Theme::COOL; },
-            [=]() { module->currentTheme = Theme::COOL; }));
+        menu->addChild(createIndexSubmenuItem(
+            "Theme",
+            {"Classic", "Warm", "Cool"},
+            [=]() { return static_cast<size_t>(module->currentTheme); },
+            [=](size_t index) { module->currentTheme = static_cast<Theme>(index); }));
 
         menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::UPPER_PARAM)));
         menu->addChild(new VFDSlider(module->getParamQuantity(Spectrum::LOWER_PARAM)));
