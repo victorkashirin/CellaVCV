@@ -1,5 +1,6 @@
 #include "plugin.hpp"
 
+#include <algorithm>
 #include <atomic>
 
 // ============================================================================
@@ -14,6 +15,7 @@ static constexpr float INPUT_GAIN = 0.1f;
 static constexpr float MIN_DELAY_TIME = 0.001f;
 static constexpr float NOISE_FLOOR_DB = -120.0f;
 static constexpr float DENORMAL_THRESHOLD = 1e-6f;
+static constexpr int NUM_AUDIO_CHANNELS = 2;
 
 // Parameter Ranges
 static constexpr float UPPER_DB_MIN = -40.0f;
@@ -159,9 +161,10 @@ struct Spectrum : Module {
     // DSP state
     dsp::RealFFT fft{VFDConfig::FFT_SIZE};
     std::vector<float> window;
-    std::vector<float> capture;
+    std::array<std::vector<float>, VFDConfig::NUM_AUDIO_CHANNELS> captures;
     std::vector<float> fftOutput;
     std::vector<float> magnitudes;
+    std::array<bool, VFDConfig::NUM_AUDIO_CHANNELS> frameChannelActive = {};
     std::array<SpectrumBand, VFDConfig::NUM_BANDS> bands;
     int writePos = 0;
 
@@ -196,7 +199,9 @@ struct Spectrum : Module {
 
     void initializeDSP() {
         window.resize(VFDConfig::FFT_SIZE);
-        capture.resize(VFDConfig::FFT_SIZE);
+        for (auto& capture : captures) {
+            capture.resize(VFDConfig::FFT_SIZE);
+        }
         fftOutput.resize(VFDConfig::FFT_SIZE);
         magnitudes.resize(VFDConfig::SPEC_BINS);
 
@@ -207,29 +212,26 @@ struct Spectrum : Module {
     }
 
     void process(const ProcessArgs& args) override {
-        float inputSignal = getInputSignal();
-        processWindowedInput(inputSignal, args.sampleRate);
+        processWindowedInput(args.sampleRate);
         updateDecayAndPeaks(args);
         // handleNoInputDecay(args);
     }
 
-    float getInputSignal() {
-        float in = 0.f;
-        bool lCon = inputs[IN_L_INPUT].isConnected();
-        bool rCon = inputs[IN_R_INPUT].isConnected();
+    void processWindowedInput(float sampleRate) {
+        const bool leftConnected = inputs[IN_L_INPUT].isConnected();
+        const bool rightConnected = inputs[IN_R_INPUT].isConnected();
+        const float windowValue = window[writePos] * VFDConfig::INPUT_GAIN;
 
-        if (lCon) in += inputs[IN_L_INPUT].getVoltage();
-        if (rCon) in += inputs[IN_R_INPUT].getVoltage();
-        if (lCon && rCon) in *= 0.5f;
+        captures[0][writePos] = leftConnected ? inputs[IN_L_INPUT].getVoltage() * windowValue : 0.f;
+        captures[1][writePos] = rightConnected ? inputs[IN_R_INPUT].getVoltage() * windowValue : 0.f;
 
-        return in * VFDConfig::INPUT_GAIN;
-    }
+        frameChannelActive[0] = frameChannelActive[0] || leftConnected;
+        frameChannelActive[1] = frameChannelActive[1] || rightConnected;
 
-    void processWindowedInput(float input, float sampleRate) {
-        capture[writePos] = input * window[writePos];
         if (++writePos >= VFDConfig::FFT_SIZE) {
             writePos = 0;
             analyzeFFT(sampleRate);
+            frameChannelActive.fill(false);
         }
     }
 
@@ -268,16 +270,38 @@ struct Spectrum : Module {
     }
 
     void performFFT() {
-        fft.rfft(capture.data(), fftOutput.data());
-        fft.scale(fftOutput.data());
+        std::fill(magnitudes.begin(), magnitudes.end(), 0.f);
 
-        magnitudes[0] = std::fabs(fftOutput[0]);
-        magnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(fftOutput[1]);
+        int activeChannels = 0;
+        // Combine channel powers after the FFT so anti-phase stereo still reports energy.
+        for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
+            if (!frameChannelActive[channel]) {
+                continue;
+            }
 
+            ++activeChannels;
+            fft.rfft(captures[channel].data(), fftOutput.data());
+            fft.scale(fftOutput.data());
+            addFFTBinPowers();
+        }
+
+        if (activeChannels == 0) {
+            return;
+        }
+
+        const float channelScale = 1.f / activeChannels;
+        for (float& magnitude : magnitudes) {
+            magnitude = std::sqrt(magnitude * channelScale);
+        }
+    }
+
+    void addFFTBinPowers() {
+        magnitudes[0] += fftOutput[0] * fftOutput[0];
+        magnitudes[VFDConfig::FFT_SIZE / 2] += fftOutput[1] * fftOutput[1];
         for (int k = 1; k < VFDConfig::FFT_SIZE / 2; ++k) {
             float re = fftOutput[2 * k];
             float im = fftOutput[2 * k + 1];
-            magnitudes[k] = std::hypot(re, im);
+            magnitudes[k] += re * re + im * im;
         }
     }
 
