@@ -344,6 +344,9 @@ struct Spectrum : Module {
                                  float sampleRate) {
         int binLo = clamp<int>(std::floor(fLo * VFDConfig::FFT_SIZE / sampleRate), 0, specBins - 1);
         int binHi = clamp<int>(std::ceil(fHi * VFDConfig::FFT_SIZE / sampleRate), binLo + 1, specBins);
+        if (fHi >= sampleRate * 0.5f) {
+            binHi = specBins;
+        }
 
         float sum = 0.f;
         for (int k = binLo; k < binHi; ++k) {
