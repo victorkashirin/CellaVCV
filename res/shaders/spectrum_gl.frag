@@ -24,6 +24,15 @@ float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+float valueNoise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 blend = fract(p);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    float bottom = mix(hash(cell), hash(cell + vec2(1.0, 0.0)), blend.x);
+    float top = mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), blend.x);
+    return mix(bottom, top, blend.y);
+}
+
 vec4 bandData(float band, float row) {
     return texture2D(uData, vec2((band + 0.5) / 16.0, (row + 0.5) / 4.0));
 }
@@ -228,12 +237,56 @@ void main() {
         glowAlpha = 0.0;
     }
 
+    // Phase 4 Micro Motion signature. Movement is deliberately sub-segment:
+    // readings and peak positions remain fixed while the phosphor energy has
+    // slow spatial drift, restrained per-band flutter, and a brief attack halo.
+    float motionGain = 1.0;
+    float attackFlash = 0.0;
+    if (uSignatureMode == 3 && effects > 0.0) {
+        float driftNoise = valueNoise(vec2(logicalX * 0.013 + uTime * 0.16,
+                                           logicalY * 0.018 - uTime * 0.10));
+        float drift = driftNoise - 0.5;
+        float bandSeed = hash(vec2(band + 2.0, row + 11.0)) * 6.2831853;
+        float flutter = sin(uTime * 1.37 + bandSeed);
+        float driftGain = uEffectsMode == 2 ? 0.14 : 0.08;
+        float flutterGain = uEffectsMode == 2 ? 0.075 : 0.035;
+        motionGain += effects * (drift * driftGain + flutter * flutterGain);
+
+        if (uEffectsMode == 2) {
+            float fineFlutter = sin(uTime * 4.11 + bandSeed * 1.73);
+            motionGain += fineFlutter * 0.025;
+        }
+
+        // Keep the drifting illumination attached to lit-cell glow. A high,
+        // sustained bar should breathe gently, not create a permanent column
+        // of light behind the meter.
+        float driftEnergy = glowMask * active;
+        float driftFieldStrength = uEffectsMode == 2 ? 0.080 : 0.040;
+        float driftField = smoothstep(0.12, 0.88, driftNoise);
+        color += emissionColor * driftField * driftEnergy * effects * driftFieldStrength;
+
+        float contentBottomY = contentBottom * 320.0;
+        float contentHeight = (contentTop - contentBottom) * 320.0;
+        float attackY = contentBottomY + data.r * contentHeight;
+        float attackDistance = abs(logicalY - attackY);
+        float attackWidth = uEffectsMode == 2 ? 11.0 : 7.0;
+        float attackHalo = exp(-attackDistance / attackWidth);
+        float attackCore = exp(-attackDistance / 2.2);
+        float attackCoreMix = uEffectsMode == 2 ? 0.50 : 0.65;
+        attackFlash = (attackHalo + attackCore * attackCoreMix) * horizontalMask * insideY * data.a;
+    }
+
     vec3 overloadColor = mix(emissionColor, vec3(1.0, 0.92, 0.62),
                              effects * smoothstep(0.86, 1.0, data.r));
-    color += overloadColor * segmentMask * active * coreAlpha;
-    color += overloadColor * glowMask * active * glowAlpha * effects * 0.25;
+    color += overloadColor * segmentMask * active * coreAlpha * motionGain;
+    color += overloadColor * glowMask * active * glowAlpha * effects * 0.25 * motionGain;
     if (uIntensityMode == 3) {
-        color += emissionColor * segmentMask * ghost * 0.28;
+        color += emissionColor * segmentMask * ghost * 0.28 * motionGain;
+    }
+    if (uSignatureMode == 3 && effects > 0.0) {
+        vec3 flashColor = mix(emissionColor, vec3(1.0, 0.94, 0.76), 0.62);
+        float flashStrength = uEffectsMode == 2 ? 0.72 : 0.48;
+        color += flashColor * attackFlash * effects * flashStrength;
     }
 
     float peakY = (peakIndex + 0.5) / segmentRows;

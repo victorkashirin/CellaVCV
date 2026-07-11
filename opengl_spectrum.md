@@ -341,6 +341,7 @@ Recommended order:
 1) **Phosphor/VFD bloom**
 2) **Glass face**
 3) **Micro-motion**
+4) **Better segmented display**
 
 Do one at a time and measure it.
 
@@ -357,7 +358,10 @@ Implementation status:
 - `Subtle` uses a single broader near-halo at about 65% of Full's maximum bloom energy, keeping the lower-cost path visibly distinct from Off.
 - Glass Face is implemented as a second optional signature mode without changing the persisted values of Off or Phosphor Bloom.
 - The glass pass is composited over the emitters and follows Rack's top-down panel lighting with a bright top rim, shallow overhead reflection, vertical face tint, full-frame edge vignette, and faint inner-bezel shadow. `Full` additionally enables a broader top reflection, static dust, and fine glass grain; `Subtle` retains only the cheaper layered gradients.
-- Micro-motion remains as the next phase-4 experiment and should be evaluated separately.
+- Micro Motion is implemented as a third optional signature mode, appended without changing the persisted values of Off, Phosphor Bloom, or Glass Face.
+- It keeps meter geometry stationary while adding a slowly drifting phosphor field, per-band brightness breathing, and short attack halos driven by a positive-only UI-side envelope. `Full` deliberately uses a clearly visible colored drift field, stronger slow breathing, a second quicker flutter component, and a broader/brighter attack halo for meaningful A/B evaluation; `Subtle` retains lower-amplitude motion.
+- Attack envelopes are derived and decayed over roughly 180 ms on the UI thread from complete analyzer snapshots, leaving the audio thread unchanged and preventing falling levels from triggering flashes. A small rise threshold rejects steady-state FFT jitter so sustained tones cannot continuously refresh the envelope. The shader renders a narrow hot core inside the broader attack halo so fast transients remain legible.
+- The animated illumination field is confined to glow immediately around lit cells rather than filling an entire high-energy band column, keeping sustained readings clean while preserving visible drift on the emitters.
 
 ### Phase 5: hardening and decision
 

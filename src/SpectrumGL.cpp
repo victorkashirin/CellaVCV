@@ -37,9 +37,9 @@ enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
-// Keep existing values stable: patches saved before Glass Face was added use
-// 0 for Off and 1 for Phosphor Bloom.
-enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, COUNT };
+// Keep existing values stable as signature modes are appended. Older patches
+// use 0 for Off, 1 for Phosphor Bloom, and 2 for Glass Face.
+enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, MICRO_MOTION, COUNT };
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -286,7 +286,8 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     std::array<std::array<float, NUM_BANDS>, 3> displayed = {};
     std::array<std::array<float, NUM_BANDS>, 3> peaks = {};
     std::array<std::array<float, NUM_BANDS>, 3> ghosts = {};
-    std::array<std::array<float, NUM_BANDS>, 3> previous = {};
+    std::array<std::array<float, NUM_BANDS>, 3> targets = {};
+    std::array<std::array<float, NUM_BANDS>, 3> attacks = {};
     std::chrono::steady_clock::time_point lastDraw = std::chrono::steady_clock::now();
     float elapsed = 0.f;
 
@@ -334,6 +335,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                                        : 1.f;
         const float peakDecay = std::exp(-dt / peakDelay);
         const float ghostDecay = std::exp(-dt / 0.9f);
+        const float attackDecay = std::exp(-dt / 0.18f);
 
         for (int row = 0; row < 3; ++row) {
             for (int band = 0; band < NUM_BANDS; ++band) {
@@ -345,7 +347,20 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                 } else {
                     target = normalizedLevel(latestFrame.channelLevels[row - 1][band]);
                 }
-                if (receivedFrame) previous[row][band] = displayed[row][band];
+                attacks[row][band] *= attackDecay;
+                if (receivedFrame) {
+                    // Only rising energy is an attack. Keep a short UI-side
+                    // envelope so the flash remains smooth between 23 Hz FFT
+                    // frames without adding work to the audio thread.
+                    const float rise = std::max(target - targets[row][band], 0.f);
+                    // FFT bins breathe by a small amount even under a steady
+                    // tone. Ignore that sub-segment jitter so it cannot keep
+                    // refreshing what should be a transient-only envelope.
+                    const float attackRise = std::max(rise - 0.018f, 0.f);
+                    attacks[row][band] =
+                        std::max(attacks[row][band], clampValue(attackRise * 6.f, 0.f, 1.f));
+                    targets[row][band] = target;
+                }
                 // Keep the vintage analyzer's immediate response. This very short,
                 // symmetric filter only softens single-frame UI flicker.
                 const float tau = 0.012f;
@@ -364,8 +379,8 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                 pixels[offset] = static_cast<unsigned char>(clampValue(displayed[row][band], 0.f, 1.f) * 255.f);
                 pixels[offset + 1] = static_cast<unsigned char>(clampValue(peaks[row][band], 0.f, 1.f) * 255.f);
                 pixels[offset + 2] = static_cast<unsigned char>(clampValue(ghosts[row][band], 0.f, 1.f) * 255.f);
-                pixels[offset + 3] = static_cast<unsigned char>(
-                    clampValue(std::fabs(displayed[row][band] - previous[row][band]) * 5.f, 0.f, 1.f) * 255.f);
+                pixels[offset + 3] =
+                    static_cast<unsigned char>(clampValue(attacks[row][band], 0.f, 1.f) * 255.f);
             }
         }
         glBindTexture(GL_TEXTURE_2D, renderer.dataTexture);
@@ -556,7 +571,7 @@ struct SpectrumGLWidget : ModuleWidget {
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
-            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face"},
+            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face", "Micro Motion"},
             [=]() { return static_cast<size_t>(spectrum->signatureMode); },
             [=](size_t index) { spectrum->signatureMode = static_cast<SignatureMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
