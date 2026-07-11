@@ -38,8 +38,9 @@ enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
 // Keep existing values stable as signature modes are appended. Older patches
-// use 0 for Off, 1 for Phosphor Bloom, and 2 for Glass Face.
-enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, MICRO_MOTION, COUNT };
+// use 0 for Off, 1 for Phosphor Bloom, 2 for Glass Face, and 3 for
+// Micro Motion.
+enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, MICRO_MOTION, SOFT_CRT, COUNT };
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -495,6 +496,21 @@ struct SpectrumGLBadge : TransparentWidget {
 struct SpectrumGLLabels : TransparentWidget {
     SpectrumGL* module = NULL;
 
+    float labelX(float flatX) const {
+        if (!module || module->signatureMode != SignatureMode::SOFT_CRT ||
+            module->effectsMode == EffectsMode::OFF)
+            return flatX;
+
+        // Match the shader's horizontal barrel warp at the label baseline.
+        // The labels stay NanoVG-sharp, but their centers continue to line up
+        // with the curved meter columns.
+        const float curvature = module->effectsMode == EffectsMode::FULL ? 0.036f : 0.016f;
+        const float normalizedX = flatX / box.size.x * 2.f - 1.f;
+        const float normalizedY = ((box.size.y - 12.f) / box.size.y) * 2.f - 1.f;
+        const float curvedX = normalizedX / (1.f + curvature * normalizedY * normalizedY);
+        return (curvedX * 0.5f + 0.5f) * box.size.x;
+    }
+
     void draw(const DrawArgs& args) override {
         if (!module || !module->showLabels) return;
         nvgFontSize(args.vg, 9.f);
@@ -509,7 +525,8 @@ struct SpectrumGLLabels : TransparentWidget {
                 std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
             else
                 std::snprintf(label, sizeof(label), "%.0f", frequency);
-            nvgText(args.vg, horizontalMargin + (band + 0.5f) * bandWidth, box.size.y - 12.f, label, NULL);
+            nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 12.f, label,
+                    NULL);
         }
     }
 };
@@ -571,7 +588,7 @@ struct SpectrumGLWidget : ModuleWidget {
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
-            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face", "Micro Motion"},
+            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face", "Micro Motion", "Soft CRT"},
             [=]() { return static_cast<size_t>(spectrum->signatureMode); },
             [=](size_t index) { spectrum->signatureMode = static_cast<SignatureMode>(index); }));
         menu->addChild(createIndexSubmenuItem(

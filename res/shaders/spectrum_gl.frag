@@ -69,6 +69,30 @@ vec2 phosphorLobes(float level, float meterLeft, float meterRight,
 void main() {
     vec2 pixel = gl_FragCoord.xy;
     vec2 uv = pixel / max(uResolution, vec2(1.0));
+    float crtMask = 1.0;
+    float crtFocusLoss = 0.0;
+    if (uSignatureMode == 4 && uEffectsMode != 0) {
+        // Inverse barrel mapping: each output fragment asks which point on the
+        // flat meter plane would be seen through the curved face. Cross-axis
+        // terms bow straight lines while leaving the screen's edge midpoints
+        // anchored, so the reading remains useful.
+        vec2 crtPoint = uv * 2.0 - 1.0;
+        // A restrained bow closer to a late vintage monitor than a fisheye
+        // lens: visible along long lines, but not enough to distort readings.
+        float curvature = uEffectsMode == 2 ? 0.036 : 0.016;
+        vec2 warpedPoint = crtPoint *
+                           (vec2(1.0) + curvature * vec2(crtPoint.y * crtPoint.y,
+                                                        crtPoint.x * crtPoint.x));
+        uv = warpedPoint * 0.5 + 0.5;
+
+        float edgeInside = min((1.0 - abs(warpedPoint.x)) * 248.0,
+                               (1.0 - abs(warpedPoint.y)) * 160.0);
+        float screenScale = max(0.5, min(uResolution.x / 496.0, uResolution.y / 320.0));
+        crtMask = smoothstep(-0.75 / screenScale, 1.25 / screenScale, edgeInside);
+        float radialEdge = max(abs(warpedPoint.x), abs(warpedPoint.y));
+        crtFocusLoss = smoothstep(0.52, 1.0, radialEdge);
+        crtFocusLoss *= crtFocusLoss;
+    }
     float logicalY = uv.y * 320.0;
     float effects = uEffectsMode == 0 ? 0.0 : (uEffectsMode == 1 ? 0.48 : 1.0);
 
@@ -100,7 +124,8 @@ void main() {
         meterRight = meterLeft + stereoChannelWidth;
     }
     float pixelScale = max(0.5, min(uResolution.x / 496.0, uResolution.y / 320.0));
-    float edgeAa = 0.65 / pixelScale;
+    float focusScale = mix(1.0, uEffectsMode == 2 ? 0.52 : 0.72, crtFocusLoss);
+    float edgeAa = 0.65 / (pixelScale * focusScale);
     float horizontalMask = smoothstep(meterLeft - edgeAa, meterLeft + edgeAa, logicalX) *
                            (1.0 - smoothstep(meterRight - edgeAa, meterRight + edgeAa, logicalX));
     float segmentMask;
@@ -121,7 +146,7 @@ void main() {
                   step(logicalY, dotBottomCenter + (segmentRows - 1.0) * 6.0 + 3.0);
         float distanceToDot = length(vec2(dotX, dotY));
         float dotRadius = 2.0;
-        float antialiasWidth = max(0.35, 0.55 / pixelScale);
+        float antialiasWidth = max(0.35, 0.55 / (pixelScale * focusScale));
         coreMask = 1.0 - smoothstep(dotRadius - antialiasWidth, dotRadius + antialiasWidth, distanceToDot);
         glowMask = exp(-max(0.0, distanceToDot - dotRadius * 0.55) /
                        2.6) * horizontalMask;
@@ -136,7 +161,7 @@ void main() {
         vec2 roundedOffset = abs(segmentPoint) - (segmentHalfSize - vec2(cornerRadius));
         float roundedDistance = length(max(roundedOffset, vec2(0.0))) +
                                 min(max(roundedOffset.x, roundedOffset.y), 0.0) - cornerRadius;
-        float roundedAa = max(0.35, 0.60 / pixelScale);
+        float roundedAa = max(0.35, 0.60 / (pixelScale * focusScale));
         coreMask = 1.0 - smoothstep(-roundedAa, roundedAa, roundedDistance);
         float horizontalOutside = max(abs(logicalX - (meterLeft + meterRight) * 0.5) - segmentHalfSize.x, 0.0);
         glowMask = exp(-max(roundedDistance, 0.0) / 2.8) *
@@ -361,6 +386,20 @@ void main() {
             float fineGrain = hash(floor(vec2(logicalX, logicalY) * 1.35) + vec2(83.1, 12.4)) - 0.5;
             color += fineGrain * 0.0045;
         }
+    }
+
+    // Curvature's low-cost fallback is the coordinate warp plus a mild focus
+    // rolloff. Full makes the edge glass visibly softer and adds a restrained
+    // cool haze, still in the same single fragment pass.
+    if (uSignatureMode == 4 && effects > 0.0) {
+        float focusStrength = uEffectsMode == 2 ? 0.22 : 0.10;
+        float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = mix(color, vec3(luminance), crtFocusLoss * focusStrength);
+        color *= 1.0 - crtFocusLoss * focusStrength * 0.55;
+        if (uEffectsMode == 2) {
+            color += vec3(0.004, 0.010, 0.013) * crtFocusLoss * crtMask;
+        }
+        color *= crtMask;
     }
 
     gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);

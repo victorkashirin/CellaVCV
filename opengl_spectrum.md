@@ -341,7 +341,7 @@ Recommended order:
 1) **Phosphor/VFD bloom**
 2) **Glass face**
 3) **Micro-motion**
-4) **Better segmented display**
+4) **Soft CRT curvature**
 
 Do one at a time and measure it.
 
@@ -362,6 +362,8 @@ Implementation status:
 - It keeps meter geometry stationary while adding a slowly drifting phosphor field, per-band brightness breathing, and short attack halos driven by a positive-only UI-side envelope. `Full` deliberately uses a clearly visible colored drift field, stronger slow breathing, a second quicker flutter component, and a broader/brighter attack halo for meaningful A/B evaluation; `Subtle` retains lower-amplitude motion.
 - Attack envelopes are derived and decayed over roughly 180 ms on the UI thread from complete analyzer snapshots, leaving the audio thread unchanged and preventing falling levels from triggering flashes. A small rise threshold rejects steady-state FFT jitter so sustained tones cannot continuously refresh the envelope. The shader renders a narrow hot core inside the broader attack halo so fast transients remain legible.
 - The animated illumination field is confined to glow immediately around lit cells rather than filling an entire high-energy band column, keeping sustained readings clean while preserving visible drift on the emitters.
+- Soft CRT Curvature is implemented as a fourth optional signature mode, appended without changing any existing persisted values. It applies a single-pass inverse barrel warp before procedural band and segment evaluation, with curved corner masking and progressively wider antialiasing toward the screen edge to suggest focus loss.
+- `Subtle` uses restrained curvature and edge softening; `Full` increases the bow, desaturation/dimming, and cool edge haze. `Effects: Off` remains the zero-cost flat fallback for measurement accuracy. Pixel-space scanlines and noise remain unwarped, and NanoVG label centers follow the horizontal warp so they stay aligned with their bands.
 
 ### Phase 5: hardening and decision
 
