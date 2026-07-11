@@ -343,12 +343,6 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         glEnd();
     }
 
-    float normalizedLevel(float db) const {
-        const float top = module ? module->params[FrequencyAnalyzer::UPPER_PARAM].getValue() : UPPER_DB_DEFAULT;
-        const float bottom = module ? module->params[FrequencyAnalyzer::LOWER_PARAM].getValue() : LOWER_DB_DEFAULT;
-        return clampValue((db - bottom) / std::max(top - bottom, 1.f), 0.f, 1.f);
-    }
-
     float demoLevel(int band, int channel) const {
         const float phase = static_cast<float>(band) * 0.71f + static_cast<float>(channel) * 0.9f;
         return 0.18f + 0.68f * (0.5f + 0.5f * std::sin(phase));
@@ -440,6 +434,10 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         const float peakDecay = std::exp(-dt / peakDelay);
         const float ghostDecay = std::exp(-dt / 0.9f);
         const float attackDecay = std::exp(-dt / 0.18f);
+        const float displayBlend = 1.f - std::exp(-dt / 0.012f);
+        const float top = module ? module->params[FrequencyAnalyzer::UPPER_PARAM].getValue() : UPPER_DB_DEFAULT;
+        const float bottom = module ? module->params[FrequencyAnalyzer::LOWER_PARAM].getValue() : LOWER_DB_DEFAULT;
+        const float inverseDbRange = 1.f / std::max(top - bottom, 1.f);
 
         for (int row = 0; row < 3; ++row) {
             for (int band = 0; band < NUM_BANDS; ++band) {
@@ -447,9 +445,10 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
                 if (!module) {
                     target = demoLevel(band, row);
                 } else if (row == 0) {
-                    target = normalizedLevel(latestFrame.levels[band]);
+                    target = clampValue((latestFrame.levels[band] - bottom) * inverseDbRange, 0.f, 1.f);
                 } else {
-                    target = normalizedLevel(latestFrame.channelLevels[row - 1][band]);
+                    target =
+                        clampValue((latestFrame.channelLevels[row - 1][band] - bottom) * inverseDbRange, 0.f, 1.f);
                 }
                 attacks[row][band] *= attackDecay;
                 if (receivedFrame) {
@@ -466,8 +465,7 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
                 }
                 // Keep the vintage analyzer's immediate response. This very short,
                 // symmetric filter only softens single-frame UI flicker.
-                const float tau = 0.012f;
-                displayed[row][band] += (target - displayed[row][band]) * (1.f - std::exp(-dt / tau));
+                displayed[row][band] += (target - displayed[row][band]) * displayBlend;
                 peaks[row][band] = std::max(displayed[row][band], peaks[row][band] * peakDecay);
                 ghosts[row][band] = std::max(displayed[row][band], ghosts[row][band] * ghostDecay);
             }
@@ -522,17 +520,12 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         GLint oldProgram = 0;
         GLint oldActiveTexture = 0;
         GLint oldTexture0 = 0;
-        GLint oldArrayBuffer = 0;
-        GLint oldElementBuffer = 0;
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
         glActiveTexture(GL_TEXTURE0);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture0);
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
-        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &oldArrayBuffer);
-        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &oldElementBuffer);
-        glPushAttrib(GL_ALL_ATTRIB_BITS);
-        glPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
+        glPushAttrib(GL_CURRENT_BIT | GL_ENABLE_BIT | GL_VIEWPORT_BIT);
 
         const math::Vec framebufferSize = getFramebufferSize();
         glViewport(0, 0, static_cast<GLsizei>(framebufferSize.x), static_cast<GLsizei>(framebufferSize.y));
@@ -541,10 +534,6 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_BLEND);
         glActiveTexture(GL_TEXTURE0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
         const bool shaderReady = renderer.initialize();
         if (shaderReady) {
@@ -579,11 +568,8 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
             drawFallback();
         }
 
-        glPopClientAttrib();
         glPopAttrib();
         glUseProgram(static_cast<GLuint>(oldProgram));
-        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(oldArrayBuffer));
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(oldElementBuffer));
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture0));
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
