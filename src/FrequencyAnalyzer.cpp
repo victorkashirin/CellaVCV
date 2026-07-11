@@ -372,8 +372,8 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
 
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0.f, 0.f, box.size.x, box.size.y);
-        nvgFillPaint(args.vg, nvgLinearGradient(args.vg, 0.f, box.size.y, 0.f, 0.f,
-                                                nvgRGB(1, 3, 4), nvgRGB(5, 13, 15)));
+        nvgFillPaint(args.vg,
+                     nvgLinearGradient(args.vg, 0.f, box.size.y, 0.f, 0.f, nvgRGB(1, 3, 4), nvgRGB(5, 13, 15)));
         nvgFill(args.vg);
 
         const GLTheme& theme = getTheme(Theme::LIGHT_BLUE);
@@ -395,11 +395,10 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
             const float width = bandWidth - 6.f;
 
             for (int segment = 0; segment < 30; ++segment) {
-                const float y = box.size.y - contentBottom - (segment + 1) * segmentPitch +
-                                (segmentPitch - segmentHeight) * 0.5f;
-                const NVGcolor color = segment == peakSegment
-                                           ? peakColor
-                                           : (segment < activeSegments ? activeColor : inactiveColor);
+                const float y =
+                    box.size.y - contentBottom - (segment + 1) * segmentPitch + (segmentPitch - segmentHeight) * 0.5f;
+                const NVGcolor color =
+                    segment == peakSegment ? peakColor : (segment < activeSegments ? activeColor : inactiveColor);
                 nvgBeginPath(args.vg);
                 nvgRoundedRect(args.vg, left, y, width, segmentHeight, 1.5f);
                 nvgFillColor(args.vg, color);
@@ -713,8 +712,13 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
         addChild(labels);
 
         const float jackY = DISPLAY_Y + DISPLAY_HEIGHT + 18.f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, jackY), module, FrequencyAnalyzer::IN_L_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45.f, jackY), module, FrequencyAnalyzer::IN_R_INPUT));
+        const float horizontalMargin = 3.f;
+        const float bandWidth = (DISPLAY_WIDTH - 2.f * horizontalMargin) / NUM_BANDS;
+        const auto bandCenterX = [=](int band) { return horizontalMargin + (band + 0.5f) * bandWidth; };
+        addInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(bandCenterX(0), jackY), module, FrequencyAnalyzer::IN_L_INPUT));
+        addInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(bandCenterX(1), jackY), module, FrequencyAnalyzer::IN_R_INPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
