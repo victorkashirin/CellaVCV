@@ -66,7 +66,7 @@ enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 
 // Theme System
-enum class Theme { CLASSIC, WARM, COOL, ORANGE, RED, IVORY, COUNT };
+enum class Theme { RED, ORANGE, AMBER, GREEN, LIGHT_BLUE, VINTAGE_BLUE, IVORY, COUNT };
 
 struct ThemeColors {
     NVGcolor active;
@@ -82,21 +82,24 @@ static inline T clamp(T v, T lo, T hi) {
 
 // Predefined themes
 static const std::array<ThemeColors, static_cast<size_t>(Theme::COUNT)> THEMES = {{
-    // CLASSIC
-    {nvgRGB(0x93, 0xEA, 0xFF), nvgRGB(0xFF, 0x9A, 0xD7), nvgRGB(0x20, 0x20, 0x20),
-     nvgRGB(0xFF, 0x30, 0x30)},
-    // WARM
-    {nvgRGB(0xFF, 0xB3, 0x47), nvgRGB(0x7E, 0xD9, 0xFF), nvgRGB(0x2A, 0x1A, 0x10),
-     nvgRGB(0xFF, 0x47, 0x47)},
-    // COOL
-    {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x8F, 0xB8, 0xFF), nvgRGB(0x10, 0x2A, 0x1A),
-     nvgRGB(0xFF, 0x87, 0x47)},
-    // ORANGE
-    {nvgRGB(0xFF, 0x6B, 0x18), nvgRGB(0xFF, 0xC1, 0x5A), nvgRGB(0x2A, 0x14, 0x08),
-     nvgRGB(0xFF, 0xE6, 0xA6)},
     // RED
     {nvgRGB(0xFF, 0x30, 0x38), nvgRGB(0xFF, 0x8A, 0x66), nvgRGB(0x26, 0x0A, 0x0C),
      nvgRGB(0xFF, 0xC2, 0x47)},
+    // ORANGE
+    {nvgRGB(0xFF, 0x6B, 0x18), nvgRGB(0xFF, 0xC1, 0x5A), nvgRGB(0x2A, 0x14, 0x08),
+     nvgRGB(0xFF, 0xE6, 0xA6)},
+    // AMBER
+    {nvgRGB(0xFF, 0xD2, 0x4A), nvgRGB(0xFF, 0x9F, 0x2F), nvgRGB(0x2A, 0x1A, 0x0A),
+     nvgRGB(0xFF, 0x5A, 0x36)},
+    // GREEN
+    {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x8F, 0xB8, 0xFF), nvgRGB(0x10, 0x2A, 0x1A),
+     nvgRGB(0xFF, 0x87, 0x47)},
+    // LIGHT BLUE
+    {nvgRGB(0x93, 0xEA, 0xFF), nvgRGB(0x5B, 0x8C, 0xFF), nvgRGB(0x20, 0x20, 0x20),
+     nvgRGB(0xFF, 0x30, 0x30)},
+    // VINTAGE BLUE
+    {nvgRGB(0x6F, 0x9F, 0xD8), nvgRGB(0xB4, 0xC4, 0xDE), nvgRGB(0x10, 0x18, 0x24),
+     nvgRGB(0xFF, 0xE0, 0xA3)},
     // IVORY
     {nvgRGB(0xFF, 0xE0, 0xA3), nvgRGB(0xB9, 0xD6, 0xC2), nvgRGB(0x24, 0x1F, 0x18),
      nvgRGB(0xFF, 0x70, 0x43)},
@@ -157,7 +160,7 @@ struct Spectrum : Module {
     IntensityMode intensityMode = IntensityMode::SOLID;
     bool showLabels = false;
     bool showUnlitSegments = true;
-    Theme currentTheme = Theme::CLASSIC;
+    Theme currentTheme = Theme::LIGHT_BLUE;
 
     Spectrum() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -854,7 +857,7 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexSubmenuItem(
             "Theme",
-            {"Light Blue", "Amber", "Green", "Orange", "Red", "Ivory"},
+            {"Red", "Orange", "Amber", "Green", "Light Blue", "Vintage Blue", "Ivory"},
             [=]() { return static_cast<size_t>(module->currentTheme); },
             [=](size_t index) { module->currentTheme = static_cast<Theme>(index); }));
 
