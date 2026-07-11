@@ -101,7 +101,11 @@ void main() {
     float effects = uEffectsMode == 0 ? 0.0 : (uEffectsMode == 1 ? 0.48 : 1.0);
 
     vec3 color = mix(vec3(0.004, 0.009, 0.012), vec3(0.018, 0.044, 0.050), contentUv.y);
-    float contentBottom = uLabels != 0 ? 0.04375 : 0.01875;
+    // Bars need a slightly lower content origin than dots: their first cell
+    // is centered half a pitch above it, while the first dot center is fixed.
+    // Ten logical pixels makes their antialiased lower edges align when the
+    // frequency-label row is present.
+    float contentBottom = uLabels != 0 ? (uDisplayMode == 0 ? 0.04375 : 0.03125) : 0.01875;
     float contentTop = 0.98125;
     float contentY = (contentUv.y - contentBottom) / (contentTop - contentBottom);
     float insideY = step(0.0, contentY) * step(contentY, 1.0);
