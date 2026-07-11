@@ -222,13 +222,44 @@ void main() {
         vec3 bloomColor = vec3(0.0);
 
         if (uEffectsMode == 1) {
-            // The low-cost path performs one texture lookup and keeps the halo
-            // local, fading it at band boundaries rather than clipping it.
+            // Use the same neighbor topology as Full so the narrower halo can
+            // cross channel and band boundaries without a visible cutoff.
             float currentNear = phosphorField(data.r, meterLeft, meterRight, contentBottomY,
                                                contentHeight, logicalX, logicalY, 7.0);
-            float bandEdgeDistance = min(bandX, bandWidth - bandX);
-            float bandWindow = smoothstep(0.0, 3.0, bandEdgeDistance);
-            bloomColor += emissionColor * currentNear * bandWindow * 0.60;
+            bloomColor += emissionColor * currentNear * 0.60;
+
+            if (uStereoMode != 0) {
+                float otherChannel = 1.0 - channel;
+                vec4 otherData = bandData(band, otherChannel + 1.0);
+                float otherLeft = bandStart + 3.0 + otherChannel * (stereoChannelWidth + 1.5);
+                float otherRight = otherLeft + stereoChannelWidth;
+                float otherNear = phosphorField(otherData.r, otherLeft, otherRight, contentBottomY,
+                                                 contentHeight, logicalX, logicalY, 7.0);
+                vec3 otherColor = otherChannel < 0.5 ? uPrimary : uSecondary;
+                bloomColor += otherColor * otherNear * 0.60;
+            }
+
+            float leftValid = step(0.5, band);
+            float leftBand = max(band - 1.0, 0.0);
+            float leftChannel = uStereoMode == 0 ? 0.0 : 1.0;
+            vec4 leftData = bandData(leftBand, uStereoMode == 0 ? 0.0 : 2.0);
+            float leftStart = bandStart - bandWidth;
+            float leftMeterLeft = leftStart + 3.0 + leftChannel * (stereoChannelWidth + 1.5);
+            float leftMeterRight = leftMeterLeft + (uStereoMode == 0 ? bandWidth - 6.0 : stereoChannelWidth);
+            float leftNear = phosphorField(leftData.r, leftMeterLeft, leftMeterRight, contentBottomY,
+                                            contentHeight, logicalX, logicalY, 7.0);
+            vec3 leftColor = uStereoMode == 0 ? uPrimary : uSecondary;
+            bloomColor += leftColor * leftNear * leftValid * 0.60;
+
+            float rightValid = step(band, 10.5);
+            float rightBand = min(band + 1.0, 11.0);
+            vec4 rightData = bandData(rightBand, uStereoMode == 0 ? 0.0 : 1.0);
+            float rightStart = bandStart + bandWidth;
+            float rightMeterLeft = rightStart + 3.0;
+            float rightMeterRight = rightMeterLeft + (uStereoMode == 0 ? bandWidth - 6.0 : stereoChannelWidth);
+            float rightNear = phosphorField(rightData.r, rightMeterLeft, rightMeterRight, contentBottomY,
+                                             contentHeight, logicalX, logicalY, 7.0);
+            bloomColor += uPrimary * rightNear * rightValid * 0.60;
         }
         if (uEffectsMode == 2) {
             vec2 currentLobes = phosphorLobes(data.r, meterLeft, meterRight, contentBottomY,
@@ -271,7 +302,9 @@ void main() {
         }
         // Leave headroom when Micro Motion also contributes emitter energy.
         float bloomCombinationScale = uSignatureEffects.z > 0.5 ? 0.86 : 1.0;
-        color += bloomColor * effects * bloomCombinationScale * (1.0 - foregroundOcclusion);
+        float bloomStrength = uEffectsMode == 1 ? 0.9 : 0.8;
+        color += bloomColor * effects * bloomStrength * bloomCombinationScale *
+                 (1.0 - foregroundOcclusion);
     }
 
     float coreAlpha = 1.0;
