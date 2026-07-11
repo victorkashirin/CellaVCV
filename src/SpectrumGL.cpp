@@ -37,6 +37,7 @@ enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
+enum class SignatureMode { OFF, PHOSPHOR_BLOOM, COUNT };
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -88,6 +89,7 @@ struct SpectrumGL : Module {
     StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
     EffectsMode effectsMode = EffectsMode::SUBTLE;
+    SignatureMode signatureMode = SignatureMode::PHOSPHOR_BLOOM;
     bool showLabels = false;
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::CLASSIC;
@@ -118,6 +120,7 @@ struct SpectrumGL : Module {
         json_object_set_new(rootJ, "stereoMode", json_integer(static_cast<int>(stereoMode)));
         json_object_set_new(rootJ, "intensityMode", json_integer(static_cast<int>(intensityMode)));
         json_object_set_new(rootJ, "effectsMode", json_integer(static_cast<int>(effectsMode)));
+        json_object_set_new(rootJ, "signatureMode", json_integer(static_cast<int>(signatureMode)));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
         json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
@@ -134,6 +137,8 @@ struct SpectrumGL : Module {
                                                                static_cast<int>(intensityMode)));
         effectsMode = static_cast<EffectsMode>(getJsonEnum(rootJ, "effectsMode", static_cast<int>(EffectsMode::COUNT),
                                                            static_cast<int>(effectsMode)));
+        signatureMode = static_cast<SignatureMode>(getJsonEnum(
+            rootJ, "signatureMode", static_cast<int>(SignatureMode::COUNT), static_cast<int>(SignatureMode::OFF)));
         currentTheme = static_cast<Theme>(getJsonEnum(rootJ, "currentTheme", static_cast<int>(Theme::COUNT),
                                                       static_cast<int>(currentTheme)));
         json_t* labelsJ = json_object_get(rootJ, "showLabels");
@@ -155,6 +160,7 @@ struct SpectrumGLRenderer {
     GLint stereoModeLocation = -1;
     GLint intensityModeLocation = -1;
     GLint effectsModeLocation = -1;
+    GLint signatureModeLocation = -1;
     GLint showUnlitLocation = -1;
     GLint labelsLocation = -1;
     GLint primaryLocation = -1;
@@ -230,6 +236,7 @@ struct SpectrumGLRenderer {
             stereoModeLocation = glGetUniformLocation(program, "uStereoMode");
             intensityModeLocation = glGetUniformLocation(program, "uIntensityMode");
             effectsModeLocation = glGetUniformLocation(program, "uEffectsMode");
+            signatureModeLocation = glGetUniformLocation(program, "uSignatureMode");
             showUnlitLocation = glGetUniformLocation(program, "uShowUnlit");
             labelsLocation = glGetUniformLocation(program, "uLabels");
             primaryLocation = glGetUniformLocation(program, "uPrimary");
@@ -263,6 +270,7 @@ struct SpectrumGLRenderer {
         }
         dataLocation = resolutionLocation = timeLocation = -1;
         displayModeLocation = stereoModeLocation = intensityModeLocation = effectsModeLocation = -1;
+        signatureModeLocation = -1;
         showUnlitLocation = labelsLocation = -1;
         primaryLocation = secondaryLocation = inactiveLocation = peakColorLocation = -1;
         initializationAttempted = false;
@@ -430,6 +438,8 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                         static_cast<int>(module ? module->intensityMode : IntensityMode::GLOW));
             glUniform1i(renderer.effectsModeLocation,
                         static_cast<int>(module ? module->effectsMode : EffectsMode::SUBTLE));
+            glUniform1i(renderer.signatureModeLocation,
+                        static_cast<int>(module ? module->signatureMode : SignatureMode::PHOSPHOR_BLOOM));
             glUniform1i(renderer.showUnlitLocation, !module || module->showUnlitSegments);
             glUniform1i(renderer.labelsLocation, module && module->showLabels);
             glUniform3f(renderer.primaryLocation, theme.primary.r, theme.primary.g, theme.primary.b);
@@ -543,6 +553,10 @@ struct SpectrumGLWidget : ModuleWidget {
         menu->addChild(createIndexSubmenuItem(
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Signature Mode", {"Off", "Phosphor Bloom"},
+            [=]() { return static_cast<size_t>(spectrum->signatureMode); },
+            [=](size_t index) { spectrum->signatureMode = static_cast<SignatureMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
             "Theme", {"Classic", "Warm", "Cool"}, [=]() { return static_cast<size_t>(spectrum->currentTheme); },
             [=](size_t index) { spectrum->currentTheme = static_cast<Theme>(index); }));

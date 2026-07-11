@@ -338,14 +338,24 @@ Goal: test something NanoVG would not do as naturally.
 
 Recommended order:
 
-1. continuous log-frequency spectrum;
-2. waterfall history texture;
-3. persistence/feedback;
-4. only then consider multipass bloom or 3D.
+1) **Phosphor/VFD bloom**
+2) **Glass face**
+3) **Micro-motion**
 
-Do one at a time and measure it. A continuous spectrum plus waterfall is likely the strongest demonstration of why the GL module should exist.
+Do one at a time and measure it.
 
 Exit criterion: the signature mode stays responsive with multiple module instances and has a low-quality/off fallback.
+
+Implementation status:
+
+- Phosphor/VFD bloom is implemented as an optional signature mode. It adds near and wide analytic halo lobes behind the discrete segments without another framebuffer pass.
+- `Effects: Off` disables the signature pass, `Subtle` evaluates only the near lobe, and `Full` enables the additional wide halo.
+- The selection is patch-persisted as `signatureMode`; new Spectrum GL instances default to `Phosphor Bloom`, while phase-3 patches without the new key load it off to preserve their appearance.
+- The `Full` preset is intentionally conspicuous enough for a clear A/B comparison; `Subtle` is the restrained shipping candidate rather than merely a numerically smaller but visually indistinguishable setting.
+- Full bloom samples neighboring bands and the opposite stereo channel so the field spreads horizontally. It is composited as a background plane and occluded by lit/peak segment cores, preserving their foreground colors.
+- In `Solid` light response, bloom energy is independent of bar height; other light responses retain level-dependent bloom intensity.
+- `Subtle` uses a single broader near-halo at about 65% of Full's maximum bloom energy, keeping the lower-cost path visibly distinct from Off.
+- Glass-face refinement and micro-motion remain as the next phase-4 experiments and should be evaluated separately.
 
 ### Phase 5: hardening and decision
 

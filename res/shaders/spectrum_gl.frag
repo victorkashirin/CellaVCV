@@ -7,6 +7,7 @@ uniform int uDisplayMode;
 uniform int uStereoMode;
 uniform int uIntensityMode;
 uniform int uEffectsMode;
+uniform int uSignatureMode;
 uniform int uShowUnlit;
 uniform int uLabels;
 uniform vec3 uPrimary;
@@ -25,6 +26,35 @@ float hash(vec2 p) {
 
 vec4 bandData(float band, float row) {
     return texture2D(uData, vec2((band + 0.5) / 16.0, (row + 0.5) / 4.0));
+}
+
+float phosphorEnergy(float level) {
+    float energyGate = smoothstep(0.002, 0.055, level);
+    // Solid means constant emitter brightness. The bar height still controls
+    // the field geometry, but it must not attenuate the bloom energy.
+    float response = uIntensityMode == 0 ? 1.0 : sqrt(max(level, 0.0));
+    return energyGate * response;
+}
+
+float phosphorField(float level, float meterLeft, float meterRight,
+                    float contentBottomY, float contentHeight,
+                    float logicalX, float logicalY, float decay) {
+    float phosphorTopY = contentBottomY + level * contentHeight;
+    float horizontalDistance = max(max(meterLeft - logicalX, logicalX - meterRight), 0.0);
+    float verticalDistance = max(max(contentBottomY - logicalY, logicalY - phosphorTopY), 0.0);
+    float columnDistance = length(vec2(horizontalDistance, verticalDistance));
+    return exp(-columnDistance / decay) * phosphorEnergy(level);
+}
+
+vec2 phosphorLobes(float level, float meterLeft, float meterRight,
+                   float contentBottomY, float contentHeight,
+                   float logicalX, float logicalY) {
+    float phosphorTopY = contentBottomY + level * contentHeight;
+    float horizontalDistance = max(max(meterLeft - logicalX, logicalX - meterRight), 0.0);
+    float verticalDistance = max(max(contentBottomY - logicalY, logicalY - phosphorTopY), 0.0);
+    float columnDistance = length(vec2(horizontalDistance, verticalDistance));
+    float energy = phosphorEnergy(level);
+    return vec2(exp(-columnDistance / 4.8), exp(-columnDistance / 15.0)) * energy;
 }
 
 void main() {
@@ -55,10 +85,10 @@ void main() {
 
     float meterLeft = bandStart + 3.0;
     float meterRight = meterLeft + bandWidth - 6.0;
+    float stereoChannelWidth = (bandWidth - 7.5) * 0.5;
     if (uStereoMode != 0) {
-        float channelWidth = (bandWidth - 7.5) * 0.5;
-        meterLeft = bandStart + 3.0 + channel * (channelWidth + 1.5);
-        meterRight = meterLeft + channelWidth;
+        meterLeft = bandStart + 3.0 + channel * (stereoChannelWidth + 1.5);
+        meterRight = meterLeft + stereoChannelWidth;
     }
     float pixelScale = max(0.5, min(uResolution.x / 496.0, uResolution.y / 320.0));
     float edgeAa = 0.65 / pixelScale;
@@ -121,6 +151,68 @@ void main() {
     color += uInactive * segmentMask * inactiveAlpha;
 
     float levelBrightness = sqrt(max(data.r, 0.0));
+
+    // Phase 4 signature mode: a background phosphor plane behind the discrete
+    // cells. Full samples adjacent bands (and the other stereo channel) so its
+    // two-lobe field can cross meter boundaries. Segment cores occlude this
+    // plane below, retaining their exact foreground colors.
+    if (uSignatureMode == 1 && effects > 0.0) {
+        float contentBottomY = contentBottom * 320.0;
+        float contentHeight = (contentTop - contentBottom) * 320.0;
+        float foregroundOcclusion = saturate(segmentMask * max(active, peakSegment));
+        vec3 bloomColor = vec3(0.0);
+
+        if (uEffectsMode == 1) {
+            // The low-cost path performs one texture lookup and keeps the halo
+            // local, fading it at band boundaries rather than clipping it.
+            float currentNear = phosphorField(data.r, meterLeft, meterRight, contentBottomY,
+                                               contentHeight, logicalX, logicalY, 7.0);
+            float bandEdgeDistance = min(bandX, bandWidth - bandX);
+            float bandWindow = smoothstep(0.0, 3.0, bandEdgeDistance);
+            bloomColor += emissionColor * currentNear * bandWindow * 0.60;
+        }
+        if (uEffectsMode == 2) {
+            vec2 currentLobes = phosphorLobes(data.r, meterLeft, meterRight, contentBottomY,
+                                              contentHeight, logicalX, logicalY);
+            bloomColor += emissionColor * dot(currentLobes, vec2(0.28, 0.16));
+
+            if (uStereoMode != 0) {
+                float otherChannel = 1.0 - channel;
+                float otherRow = otherChannel + 1.0;
+                vec4 otherData = bandData(band, otherRow);
+                float otherLeft = bandStart + 3.0 + otherChannel * (stereoChannelWidth + 1.5);
+                float otherRight = otherLeft + stereoChannelWidth;
+                vec2 otherLobes = phosphorLobes(otherData.r, otherLeft, otherRight, contentBottomY,
+                                                contentHeight, logicalX, logicalY);
+                vec3 otherColor = otherChannel < 0.5 ? uPrimary : uSecondary;
+                bloomColor += otherColor * dot(otherLobes, vec2(0.28, 0.16));
+            }
+
+            float leftValid = step(0.5, band);
+            float leftBand = max(band - 1.0, 0.0);
+            float leftChannel = uStereoMode == 0 ? 0.0 : 1.0;
+            vec4 leftData = bandData(leftBand, uStereoMode == 0 ? 0.0 : 2.0);
+            float leftStart = bandStart - bandWidth;
+            float leftMeterLeft = leftStart + 3.0 + leftChannel * (stereoChannelWidth + 1.5);
+            float leftMeterRight = leftMeterLeft + (uStereoMode == 0 ? bandWidth - 6.0 : stereoChannelWidth);
+            vec2 leftLobes = phosphorLobes(leftData.r, leftMeterLeft, leftMeterRight, contentBottomY,
+                                           contentHeight, logicalX, logicalY);
+            vec3 leftColor = uStereoMode == 0 ? uPrimary : uSecondary;
+            bloomColor += leftColor * dot(leftLobes, vec2(0.28, 0.16)) * leftValid;
+
+            float rightValid = step(band, 10.5);
+            float rightBand = min(band + 1.0, 11.0);
+            vec4 rightData = bandData(rightBand, uStereoMode == 0 ? 0.0 : 1.0);
+            float rightStart = bandStart + bandWidth;
+            float rightMeterLeft = rightStart + 3.0;
+            float rightMeterRight = rightMeterLeft + (uStereoMode == 0 ? bandWidth - 6.0 : stereoChannelWidth);
+            vec2 rightLobes = phosphorLobes(rightData.r, rightMeterLeft, rightMeterRight, contentBottomY,
+                                            contentHeight, logicalX, logicalY);
+            bloomColor += uPrimary * dot(rightLobes, vec2(0.28, 0.16)) * rightValid;
+        }
+        color += bloomColor * effects * (1.0 - foregroundOcclusion);
+    }
+
     float coreAlpha = 1.0;
     float glowAlpha = 0.30;
     if (uIntensityMode == 1) {
