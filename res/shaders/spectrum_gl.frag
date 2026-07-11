@@ -170,7 +170,10 @@ void main() {
         float horizontalOutside = max(abs(logicalX - (meterLeft + meterRight) * 0.5) - segmentHalfSize.x, 0.0);
         glowMask = exp(-max(roundedDistance, 0.0) / 2.8) *
                    (1.0 - smoothstep(0.0, 3.0, horizontalOutside));
-        segmentMask = coreMask;
+        // fract() repeats the cell geometry above and below the meter. Mask
+        // the scaffold here as well as the lit states so CRT warping cannot
+        // reveal a stray segment past the curved top edge.
+        segmentMask = coreMask * insideY;
     }
 
     // Vintage meters illuminate whole segments. Quantize the incoming levels
