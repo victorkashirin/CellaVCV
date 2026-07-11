@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -34,6 +36,7 @@ T clampValue(T value, T low, T high) {
 enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
+enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -57,12 +60,14 @@ struct Color3 {
 struct GLTheme {
     Color3 primary;
     Color3 secondary;
+    Color3 inactive;
+    Color3 peak;
 };
 
 const std::array<GLTheme, static_cast<size_t>(Theme::COUNT)> GL_THEMES = {{
-    {{0.576f, 0.918f, 1.f}, {1.f, 0.604f, 0.843f}},
-    {{1.f, 0.702f, 0.278f}, {0.494f, 0.851f, 1.f}},
-    {{0.278f, 1.f, 0.529f}, {0.561f, 0.722f, 1.f}},
+    {{0.576f, 0.918f, 1.f}, {1.f, 0.604f, 0.843f}, {0.125f, 0.125f, 0.125f}, {1.f, 0.188f, 0.188f}},
+    {{1.f, 0.702f, 0.278f}, {0.494f, 0.851f, 1.f}, {0.165f, 0.102f, 0.063f}, {1.f, 0.278f, 0.278f}},
+    {{0.278f, 1.f, 0.529f}, {0.561f, 0.722f, 1.f}, {0.063f, 0.165f, 0.102f}, {1.f, 0.529f, 0.278f}},
 }};
 
 const GLTheme& getTheme(Theme theme) {
@@ -82,6 +87,7 @@ struct SpectrumGL : Module {
     DisplayMode displayMode = DisplayMode::BARS;
     StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
+    EffectsMode effectsMode = EffectsMode::SUBTLE;
     bool showLabels = false;
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::CLASSIC;
@@ -111,6 +117,7 @@ struct SpectrumGL : Module {
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
         json_object_set_new(rootJ, "stereoMode", json_integer(static_cast<int>(stereoMode)));
         json_object_set_new(rootJ, "intensityMode", json_integer(static_cast<int>(intensityMode)));
+        json_object_set_new(rootJ, "effectsMode", json_integer(static_cast<int>(effectsMode)));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
         json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
@@ -125,6 +132,8 @@ struct SpectrumGL : Module {
         intensityMode = static_cast<IntensityMode>(getJsonEnum(rootJ, "intensityMode",
                                                                static_cast<int>(IntensityMode::COUNT),
                                                                static_cast<int>(intensityMode)));
+        effectsMode = static_cast<EffectsMode>(getJsonEnum(rootJ, "effectsMode", static_cast<int>(EffectsMode::COUNT),
+                                                           static_cast<int>(effectsMode)));
         currentTheme = static_cast<Theme>(getJsonEnum(rootJ, "currentTheme", static_cast<int>(Theme::COUNT),
                                                       static_cast<int>(currentTheme)));
         json_t* labelsJ = json_object_get(rootJ, "showLabels");
@@ -138,9 +147,20 @@ namespace {
 
 struct SpectrumGLRenderer {
     GLuint program = 0;
-    GLint modeLocation = -1;
-    GLint bottomColorLocation = -1;
-    GLint topColorLocation = -1;
+    GLuint dataTexture = 0;
+    GLint dataLocation = -1;
+    GLint resolutionLocation = -1;
+    GLint timeLocation = -1;
+    GLint displayModeLocation = -1;
+    GLint stereoModeLocation = -1;
+    GLint intensityModeLocation = -1;
+    GLint effectsModeLocation = -1;
+    GLint showUnlitLocation = -1;
+    GLint labelsLocation = -1;
+    GLint primaryLocation = -1;
+    GLint secondaryLocation = -1;
+    GLint inactiveLocation = -1;
+    GLint peakColorLocation = -1;
     bool initializationAttempted = false;
 
     static std::string loadResource(const std::string& relativePath) {
@@ -203,9 +223,28 @@ struct SpectrumGLRenderer {
             }
 
             program = candidate;
-            modeLocation = glGetUniformLocation(program, "uMode");
-            bottomColorLocation = glGetUniformLocation(program, "uBottomColor");
-            topColorLocation = glGetUniformLocation(program, "uTopColor");
+            dataLocation = glGetUniformLocation(program, "uData");
+            resolutionLocation = glGetUniformLocation(program, "uResolution");
+            timeLocation = glGetUniformLocation(program, "uTime");
+            displayModeLocation = glGetUniformLocation(program, "uDisplayMode");
+            stereoModeLocation = glGetUniformLocation(program, "uStereoMode");
+            intensityModeLocation = glGetUniformLocation(program, "uIntensityMode");
+            effectsModeLocation = glGetUniformLocation(program, "uEffectsMode");
+            showUnlitLocation = glGetUniformLocation(program, "uShowUnlit");
+            labelsLocation = glGetUniformLocation(program, "uLabels");
+            primaryLocation = glGetUniformLocation(program, "uPrimary");
+            secondaryLocation = glGetUniformLocation(program, "uSecondary");
+            inactiveLocation = glGetUniformLocation(program, "uInactive");
+            peakColorLocation = glGetUniformLocation(program, "uPeakColor");
+
+            glGenTextures(1, &dataTexture);
+            glBindTexture(GL_TEXTURE_2D, dataTexture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            std::array<unsigned char, 16 * 4 * 4> empty = {};
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, empty.data());
             return true;
         } catch (const std::exception& e) {
             WARN("Spectrum GL shader resources could not be loaded: %s", e.what());
@@ -214,20 +253,19 @@ struct SpectrumGLRenderer {
     }
 
     void destroy() {
+        if (dataTexture) {
+            glDeleteTextures(1, &dataTexture);
+            dataTexture = 0;
+        }
         if (program) {
             glDeleteProgram(program);
             program = 0;
         }
-        modeLocation = -1;
-        bottomColorLocation = -1;
-        topColorLocation = -1;
+        dataLocation = resolutionLocation = timeLocation = -1;
+        displayModeLocation = stereoModeLocation = intensityModeLocation = effectsModeLocation = -1;
+        showUnlitLocation = labelsLocation = -1;
+        primaryLocation = secondaryLocation = inactiveLocation = peakColorLocation = -1;
         initializationAttempted = false;
-    }
-
-    void beginShaderMode(int mode, const Color3& bottom, const Color3& top) const {
-        glUniform1i(modeLocation, mode);
-        glUniform3f(bottomColorLocation, bottom.r, bottom.g, bottom.b);
-        glUniform3f(topColorLocation, top.r, top.g, top.b);
     }
 };
 
@@ -235,15 +273,19 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     SpectrumGL* module = NULL;
     SpectrumGLRenderer renderer;
     cella::spectrum::SpectrumFrame latestFrame;
+    std::array<std::array<float, NUM_BANDS>, 3> displayed = {};
+    std::array<std::array<float, NUM_BANDS>, 3> peaks = {};
+    std::array<std::array<float, NUM_BANDS>, 3> ghosts = {};
+    std::array<std::array<float, NUM_BANDS>, 3> previous = {};
+    std::chrono::steady_clock::time_point lastDraw = std::chrono::steady_clock::now();
+    float elapsed = 0.f;
 
-    ~SpectrumGLDisplay() override { renderer.destroy(); }
+    ~SpectrumGLDisplay() override {}
 
     void onContextCreate(const ContextCreateEvent& e) override {
         widget::OpenGlWidget::onContextCreate(e);
         renderer.program = 0;
-        renderer.modeLocation = -1;
-        renderer.bottomColorLocation = -1;
-        renderer.topColorLocation = -1;
+        renderer.dataTexture = 0;
         renderer.initializationAttempted = false;
     }
 
@@ -276,80 +318,85 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
         return 0.18f + 0.68f * (0.5f + 0.5f * std::sin(phase));
     }
 
-    float levelFor(int band, int channel) const {
-        if (!module) return demoLevel(band, channel);
-        if (module->stereoMode == StereoMode::LEFT_RIGHT_SPLIT) {
-            return normalizedLevel(latestFrame.channelLevels[channel][band]);
+    void updateAnimation(float dt, bool receivedFrame) {
+        const float peakDelay = module ? std::max(module->params[SpectrumGL::PEAK_FALL_DELAY_PARAM].getValue(),
+                                                   cella::spectrum::SpectrumConfig::MIN_DELAY_TIME)
+                                       : 1.f;
+        const float peakDecay = std::exp(-dt / peakDelay);
+        const float ghostDecay = std::exp(-dt / 0.9f);
+
+        for (int row = 0; row < 3; ++row) {
+            for (int band = 0; band < NUM_BANDS; ++band) {
+                float target;
+                if (!module) {
+                    target = demoLevel(band, row);
+                } else if (row == 0) {
+                    target = normalizedLevel(latestFrame.levels[band]);
+                } else {
+                    target = normalizedLevel(latestFrame.channelLevels[row - 1][band]);
+                }
+                if (receivedFrame) previous[row][band] = displayed[row][band];
+                // Keep the vintage analyzer's immediate response. This very short,
+                // symmetric filter only softens single-frame UI flicker.
+                const float tau = 0.012f;
+                displayed[row][band] += (target - displayed[row][band]) * (1.f - std::exp(-dt / tau));
+                peaks[row][band] = std::max(displayed[row][band], peaks[row][band] * peakDecay);
+                ghosts[row][band] = std::max(displayed[row][band], ghosts[row][band] * ghostDecay);
+            }
         }
-        return normalizedLevel(latestFrame.levels[band]);
     }
 
-    void drawScene(bool shaderReady) {
-        const Theme themeChoice = module ? module->currentTheme : Theme::CLASSIC;
-        const GLTheme& theme = getTheme(themeChoice);
-        const Color3 backgroundBottom = {0.006f, 0.012f, 0.016f};
-        const Color3 backgroundTop = {0.025f, 0.055f, 0.065f};
-
-        if (shaderReady) {
-            renderer.beginShaderMode(0, backgroundBottom, backgroundTop);
-        } else {
-            glBegin(GL_QUADS);
-            glColor3f(backgroundBottom.r, backgroundBottom.g, backgroundBottom.b);
-            glVertex2f(-1.f, -1.f);
-            glVertex2f(1.f, -1.f);
-            glColor3f(backgroundTop.r, backgroundTop.g, backgroundTop.b);
-            glVertex2f(1.f, 1.f);
-            glVertex2f(-1.f, 1.f);
-            glEnd();
-        }
-        if (shaderReady) drawRect(-1.f, -1.f, 1.f, 1.f);
-
-        const float outerMargin = 0.025f;
-        const float bandPitch = (2.f - 2.f * outerMargin) / NUM_BANDS;
-        const float gap = bandPitch * 0.20f;
-        const bool split = module && module->stereoMode == StereoMode::LEFT_RIGHT_SPLIT;
-        const int channels = split ? 2 : 1;
-        const bool showUnlit = !module || module->showUnlitSegments;
-        const Color3 unlit = {0.035f, 0.065f, 0.072f};
-
-        for (int band = 0; band < NUM_BANDS; ++band) {
-            const float left = -1.f + outerMargin + band * bandPitch + gap * 0.5f;
-            const float right = left + bandPitch - gap;
-            if (showUnlit) {
-                if (shaderReady) renderer.beginShaderMode(1, unlit, unlit);
-                else glColor3f(unlit.r, unlit.g, unlit.b);
-                drawRect(left, -0.95f, right, 0.95f);
-            }
-
-            for (int channel = 0; channel < channels; ++channel) {
-                const Color3& color = channel == 0 ? theme.primary : theme.secondary;
-                const float channelWidth = (right - left) / channels;
-                const float channelGap = split ? channelWidth * 0.08f : 0.f;
-                const float channelLeft = left + channel * channelWidth + channelGap * 0.5f;
-                const float channelRight = left + (channel + 1) * channelWidth - channelGap * 0.5f;
-                const float top = -0.95f + levelFor(band, channel) * 1.9f;
-                const Color3 bright = {std::min(color.r * 1.12f, 1.f), std::min(color.g * 1.12f, 1.f),
-                                       std::min(color.b * 1.12f, 1.f)};
-                if (shaderReady) renderer.beginShaderMode(1, color, bright);
-                else glColor3f(color.r, color.g, color.b);
-                drawRect(channelLeft, -0.95f, channelRight, top);
+    void uploadData() {
+        std::array<unsigned char, 16 * 4 * 4> pixels = {};
+        for (int row = 0; row < 3; ++row) {
+            for (int band = 0; band < NUM_BANDS; ++band) {
+                const size_t offset = static_cast<size_t>((row * 16 + band) * 4);
+                pixels[offset] = static_cast<unsigned char>(clampValue(displayed[row][band], 0.f, 1.f) * 255.f);
+                pixels[offset + 1] = static_cast<unsigned char>(clampValue(peaks[row][band], 0.f, 1.f) * 255.f);
+                pixels[offset + 2] = static_cast<unsigned char>(clampValue(ghosts[row][band], 0.f, 1.f) * 255.f);
+                pixels[offset + 3] = static_cast<unsigned char>(
+                    clampValue(std::fabs(displayed[row][band] - previous[row][band]) * 5.f, 0.f, 1.f) * 255.f);
             }
         }
+        glBindTexture(GL_TEXTURE_2D, renderer.dataTexture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 16, 4, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    }
+
+    void drawFallback() {
+        glUseProgram(0);
+        glBegin(GL_QUADS);
+        glColor3f(0.006f, 0.012f, 0.016f);
+        glVertex2f(-1.f, -1.f);
+        glVertex2f(1.f, -1.f);
+        glColor3f(0.025f, 0.055f, 0.065f);
+        glVertex2f(1.f, 1.f);
+        glVertex2f(-1.f, 1.f);
+        glEnd();
     }
 
     void drawFramebuffer() override {
+        bool receivedFrame = false;
         while (module && !module->displayFrames.empty()) {
             latestFrame = module->displayFrames.shift();
+            receivedFrame = true;
         }
+
+        const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        const float dt = clampValue(std::chrono::duration<float>(now - lastDraw).count(), 0.f, 0.1f);
+        lastDraw = now;
+        elapsed += dt;
+        updateAnimation(dt, receivedFrame);
 
         GLint oldProgram = 0;
         GLint oldActiveTexture = 0;
-        GLint oldTexture = 0;
+        GLint oldTexture0 = 0;
         GLint oldArrayBuffer = 0;
         GLint oldElementBuffer = 0;
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture0);
+        glActiveTexture(static_cast<GLenum>(oldActiveTexture));
         glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &oldArrayBuffer);
         glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &oldElementBuffer);
         glPushAttrib(GL_ALL_ATTRIB_BITS);
@@ -361,22 +408,47 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
         glDisable(GL_CULL_FACE);
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_BLEND);
+        glActiveTexture(GL_TEXTURE0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
         const bool shaderReady = renderer.initialize();
-        glUseProgram(shaderReady ? renderer.program : 0);
-        drawScene(shaderReady);
+        if (shaderReady) {
+            uploadData();
+            const GLTheme& theme = getTheme(module ? module->currentTheme : Theme::CLASSIC);
+            glUseProgram(renderer.program);
+            glUniform1i(renderer.dataLocation, 0);
+            glUniform2f(renderer.resolutionLocation, framebufferSize.x, framebufferSize.y);
+            glUniform1f(renderer.timeLocation, elapsed);
+            glUniform1i(renderer.displayModeLocation,
+                        static_cast<int>(module ? module->displayMode : DisplayMode::BARS));
+            glUniform1i(renderer.stereoModeLocation,
+                        static_cast<int>(module ? module->stereoMode : StereoMode::MONO));
+            glUniform1i(renderer.intensityModeLocation,
+                        static_cast<int>(module ? module->intensityMode : IntensityMode::GLOW));
+            glUniform1i(renderer.effectsModeLocation,
+                        static_cast<int>(module ? module->effectsMode : EffectsMode::SUBTLE));
+            glUniform1i(renderer.showUnlitLocation, !module || module->showUnlitSegments);
+            glUniform1i(renderer.labelsLocation, module && module->showLabels);
+            glUniform3f(renderer.primaryLocation, theme.primary.r, theme.primary.g, theme.primary.b);
+            glUniform3f(renderer.secondaryLocation, theme.secondary.r, theme.secondary.g, theme.secondary.b);
+            glUniform3f(renderer.inactiveLocation, theme.inactive.r, theme.inactive.g, theme.inactive.b);
+            glUniform3f(renderer.peakColorLocation, theme.peak.r, theme.peak.g, theme.peak.b);
+            drawRect(-1.f, -1.f, 1.f, 1.f);
+        } else {
+            drawFallback();
+        }
 
+        glPopClientAttrib();
+        glPopAttrib();
         glUseProgram(static_cast<GLuint>(oldProgram));
         glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(oldArrayBuffer));
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(oldElementBuffer));
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture0));
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
-        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture));
-        glPopClientAttrib();
-        glPopAttrib();
     }
 };
 
@@ -390,6 +462,28 @@ struct SpectrumGLBadge : TransparentWidget {
         nvgFillColor(args.vg, nvgRGB(147, 234, 255));
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.52f, "GL", NULL);
+    }
+};
+
+struct SpectrumGLLabels : TransparentWidget {
+    SpectrumGL* module = NULL;
+
+    void draw(const DrawArgs& args) override {
+        if (!module || !module->showLabels) return;
+        nvgFontSize(args.vg, 9.f);
+        nvgFillColor(args.vg, nvgRGB(180, 190, 192));
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        const float horizontalMargin = 3.f;
+        const float bandWidth = (box.size.x - 2.f * horizontalMargin) / NUM_BANDS;
+        for (int band = 0; band < NUM_BANDS; ++band) {
+            const float frequency = cella::spectrum::SpectrumConfig::BAND_CENTERS[band];
+            char label[16];
+            if (frequency >= 1000.f)
+                std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
+            else
+                std::snprintf(label, sizeof(label), "%.0f", frequency);
+            nvgText(args.vg, horizontalMargin + (band + 0.5f) * bandWidth, box.size.y - 12.f, label, NULL);
+        }
     }
 };
 
@@ -414,6 +508,12 @@ struct SpectrumGLWidget : ModuleWidget {
         display->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(display);
 
+        SpectrumGLLabels* labels = new SpectrumGLLabels();
+        labels->module = module;
+        labels->box.pos = Vec(0.f, DISPLAY_Y);
+        labels->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        addChild(labels);
+
         SpectrumGLBadge* badge = new SpectrumGLBadge();
         badge->box.pos = Vec(460.f, 5.f);
         badge->box.size = Vec(28.f, 15.f);
@@ -434,10 +534,23 @@ struct SpectrumGLWidget : ModuleWidget {
             [=]() { return static_cast<size_t>(spectrum->stereoMode); },
             [=](size_t index) { spectrum->stereoMode = static_cast<StereoMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
+            "Display", {"Dots", "Bars"}, [=]() { return static_cast<size_t>(spectrum->displayMode); },
+            [=](size_t index) { spectrum->displayMode = static_cast<DisplayMode>(index); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Light Response", {"Solid", "Dynamic", "Bloom", "Persistence", "Clean"},
+            [=]() { return static_cast<size_t>(spectrum->intensityMode); },
+            [=](size_t index) { spectrum->intensityMode = static_cast<IntensityMode>(index); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
+            [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
+        menu->addChild(createIndexSubmenuItem(
             "Theme", {"Classic", "Warm", "Cool"}, [=]() { return static_cast<size_t>(spectrum->currentTheme); },
             [=](size_t index) { spectrum->currentTheme = static_cast<Theme>(index); }));
         menu->addChild(createCheckMenuItem(
-            "Show Unlit Bands", "", [=]() { return spectrum->showUnlitSegments; },
+            "Show Labels", "", [=]() { return spectrum->showLabels; },
+            [=]() { spectrum->showLabels = !spectrum->showLabels; }));
+        menu->addChild(createCheckMenuItem(
+            "Show Unlit Segments", "", [=]() { return spectrum->showUnlitSegments; },
             [=]() { spectrum->showUnlitSegments = !spectrum->showUnlitSegments; }));
         menu->addChild(new MenuSeparator);
         menu->addChild(new GLSlider(spectrum->getParamQuantity(SpectrumGL::UPPER_PARAM)));
