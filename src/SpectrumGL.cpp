@@ -46,7 +46,7 @@ enum class SignatureEffect : uint32_t {
     SOFT_CRT = 1u << 3,
 };
 constexpr uint32_t ALL_SIGNATURE_EFFECTS = (1u << 4) - 1u;
-enum class Theme { CLASSIC, WARM, COOL, COUNT };
+enum class Theme { CLASSIC, WARM, COOL, ORANGE, RED, IVORY, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
     json_t* valueJ = json_object_get(rootJ, key);
@@ -77,6 +77,9 @@ const std::array<GLTheme, static_cast<size_t>(Theme::COUNT)> GL_THEMES = {{
     {{0.576f, 0.918f, 1.f}, {1.f, 0.604f, 0.843f}, {0.125f, 0.125f, 0.125f}, {1.f, 0.188f, 0.188f}},
     {{1.f, 0.702f, 0.278f}, {0.494f, 0.851f, 1.f}, {0.165f, 0.102f, 0.063f}, {1.f, 0.278f, 0.278f}},
     {{0.278f, 1.f, 0.529f}, {0.561f, 0.722f, 1.f}, {0.063f, 0.165f, 0.102f}, {1.f, 0.529f, 0.278f}},
+    {{1.f, 0.420f, 0.094f}, {1.f, 0.757f, 0.353f}, {0.165f, 0.078f, 0.031f}, {1.f, 0.902f, 0.651f}},
+    {{1.f, 0.188f, 0.220f}, {1.f, 0.541f, 0.400f}, {0.149f, 0.039f, 0.047f}, {1.f, 0.761f, 0.278f}},
+    {{1.f, 0.878f, 0.639f}, {0.725f, 0.839f, 0.761f}, {0.141f, 0.122f, 0.094f}, {1.f, 0.439f, 0.263f}},
 }};
 
 const GLTheme& getTheme(Theme theme) {
@@ -699,7 +702,8 @@ struct SpectrumGLWidget : ModuleWidget {
             }
         }));
         menu->addChild(createIndexSubmenuItem(
-            "Theme", {"Classic", "Warm", "Cool"}, [=]() { return static_cast<size_t>(spectrum->currentTheme); },
+            "Theme", {"Light Blue", "Amber", "Green", "Orange", "Red", "Ivory"},
+            [=]() { return static_cast<size_t>(spectrum->currentTheme); },
             [=](size_t index) { spectrum->currentTheme = static_cast<Theme>(index); }));
         menu->addChild(createCheckMenuItem(
             "Show Labels", "", [=]() { return spectrum->showLabels; },

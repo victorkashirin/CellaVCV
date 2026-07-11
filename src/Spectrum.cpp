@@ -66,7 +66,7 @@ enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 
 // Theme System
-enum class Theme { CLASSIC, WARM, COOL, COUNT };
+enum class Theme { CLASSIC, WARM, COOL, ORANGE, RED, IVORY, COUNT };
 
 struct ThemeColors {
     NVGcolor active;
@@ -91,6 +91,15 @@ static const std::array<ThemeColors, static_cast<size_t>(Theme::COUNT)> THEMES =
     // COOL
     {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x8F, 0xB8, 0xFF), nvgRGB(0x10, 0x2A, 0x1A),
      nvgRGB(0xFF, 0x87, 0x47)},
+    // ORANGE
+    {nvgRGB(0xFF, 0x6B, 0x18), nvgRGB(0xFF, 0xC1, 0x5A), nvgRGB(0x2A, 0x14, 0x08),
+     nvgRGB(0xFF, 0xE6, 0xA6)},
+    // RED
+    {nvgRGB(0xFF, 0x30, 0x38), nvgRGB(0xFF, 0x8A, 0x66), nvgRGB(0x26, 0x0A, 0x0C),
+     nvgRGB(0xFF, 0xC2, 0x47)},
+    // IVORY
+    {nvgRGB(0xFF, 0xE0, 0xA3), nvgRGB(0xB9, 0xD6, 0xC2), nvgRGB(0x24, 0x1F, 0x18),
+     nvgRGB(0xFF, 0x70, 0x43)},
 }};
 
 // Theme-based color functions
@@ -845,7 +854,7 @@ struct SpectrumWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexSubmenuItem(
             "Theme",
-            {"Classic", "Warm", "Cool"},
+            {"Light Blue", "Amber", "Green", "Orange", "Red", "Ivory"},
             [=]() { return static_cast<size_t>(module->currentTheme); },
             [=](size_t index) { module->currentTheme = static_cast<Theme>(index); }));
 
