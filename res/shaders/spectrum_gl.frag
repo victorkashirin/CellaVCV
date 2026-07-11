@@ -192,7 +192,22 @@ void main() {
     float active = step(segmentIndex + 0.5, activeCount) * insideY * nonPeakSegment;
     float ghost = step(segmentIndex + 0.5, ghostCount) * (1.0 - active) * insideY * nonPeakSegment;
     float inactiveAlpha = uShowUnlit != 0 ? (uIntensityMode == 2 ? 0.18 : 0.42) : 0.0;
-    color += uInactive * segmentMask * inactiveAlpha;
+
+    // Three brighter unlit rows divide the scale into quarters, echoing the
+    // reference lines found on vintage hardware analyzers without placing
+    // text over a band or changing the meter geometry.
+    float quarterRow = floor(segmentRows * 0.25 - 0.0001);
+    float halfRow = floor(segmentRows * 0.50 - 0.0001);
+    float threeQuarterRow = floor(segmentRows * 0.75 - 0.0001);
+    float referenceDistance = min(abs(segmentIndex - quarterRow),
+                                  min(abs(segmentIndex - halfRow),
+                                      abs(segmentIndex - threeQuarterRow)));
+    float referenceRow = (1.0 - step(0.5, referenceDistance)) * (uLabels != 0 ? 1.0 : 0.0);
+    float occupied = max(active, peakSegment);
+    if (uIntensityMode == 2) occupied = max(occupied, ghost);
+    float referenceAlpha = uShowUnlit != 0 ? (uIntensityMode == 2 ? 0.20 : 0.18) : 0.0;
+    float unlitReference = referenceRow * (1.0 - occupied);
+    color += uInactive * segmentMask * (inactiveAlpha + referenceAlpha * unlitReference);
 
     float levelBrightness = sqrt(max(data.r, 0.0));
 
