@@ -187,7 +187,6 @@ struct FrequencyAnalyzerRenderer {
     GLint stereoModeLocation = -1;
     GLint intensityModeLocation = -1;
     GLint effectsModeLocation = -1;
-    GLint signatureEffectsLocation = -1;
     GLint showUnlitLocation = -1;
     GLint labelsLocation = -1;
     GLint primaryLocation = -1;
@@ -195,6 +194,8 @@ struct FrequencyAnalyzerRenderer {
     GLint inactiveLocation = -1;
     GLint peakColorLocation = -1;
     bool initializationAttempted = false;
+    uint32_t attemptedSignatureEffects = ALL_SIGNATURE_EFFECTS + 1u;
+    uint32_t programSignatureEffects = ALL_SIGNATURE_EFFECTS + 1u;
 
     static std::string loadResource(const std::string& relativePath) {
         const std::vector<uint8_t> bytes = system::readFile(asset::plugin(pluginInstance, relativePath));
@@ -220,14 +221,47 @@ struct FrequencyAnalyzerRenderer {
         return 0;
     }
 
-    bool initialize() {
-        if (program) return true;
-        if (initializationAttempted) return false;
+    static std::string specializeFragmentShader(std::string source, uint32_t signatureEffects) {
+        const size_t versionEnd = source.find('\n');
+        if (versionEnd == std::string::npos) return source;
+
+        const std::string defines = rack::string::f(
+            "#define SIGNATURE_PHOSPHOR_BLOOM %d\n"
+            "#define SIGNATURE_GLASS_FACE %d\n"
+            "#define SIGNATURE_MICRO_MOTION %d\n"
+            "#define SIGNATURE_SOFT_CRT %d\n",
+            (signatureEffects & static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM)) != 0u,
+            (signatureEffects & static_cast<uint32_t>(SignatureEffect::GLASS_FACE)) != 0u,
+            (signatureEffects & static_cast<uint32_t>(SignatureEffect::MICRO_MOTION)) != 0u,
+            (signatureEffects & static_cast<uint32_t>(SignatureEffect::SOFT_CRT)) != 0u);
+        source.insert(versionEnd + 1, defines);
+        return source;
+    }
+
+    void resetProgram() {
+        if (program) {
+            glDeleteProgram(program);
+            program = 0;
+        }
+        dataLocation = resolutionLocation = timeLocation = -1;
+        displayModeLocation = stereoModeLocation = intensityModeLocation = effectsModeLocation = -1;
+        showUnlitLocation = labelsLocation = -1;
+        primaryLocation = secondaryLocation = inactiveLocation = peakColorLocation = -1;
+        programSignatureEffects = ALL_SIGNATURE_EFFECTS + 1u;
+    }
+
+    bool initialize(uint32_t signatureEffects) {
+        signatureEffects &= ALL_SIGNATURE_EFFECTS;
+        if (program && programSignatureEffects == signatureEffects) return true;
+        if (program) resetProgram();
+        if (initializationAttempted && attemptedSignatureEffects == signatureEffects) return false;
         initializationAttempted = true;
+        attemptedSignatureEffects = signatureEffects;
 
         try {
             const std::string vertexSource = loadResource("res/shaders/spectrum_gl.vert");
-            const std::string fragmentSource = loadResource("res/shaders/spectrum_gl.frag");
+            const std::string fragmentSource =
+                specializeFragmentShader(loadResource("res/shaders/spectrum_gl.frag"), signatureEffects);
             GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource, "vertex");
             GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource, "fragment");
             if (!vertexShader || !fragmentShader) {
@@ -256,6 +290,7 @@ struct FrequencyAnalyzerRenderer {
             }
 
             program = candidate;
+            programSignatureEffects = signatureEffects;
             dataLocation = glGetUniformLocation(program, "uData");
             resolutionLocation = glGetUniformLocation(program, "uResolution");
             timeLocation = glGetUniformLocation(program, "uTime");
@@ -263,7 +298,6 @@ struct FrequencyAnalyzerRenderer {
             stereoModeLocation = glGetUniformLocation(program, "uStereoMode");
             intensityModeLocation = glGetUniformLocation(program, "uIntensityMode");
             effectsModeLocation = glGetUniformLocation(program, "uEffectsMode");
-            signatureEffectsLocation = glGetUniformLocation(program, "uSignatureEffects");
             showUnlitLocation = glGetUniformLocation(program, "uShowUnlit");
             labelsLocation = glGetUniformLocation(program, "uLabels");
             primaryLocation = glGetUniformLocation(program, "uPrimary");
@@ -271,14 +305,16 @@ struct FrequencyAnalyzerRenderer {
             inactiveLocation = glGetUniformLocation(program, "uInactive");
             peakColorLocation = glGetUniformLocation(program, "uPeakColor");
 
-            glGenTextures(1, &dataTexture);
-            glBindTexture(GL_TEXTURE_2D, dataTexture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            std::array<unsigned char, 16 * 4 * 4> empty = {};
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, empty.data());
+            if (!dataTexture) {
+                glGenTextures(1, &dataTexture);
+                glBindTexture(GL_TEXTURE_2D, dataTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                std::array<unsigned char, 16 * 4 * 4> empty = {};
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, empty.data());
+            }
             return true;
         } catch (const std::exception& e) {
             WARN("Frequency Analyzer shader resources could not be loaded: %s", e.what());
@@ -291,16 +327,9 @@ struct FrequencyAnalyzerRenderer {
             glDeleteTextures(1, &dataTexture);
             dataTexture = 0;
         }
-        if (program) {
-            glDeleteProgram(program);
-            program = 0;
-        }
-        dataLocation = resolutionLocation = timeLocation = -1;
-        displayModeLocation = stereoModeLocation = intensityModeLocation = effectsModeLocation = -1;
-        signatureEffectsLocation = -1;
-        showUnlitLocation = labelsLocation = -1;
-        primaryLocation = secondaryLocation = inactiveLocation = peakColorLocation = -1;
+        resetProgram();
         initializationAttempted = false;
+        attemptedSignatureEffects = ALL_SIGNATURE_EFFECTS + 1u;
     }
 };
 
@@ -535,7 +564,9 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         glDisable(GL_BLEND);
         glActiveTexture(GL_TEXTURE0);
 
-        const bool shaderReady = renderer.initialize();
+        const uint32_t signatureEffects =
+            module ? module->signatureEffects : static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM);
+        const bool shaderReady = renderer.initialize(signatureEffects);
         if (shaderReady) {
             uploadData();
             const GLTheme& theme = getTheme(module ? module->currentTheme : Theme::LIGHT_BLUE);
@@ -550,13 +581,6 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
                         static_cast<int>(module ? module->intensityMode : IntensityMode::SOLID));
             glUniform1i(renderer.effectsModeLocation,
                         static_cast<int>(module ? module->effectsMode : EffectsMode::SUBTLE));
-            const uint32_t signatureEffects =
-                module ? module->signatureEffects : static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM);
-            glUniform4f(renderer.signatureEffectsLocation,
-                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM)) ? 1.f : 0.f,
-                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::GLASS_FACE)) ? 1.f : 0.f,
-                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::MICRO_MOTION)) ? 1.f : 0.f,
-                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::SOFT_CRT)) ? 1.f : 0.f);
             glUniform1i(renderer.showUnlitLocation, !module || module->showUnlitSegments);
             glUniform1i(renderer.labelsLocation, module && module->showLabels);
             glUniform3f(renderer.primaryLocation, theme.primary.r, theme.primary.g, theme.primary.b);

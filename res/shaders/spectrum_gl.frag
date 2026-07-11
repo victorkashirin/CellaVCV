@@ -7,10 +7,6 @@ uniform int uDisplayMode;
 uniform int uStereoMode;
 uniform int uIntensityMode;
 uniform int uEffectsMode;
-// x: phosphor bloom, y: glass face, z: micro motion, w: soft CRT.
-// A vec4 keeps the CPU-side bitmask compatible with GLSL 1.10, which has no
-// portable integer bitwise operators.
-uniform vec4 uSignatureEffects;
 uniform int uShowUnlit;
 uniform int uLabels;
 uniform vec3 uPrimary;
@@ -75,7 +71,8 @@ void main() {
     vec2 contentUv = screenUv;
     float crtMask = 1.0;
     float crtFocusLoss = 0.0;
-    if (uSignatureEffects.w > 0.5 && uEffectsMode != 0) {
+#if SIGNATURE_SOFT_CRT
+    if (uEffectsMode != 0) {
         // Inverse barrel mapping: each output fragment asks which point on the
         // flat meter plane would be seen through the curved face. Cross-axis
         // terms bow straight lines while leaving the screen's edge midpoints
@@ -97,6 +94,7 @@ void main() {
         crtFocusLoss = smoothstep(0.52, 1.0, radialEdge);
         crtFocusLoss *= crtFocusLoss;
     }
+#endif
     float logicalY = contentUv.y * 320.0;
     float effects = uEffectsMode == 0 ? 0.0 : (uEffectsMode == 1 ? 0.48 : 1.0);
 
@@ -215,7 +213,8 @@ void main() {
     // cells. Full samples adjacent bands (and the other stereo channel) so its
     // two-lobe field can cross meter boundaries. Segment cores occlude this
     // plane below, retaining their exact foreground colors.
-    if (uSignatureEffects.x > 0.5 && effects > 0.0) {
+#if SIGNATURE_PHOSPHOR_BLOOM
+    if (effects > 0.0) {
         float contentBottomY = contentBottom * 320.0;
         float contentHeight = (contentTop - contentBottom) * 320.0;
         float foregroundOcclusion = saturate(segmentMask * max(active, peakSegment));
@@ -301,11 +300,16 @@ void main() {
             bloomColor += uPrimary * dot(rightLobes, vec2(0.28, 0.16)) * rightValid;
         }
         // Leave headroom when Micro Motion also contributes emitter energy.
-        float bloomCombinationScale = uSignatureEffects.z > 0.5 ? 0.86 : 1.0;
+#if SIGNATURE_MICRO_MOTION
+        float bloomCombinationScale = 0.86;
+#else
+        float bloomCombinationScale = 1.0;
+#endif
         float bloomStrength = uEffectsMode == 1 ? 0.9 : 0.8;
         color += bloomColor * effects * bloomStrength * bloomCombinationScale *
                  (1.0 - foregroundOcclusion);
     }
+#endif
 
     float coreAlpha = 1.0;
     float glowAlpha = 0.30;
@@ -321,8 +325,9 @@ void main() {
     // readings and peak positions remain fixed while the phosphor energy has
     // slow spatial drift, restrained per-band flutter, and a brief attack halo.
     float motionGain = 1.0;
+#if SIGNATURE_MICRO_MOTION
     float attackFlash = 0.0;
-    if (uSignatureEffects.z > 0.5 && effects > 0.0) {
+    if (effects > 0.0) {
         float driftNoise = valueNoise(vec2(logicalX * 0.013 + uTime * 0.16,
                                            logicalY * 0.018 - uTime * 0.10));
         float drift = driftNoise - 0.5;
@@ -355,6 +360,7 @@ void main() {
         float attackCoreMix = uEffectsMode == 2 ? 0.50 : 0.65;
         attackFlash = (attackHalo + attackCore * attackCoreMix) * horizontalMask * insideY * data.a;
     }
+#endif
 
     vec3 overloadColor = mix(emissionColor, vec3(1.0, 0.92, 0.62),
                              effects * smoothstep(0.86, 1.0, data.r));
@@ -363,11 +369,13 @@ void main() {
     if (uIntensityMode == 2) {
         color += emissionColor * segmentMask * ghost * 0.28 * motionGain;
     }
-    if (uSignatureEffects.z > 0.5 && effects > 0.0) {
+#if SIGNATURE_MICRO_MOTION
+    if (effects > 0.0) {
         vec3 flashColor = mix(emissionColor, vec3(1.0, 0.94, 0.76), 0.62);
         float flashStrength = uEffectsMode == 2 ? 0.72 : 0.48;
         color += flashColor * attackFlash * effects * flashStrength;
     }
+#endif
 
     float peakDistance = abs(logicalY - (dotBottomCenter + peakIndex * 6.0)) * pixelScale;
     float peakCore = segmentMask * peakSegment * insideY;
@@ -394,7 +402,8 @@ void main() {
     // the faceplate reads as a physical layer over the display. Once enabled,
     // Glass Face always uses its full treatment; the global Off setting still
     // provides the zero-cost measurement fallback.
-    if (uSignatureEffects.y > 0.5 && effects > 0.0) {
+#if SIGNATURE_GLASS_FACE
+    if (effects > 0.0) {
         float glassEffects = 1.0;
         float screenLogicalX = screenUv.x * 496.0;
         float screenLogicalY = screenUv.y * 320.0;
@@ -446,11 +455,13 @@ void main() {
         float fineGrain = hash(floor(vec2(screenLogicalX, screenLogicalY) * 1.35) + vec2(83.1, 12.4)) - 0.5;
         color += fineGrain * 0.0045;
     }
+#endif
 
     // Curvature's low-cost fallback is the coordinate warp plus a mild focus
     // rolloff. Full makes the edge glass visibly softer and adds a restrained
     // cool haze, still in the same single fragment pass.
-    if (uSignatureEffects.w > 0.5 && effects > 0.0) {
+#if SIGNATURE_SOFT_CRT
+    if (effects > 0.0) {
         float focusStrength = uEffectsMode == 2 ? 0.22 : 0.10;
         float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
         color = mix(color, vec3(luminance), crtFocusLoss * focusStrength);
@@ -460,6 +471,7 @@ void main() {
         }
         color *= crtMask;
     }
+#endif
 
     gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
 }
