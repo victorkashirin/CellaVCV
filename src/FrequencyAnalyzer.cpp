@@ -354,6 +354,86 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         return 0.18f + 0.68f * (0.5f + 0.5f * std::sin(phase));
     }
 
+    void loadPreviewData() {
+        for (int row = 0; row < 3; ++row) {
+            for (int band = 0; band < NUM_BANDS; ++band) {
+                const float level = demoLevel(band, row);
+                targets[row][band] = level;
+                displayed[row][band] = level;
+                peaks[row][band] = clampValue(level + 0.04f, 0.f, 1.f);
+                ghosts[row][band] = level;
+                attacks[row][band] = 0.f;
+            }
+        }
+    }
+
+    void drawLibraryPreview(const DrawArgs& args) {
+        nvgSave(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgRect(args.vg, 0.f, 0.f, box.size.x, box.size.y);
+        nvgFillPaint(args.vg, nvgLinearGradient(args.vg, 0.f, box.size.y, 0.f, 0.f,
+                                                nvgRGB(1, 3, 4), nvgRGB(5, 13, 15)));
+        nvgFill(args.vg);
+
+        const GLTheme& theme = getTheme(Theme::LIGHT_BLUE);
+        const NVGcolor activeColor = nvgRGBf(theme.primary.r, theme.primary.g, theme.primary.b);
+        const NVGcolor peakColor = nvgRGBf(theme.peak.r, theme.peak.g, theme.peak.b);
+        const NVGcolor inactiveColor = nvgRGBAf(theme.inactive.r, theme.inactive.g, theme.inactive.b, 0.72f);
+        const float horizontalMargin = 3.f;
+        const float contentBottom = 22.f;
+        const float contentTop = 6.f;
+        const float bandWidth = (box.size.x - 2.f * horizontalMargin) / NUM_BANDS;
+        const float segmentPitch = (box.size.y - contentBottom - contentTop) / 30.f;
+        const float segmentHeight = segmentPitch * 0.64f;
+
+        for (int band = 0; band < NUM_BANDS; ++band) {
+            const float level = demoLevel(band, 0);
+            const int activeSegments = static_cast<int>(std::ceil(level * 30.f));
+            const int peakSegment = std::min(activeSegments + 1, 29);
+            const float left = horizontalMargin + band * bandWidth + 3.f;
+            const float width = bandWidth - 6.f;
+
+            for (int segment = 0; segment < 30; ++segment) {
+                const float y = box.size.y - contentBottom - (segment + 1) * segmentPitch +
+                                (segmentPitch - segmentHeight) * 0.5f;
+                const NVGcolor color = segment == peakSegment
+                                           ? peakColor
+                                           : (segment < activeSegments ? activeColor : inactiveColor);
+                nvgBeginPath(args.vg);
+                nvgRoundedRect(args.vg, left, y, width, segmentHeight, 1.5f);
+                nvgFillColor(args.vg, color);
+                nvgFill(args.vg);
+            }
+        }
+
+        nvgFontSize(args.vg, 9.f);
+        nvgFillColor(args.vg, nvgRGB(180, 190, 192));
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        for (int band = 0; band < NUM_BANDS; ++band) {
+            const float frequency = cella::spectrum::SpectrumConfig::BAND_CENTERS[band];
+            char label[16];
+            if (frequency >= 1000.f)
+                std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
+            else
+                std::snprintf(label, sizeof(label), "%.0f", frequency);
+            nvgText(args.vg, horizontalMargin + (band + 0.5f) * bandWidth, box.size.y - 13.f, label, NULL);
+        }
+
+        nvgRestore(args.vg);
+    }
+
+    void draw(const DrawArgs& args) override {
+        // Rack's module browser draws previews into an outer framebuffer. A
+        // nested OpenGlWidget is bypassed in that situation, so supply an
+        // ordinary NanoVG representation for the module-less preview only.
+        if (!module && args.fb) {
+            drawLibraryPreview(args);
+            return;
+        }
+        widget::OpenGlWidget::draw(args);
+    }
+
     void updateAnimation(float dt, bool receivedFrame) {
         const float peakDelay = module ? std::max(module->params[FrequencyAnalyzer::PEAK_FALL_DELAY_PARAM].getValue(),
                                                   cella::spectrum::SpectrumConfig::MIN_DELAY_TIME)
@@ -428,6 +508,11 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
             latestFrame = module->displayFrames.shift();
             receivedFrame = true;
         }
+
+        // The module browser constructs widgets without an engine module and
+        // can capture their first frame. Seed the display synchronously so the
+        // preview does not photograph the animation's initial zero state.
+        if (!module) loadPreviewData();
 
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         const float dt = clampValue(std::chrono::duration<float>(now - lastDraw).count(), 0.f, 0.1f);
