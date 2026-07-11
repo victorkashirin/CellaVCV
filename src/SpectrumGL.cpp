@@ -701,10 +701,48 @@ struct SpectrumGLWidget : ModuleWidget {
                 effectsMenu->addChild(item);
             }
         }));
-        menu->addChild(createIndexSubmenuItem(
-            "Theme", {"Light Blue", "Amber", "Green", "Orange", "Red", "Ivory"},
-            [=]() { return static_cast<size_t>(spectrum->currentTheme); },
-            [=](size_t index) { spectrum->currentTheme = static_cast<Theme>(index); }));
+        struct ThemeMenuItem : MenuItem {
+            SpectrumGL* spectrum;
+            Theme theme;
+
+            void step() override {
+                rightText = CHECKMARK(spectrum->currentTheme == theme);
+                MenuItem::step();
+            }
+
+            void onAction(const event::Action& e) override {
+                spectrum->currentTheme = theme;
+                e.unconsume();
+            }
+        };
+
+        struct ThemeSubmenuItem : MenuItem {
+            SpectrumGL* spectrum;
+            std::vector<std::string> labels;
+
+            void step() override {
+                const size_t index = static_cast<size_t>(spectrum->currentTheme);
+                const std::string label = index < labels.size() ? labels[index] : "";
+                rightText = label + "  " + RIGHT_ARROW;
+                MenuItem::step();
+            }
+
+            Menu* createChildMenu() override {
+                Menu* themeMenu = new Menu;
+                for (size_t i = 0; i < labels.size(); ++i) {
+                    ThemeMenuItem* item = createMenuItem<ThemeMenuItem>(labels[i]);
+                    item->spectrum = spectrum;
+                    item->theme = static_cast<Theme>(i);
+                    themeMenu->addChild(item);
+                }
+                return themeMenu;
+            }
+        };
+
+        ThemeSubmenuItem* themeItem = createMenuItem<ThemeSubmenuItem>("Theme");
+        themeItem->spectrum = spectrum;
+        themeItem->labels = {"Light Blue", "Amber", "Green", "Orange", "Red", "Ivory"};
+        menu->addChild(themeItem);
         menu->addChild(createCheckMenuItem(
             "Show Labels", "", [=]() { return spectrum->showLabels; },
             [=]() { spectrum->showLabels = !spectrum->showLabels; }));
