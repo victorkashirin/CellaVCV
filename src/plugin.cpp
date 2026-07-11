@@ -17,4 +17,5 @@ void init(Plugin *p) {
     p->addModel(modelIntegral);
     p->addModel(model2State);
     p->addModel(modelSpectrum);
+    p->addModel(modelSpectrumGL);
 }

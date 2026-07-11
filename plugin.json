@@ -151,6 +151,16 @@
         "Random",
         "Slew limiter"
       ]
+    },
+    {
+      "slug": "SpectrumGL",
+      "name": "Spectrum GL",
+      "description": "Experimental OpenGL spectrum analyzer",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
+      "keywords": "spectrum analyzer opengl",
+      "tags": [
+        "Visual"
+      ]
     }
   ]
 }
