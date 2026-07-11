@@ -364,6 +364,9 @@ Implementation status:
 - The animated illumination field is confined to glow immediately around lit cells rather than filling an entire high-energy band column, keeping sustained readings clean while preserving visible drift on the emitters.
 - Soft CRT Curvature is implemented as a fourth optional signature mode, appended without changing any existing persisted values. It applies a single-pass inverse barrel warp before procedural band and segment evaluation, with curved corner masking and progressively wider antialiasing toward the screen edge to suggest focus loss.
 - `Subtle` uses restrained curvature and edge softening; `Full` increases the bow, desaturation/dimming, and cool edge haze. `Effects: Off` remains the zero-cost flat fallback for measurement accuracy. Pixel-space scanlines and noise remain unwarped, and NanoVG label centers follow the horizontal warp so they stay aligned with their bands.
+- The four signature effects are now independently selectable and can be combined in the same single shader pass. Their enabled state is persisted as `signatureEffects`; patches using the former exclusive `signatureMode` value migrate to the corresponding single enabled effect, while phase-3 patches without either key continue to load with signature effects off.
+- CRT curvature transforms only display-content coordinates. Glass, dust, reflections, scanlines, noise, and frame vignette remain in physical screen space when combined with curvature. Bloom receives modest headroom when Micro Motion is also enabled so their emitter energy does not wash out the segment cores.
+- Glass Face always uses its full visual treatment when enabled, including the broad reflection, dust, and fine grain, regardless of whether the global effect strength is Subtle or Full. `Effects: Off` continues to disable it.
 
 ### Phase 5: hardening and decision
 

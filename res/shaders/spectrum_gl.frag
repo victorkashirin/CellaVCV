@@ -7,7 +7,10 @@ uniform int uDisplayMode;
 uniform int uStereoMode;
 uniform int uIntensityMode;
 uniform int uEffectsMode;
-uniform int uSignatureMode;
+// x: phosphor bloom, y: glass face, z: micro motion, w: soft CRT.
+// A vec4 keeps the CPU-side bitmask compatible with GLSL 1.10, which has no
+// portable integer bitwise operators.
+uniform vec4 uSignatureEffects;
 uniform int uShowUnlit;
 uniform int uLabels;
 uniform vec3 uPrimary;
@@ -68,22 +71,23 @@ vec2 phosphorLobes(float level, float meterLeft, float meterRight,
 
 void main() {
     vec2 pixel = gl_FragCoord.xy;
-    vec2 uv = pixel / max(uResolution, vec2(1.0));
+    vec2 screenUv = pixel / max(uResolution, vec2(1.0));
+    vec2 contentUv = screenUv;
     float crtMask = 1.0;
     float crtFocusLoss = 0.0;
-    if (uSignatureMode == 4 && uEffectsMode != 0) {
+    if (uSignatureEffects.w > 0.5 && uEffectsMode != 0) {
         // Inverse barrel mapping: each output fragment asks which point on the
         // flat meter plane would be seen through the curved face. Cross-axis
         // terms bow straight lines while leaving the screen's edge midpoints
         // anchored, so the reading remains useful.
-        vec2 crtPoint = uv * 2.0 - 1.0;
+        vec2 crtPoint = screenUv * 2.0 - 1.0;
         // A restrained bow closer to a late vintage monitor than a fisheye
         // lens: visible along long lines, but not enough to distort readings.
         float curvature = uEffectsMode == 2 ? 0.036 : 0.016;
         vec2 warpedPoint = crtPoint *
                            (vec2(1.0) + curvature * vec2(crtPoint.y * crtPoint.y,
                                                         crtPoint.x * crtPoint.x));
-        uv = warpedPoint * 0.5 + 0.5;
+        contentUv = warpedPoint * 0.5 + 0.5;
 
         float edgeInside = min((1.0 - abs(warpedPoint.x)) * 248.0,
                                (1.0 - abs(warpedPoint.y)) * 160.0);
@@ -93,16 +97,16 @@ void main() {
         crtFocusLoss = smoothstep(0.52, 1.0, radialEdge);
         crtFocusLoss *= crtFocusLoss;
     }
-    float logicalY = uv.y * 320.0;
+    float logicalY = contentUv.y * 320.0;
     float effects = uEffectsMode == 0 ? 0.0 : (uEffectsMode == 1 ? 0.48 : 1.0);
 
-    vec3 color = mix(vec3(0.004, 0.009, 0.012), vec3(0.018, 0.044, 0.050), uv.y);
+    vec3 color = mix(vec3(0.004, 0.009, 0.012), vec3(0.018, 0.044, 0.050), contentUv.y);
     float contentBottom = uLabels != 0 ? 0.04375 : 0.01875;
     float contentTop = 0.98125;
-    float contentY = (uv.y - contentBottom) / (contentTop - contentBottom);
+    float contentY = (contentUv.y - contentBottom) / (contentTop - contentBottom);
     float insideY = step(0.0, contentY) * step(contentY, 1.0);
 
-    float logicalX = uv.x * 496.0;
+    float logicalX = contentUv.x * 496.0;
     float bandWidth = 490.0 / 12.0;
     float bandPosition = clamp((logicalX - 3.0) / 490.0, 0.0, 0.9999) * 12.0;
     float band = min(floor(bandPosition), 11.0);
@@ -190,7 +194,7 @@ void main() {
     // cells. Full samples adjacent bands (and the other stereo channel) so its
     // two-lobe field can cross meter boundaries. Segment cores occlude this
     // plane below, retaining their exact foreground colors.
-    if (uSignatureMode == 1 && effects > 0.0) {
+    if (uSignatureEffects.x > 0.5 && effects > 0.0) {
         float contentBottomY = contentBottom * 320.0;
         float contentHeight = (contentTop - contentBottom) * 320.0;
         float foregroundOcclusion = saturate(segmentMask * max(active, peakSegment));
@@ -244,7 +248,9 @@ void main() {
                                             contentHeight, logicalX, logicalY);
             bloomColor += uPrimary * dot(rightLobes, vec2(0.28, 0.16)) * rightValid;
         }
-        color += bloomColor * effects * (1.0 - foregroundOcclusion);
+        // Leave headroom when Micro Motion also contributes emitter energy.
+        float bloomCombinationScale = uSignatureEffects.z > 0.5 ? 0.86 : 1.0;
+        color += bloomColor * effects * bloomCombinationScale * (1.0 - foregroundOcclusion);
     }
 
     float coreAlpha = 1.0;
@@ -267,7 +273,7 @@ void main() {
     // slow spatial drift, restrained per-band flutter, and a brief attack halo.
     float motionGain = 1.0;
     float attackFlash = 0.0;
-    if (uSignatureMode == 3 && effects > 0.0) {
+    if (uSignatureEffects.z > 0.5 && effects > 0.0) {
         float driftNoise = valueNoise(vec2(logicalX * 0.013 + uTime * 0.16,
                                            logicalY * 0.018 - uTime * 0.10));
         float drift = driftNoise - 0.5;
@@ -308,7 +314,7 @@ void main() {
     if (uIntensityMode == 3) {
         color += emissionColor * segmentMask * ghost * 0.28 * motionGain;
     }
-    if (uSignatureMode == 3 && effects > 0.0) {
+    if (uSignatureEffects.z > 0.5 && effects > 0.0) {
         vec3 flashColor = mix(emissionColor, vec3(1.0, 0.94, 0.76), 0.62);
         float flashStrength = uEffectsMode == 2 ? 0.72 : 0.48;
         color += flashColor * attackFlash * effects * flashStrength;
@@ -329,69 +335,71 @@ void main() {
         color *= 1.0 - effects * 0.035 * scanline;
         float noise = hash(floor(pixel) + floor(uTime * 24.0)) - 0.5;
         color += noise * effects * 0.010;
-        float reflection = smoothstep(0.52, 1.0, uv.y) * (1.0 - smoothstep(0.76, 1.0, uv.y));
+        float reflection = smoothstep(0.52, 1.0, screenUv.y) * (1.0 - smoothstep(0.76, 1.0, screenUv.y));
         color += vec3(0.025, 0.050, 0.055) * reflection * effects;
-        float vignette = 16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y);
+        float vignette = 16.0 * screenUv.x * screenUv.y * (1.0 - screenUv.x) * (1.0 - screenUv.y);
         color *= mix(1.0, 0.70 + 0.30 * pow(saturate(vignette), 0.28), effects);
     }
 
     // Phase 4 Glass Face signature. This is composited after the emitters so
-    // the faceplate reads as a physical layer over the display. Subtle keeps
-    // to cheap gradients; Full adds a second reflection and static dust.
-    if (uSignatureMode == 2 && effects > 0.0) {
-        float edgeDistance = min(min(logicalX, 496.0 - logicalX),
-                                 min(logicalY, 320.0 - logicalY));
+    // the faceplate reads as a physical layer over the display. Once enabled,
+    // Glass Face always uses its full treatment; the global Off setting still
+    // provides the zero-cost measurement fallback.
+    if (uSignatureEffects.y > 0.5 && effects > 0.0) {
+        float glassEffects = 1.0;
+        float screenLogicalX = screenUv.x * 496.0;
+        float screenLogicalY = screenUv.y * 320.0;
+        float edgeDistance = min(min(screenLogicalX, 496.0 - screenLogicalX),
+                                 min(screenLogicalY, 320.0 - screenLogicalY));
         float innerBezel = 1.0 - smoothstep(1.5, 13.0, edgeDistance);
         float cornerBezel = 1.0 - smoothstep(0.0, 0.075,
-                                            min(min(uv.x, 1.0 - uv.x),
-                                                min(uv.y, 1.0 - uv.y)));
-        color *= 1.0 - effects * (0.13 * innerBezel + 0.055 * cornerBezel);
+                                            min(min(screenUv.x, 1.0 - screenUv.x),
+                                                min(screenUv.y, 1.0 - screenUv.y)));
+        color *= 1.0 - glassEffects * (0.13 * innerBezel + 0.055 * cornerBezel);
 
         // Rack's panel light comes from above. Keep the face brightest at the
         // top and let the tint and reflection fall naturally toward the base.
-        float overheadLight = smoothstep(0.05, 1.0, uv.y);
+        float overheadLight = smoothstep(0.05, 1.0, screenUv.y);
         color += mix(vec3(0.001, 0.004, 0.004),
-                     vec3(0.010, 0.022, 0.024), overheadLight) * effects;
-        color *= 1.0 - (1.0 - overheadLight) * 0.035 * effects;
+                     vec3(0.010, 0.022, 0.024), overheadLight) * glassEffects;
+        color *= 1.0 - (1.0 - overheadLight) * 0.035 * glassEffects;
 
         // Full-frame glass falloff. The upper edge stays relatively open to
         // the panel light while the sides and lower edge gain depth.
-        float frameEdge = min(min(uv.x, 1.0 - uv.x),
-                              min(uv.y, 1.0 - uv.y));
+        float frameEdge = min(min(screenUv.x, 1.0 - screenUv.x),
+                              min(screenUv.y, 1.0 - screenUv.y));
         float frameVignette = 1.0 - smoothstep(0.0, 0.16, frameEdge);
-        float vignetteStrength = mix(0.15, 0.075, uv.y);
-        color *= 1.0 - frameVignette * vignetteStrength * effects;
+        float vignetteStrength = mix(0.15, 0.075, screenUv.y);
+        color *= 1.0 - frameVignette * vignetteStrength * glassEffects;
 
-        float topRim = smoothstep(0.955, 0.985, uv.y) *
-                       (1.0 - smoothstep(0.992, 1.0, uv.y));
-        float topWash = smoothstep(0.70, 0.98, uv.y) *
-                        (1.0 - smoothstep(0.965, 1.0, uv.y));
-        float sheenSides = smoothstep(0.015, 0.10, uv.x) *
-                           smoothstep(0.015, 0.10, 1.0 - uv.x);
-        color += vec3(0.070, 0.085, 0.084) * topRim * sheenSides * effects;
-        color += vec3(0.018, 0.026, 0.026) * topWash * sheenSides * effects;
+        float topRim = smoothstep(0.955, 0.985, screenUv.y) *
+                       (1.0 - smoothstep(0.992, 1.0, screenUv.y));
+        float topWash = smoothstep(0.70, 0.98, screenUv.y) *
+                        (1.0 - smoothstep(0.965, 1.0, screenUv.y));
+        float sheenSides = smoothstep(0.015, 0.10, screenUv.x) *
+                           smoothstep(0.015, 0.10, 1.0 - screenUv.x);
+        color += vec3(0.070, 0.085, 0.084) * topRim * sheenSides * glassEffects;
+        color += vec3(0.018, 0.026, 0.026) * topWash * sheenSides * glassEffects;
 
-        if (uEffectsMode == 2) {
-            float topReflection = smoothstep(0.82, 0.94, uv.y) *
-                                  (1.0 - smoothstep(0.94, 0.985, uv.y));
-            color += vec3(0.018, 0.024, 0.023) * topReflection * sheenSides;
+        float topReflection = smoothstep(0.82, 0.94, screenUv.y) *
+                              (1.0 - smoothstep(0.94, 0.985, screenUv.y));
+        color += vec3(0.018, 0.024, 0.023) * topReflection * sheenSides;
 
-            vec2 dustCell = floor(vec2(logicalX, logicalY) * 0.72);
-            float dustSeed = hash(dustCell + vec2(19.3, 7.1));
-            float dust = smoothstep(0.994, 0.999, dustSeed);
-            float dustBody = hash(dustCell + vec2(3.7, 41.9));
-            vec3 dustColor = mix(vec3(-0.012), vec3(0.050, 0.055, 0.052), dustBody);
-            color += dustColor * dust * (0.25 + 0.75 * overheadLight);
+        vec2 dustCell = floor(vec2(screenLogicalX, screenLogicalY) * 0.72);
+        float dustSeed = hash(dustCell + vec2(19.3, 7.1));
+        float dust = smoothstep(0.994, 0.999, dustSeed);
+        float dustBody = hash(dustCell + vec2(3.7, 41.9));
+        vec3 dustColor = mix(vec3(-0.012), vec3(0.050, 0.055, 0.052), dustBody);
+        color += dustColor * dust * (0.25 + 0.75 * overheadLight);
 
-            float fineGrain = hash(floor(vec2(logicalX, logicalY) * 1.35) + vec2(83.1, 12.4)) - 0.5;
-            color += fineGrain * 0.0045;
-        }
+        float fineGrain = hash(floor(vec2(screenLogicalX, screenLogicalY) * 1.35) + vec2(83.1, 12.4)) - 0.5;
+        color += fineGrain * 0.0045;
     }
 
     // Curvature's low-cost fallback is the coordinate warp plus a mild focus
     // rolloff. Full makes the edge glass visibly softer and adds a restrained
     // cool haze, still in the same single fragment pass.
-    if (uSignatureMode == 4 && effects > 0.0) {
+    if (uSignatureEffects.w > 0.5 && effects > 0.0) {
         float focusStrength = uEffectsMode == 2 ? 0.22 : 0.10;
         float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
         color = mix(color, vec3(luminance), crtFocusLoss * focusStrength);

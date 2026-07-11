@@ -5,8 +5,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -37,10 +39,13 @@ enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
-// Keep existing values stable as signature modes are appended. Older patches
-// use 0 for Off, 1 for Phosphor Bloom, 2 for Glass Face, and 3 for
-// Micro Motion.
-enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, MICRO_MOTION, SOFT_CRT, COUNT };
+enum class SignatureEffect : uint32_t {
+    PHOSPHOR_BLOOM = 1u << 0,
+    GLASS_FACE = 1u << 1,
+    MICRO_MOTION = 1u << 2,
+    SOFT_CRT = 1u << 3,
+};
+constexpr uint32_t ALL_SIGNATURE_EFFECTS = (1u << 4) - 1u;
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -92,7 +97,7 @@ struct SpectrumGL : Module {
     StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
     EffectsMode effectsMode = EffectsMode::SUBTLE;
-    SignatureMode signatureMode = SignatureMode::PHOSPHOR_BLOOM;
+    uint32_t signatureEffects = static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM);
     bool showLabels = false;
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::CLASSIC;
@@ -123,7 +128,7 @@ struct SpectrumGL : Module {
         json_object_set_new(rootJ, "stereoMode", json_integer(static_cast<int>(stereoMode)));
         json_object_set_new(rootJ, "intensityMode", json_integer(static_cast<int>(intensityMode)));
         json_object_set_new(rootJ, "effectsMode", json_integer(static_cast<int>(effectsMode)));
-        json_object_set_new(rootJ, "signatureMode", json_integer(static_cast<int>(signatureMode)));
+        json_object_set_new(rootJ, "signatureEffects", json_integer(signatureEffects));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
         json_object_set_new(rootJ, "currentTheme", json_integer(static_cast<int>(currentTheme)));
@@ -140,8 +145,17 @@ struct SpectrumGL : Module {
                                                                static_cast<int>(intensityMode)));
         effectsMode = static_cast<EffectsMode>(getJsonEnum(rootJ, "effectsMode", static_cast<int>(EffectsMode::COUNT),
                                                            static_cast<int>(effectsMode)));
-        signatureMode = static_cast<SignatureMode>(getJsonEnum(
-            rootJ, "signatureMode", static_cast<int>(SignatureMode::COUNT), static_cast<int>(SignatureMode::OFF)));
+        json_t* signatureEffectsJ = json_object_get(rootJ, "signatureEffects");
+        if (json_is_integer(signatureEffectsJ)) {
+            const json_int_t storedEffects = json_integer_value(signatureEffectsJ);
+            signatureEffects = storedEffects > 0 ? static_cast<uint32_t>(storedEffects) & ALL_SIGNATURE_EFFECTS : 0u;
+        } else {
+            // Migrate the former exclusive enum without changing the appearance
+            // of existing patches. A missing legacy key is a phase-3 patch and
+            // therefore intentionally loads with all signature effects off.
+            const int legacyMode = getJsonEnum(rootJ, "signatureMode", 5, 0);
+            signatureEffects = legacyMode > 0 ? (1u << (legacyMode - 1)) : 0u;
+        }
         currentTheme = static_cast<Theme>(getJsonEnum(rootJ, "currentTheme", static_cast<int>(Theme::COUNT),
                                                       static_cast<int>(currentTheme)));
         json_t* labelsJ = json_object_get(rootJ, "showLabels");
@@ -149,6 +163,12 @@ struct SpectrumGL : Module {
         json_t* unlitJ = json_object_get(rootJ, "showUnlitSegments");
         if (json_is_boolean(unlitJ)) showUnlitSegments = json_boolean_value(unlitJ);
     }
+
+    bool hasSignatureEffect(SignatureEffect effect) const {
+        return (signatureEffects & static_cast<uint32_t>(effect)) != 0u;
+    }
+
+    void toggleSignatureEffect(SignatureEffect effect) { signatureEffects ^= static_cast<uint32_t>(effect); }
 };
 
 namespace {
@@ -163,7 +183,7 @@ struct SpectrumGLRenderer {
     GLint stereoModeLocation = -1;
     GLint intensityModeLocation = -1;
     GLint effectsModeLocation = -1;
-    GLint signatureModeLocation = -1;
+    GLint signatureEffectsLocation = -1;
     GLint showUnlitLocation = -1;
     GLint labelsLocation = -1;
     GLint primaryLocation = -1;
@@ -239,7 +259,7 @@ struct SpectrumGLRenderer {
             stereoModeLocation = glGetUniformLocation(program, "uStereoMode");
             intensityModeLocation = glGetUniformLocation(program, "uIntensityMode");
             effectsModeLocation = glGetUniformLocation(program, "uEffectsMode");
-            signatureModeLocation = glGetUniformLocation(program, "uSignatureMode");
+            signatureEffectsLocation = glGetUniformLocation(program, "uSignatureEffects");
             showUnlitLocation = glGetUniformLocation(program, "uShowUnlit");
             labelsLocation = glGetUniformLocation(program, "uLabels");
             primaryLocation = glGetUniformLocation(program, "uPrimary");
@@ -273,7 +293,7 @@ struct SpectrumGLRenderer {
         }
         dataLocation = resolutionLocation = timeLocation = -1;
         displayModeLocation = stereoModeLocation = intensityModeLocation = effectsModeLocation = -1;
-        signatureModeLocation = -1;
+        signatureEffectsLocation = -1;
         showUnlitLocation = labelsLocation = -1;
         primaryLocation = secondaryLocation = inactiveLocation = peakColorLocation = -1;
         initializationAttempted = false;
@@ -456,8 +476,13 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                         static_cast<int>(module ? module->intensityMode : IntensityMode::GLOW));
             glUniform1i(renderer.effectsModeLocation,
                         static_cast<int>(module ? module->effectsMode : EffectsMode::SUBTLE));
-            glUniform1i(renderer.signatureModeLocation,
-                        static_cast<int>(module ? module->signatureMode : SignatureMode::PHOSPHOR_BLOOM));
+            const uint32_t signatureEffects =
+                module ? module->signatureEffects : static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM);
+            glUniform4f(renderer.signatureEffectsLocation,
+                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM)) ? 1.f : 0.f,
+                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::GLASS_FACE)) ? 1.f : 0.f,
+                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::MICRO_MOTION)) ? 1.f : 0.f,
+                        (signatureEffects & static_cast<uint32_t>(SignatureEffect::SOFT_CRT)) ? 1.f : 0.f);
             glUniform1i(renderer.showUnlitLocation, !module || module->showUnlitSegments);
             glUniform1i(renderer.labelsLocation, module && module->showLabels);
             glUniform3f(renderer.primaryLocation, theme.primary.r, theme.primary.g, theme.primary.b);
@@ -549,7 +574,7 @@ struct SpectrumGLLabels : TransparentWidget {
     SpectrumGL* module = NULL;
 
     float labelX(float flatX) const {
-        if (!module || module->signatureMode != SignatureMode::SOFT_CRT ||
+        if (!module || !module->hasSignatureEffect(SignatureEffect::SOFT_CRT) ||
             module->effectsMode == EffectsMode::OFF)
             return flatX;
 
@@ -644,10 +669,19 @@ struct SpectrumGLWidget : ModuleWidget {
         menu->addChild(createIndexSubmenuItem(
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face", "Micro Motion", "Soft CRT"},
-            [=]() { return static_cast<size_t>(spectrum->signatureMode); },
-            [=](size_t index) { spectrum->signatureMode = static_cast<SignatureMode>(index); }));
+        menu->addChild(createSubmenuItem("Signature Effects", "", [=](Menu* effectsMenu) {
+            const std::array<std::pair<const char*, SignatureEffect>, 4> effects = {{
+                {"Phosphor Bloom", SignatureEffect::PHOSPHOR_BLOOM},
+                {"Glass Face", SignatureEffect::GLASS_FACE},
+                {"Micro Motion", SignatureEffect::MICRO_MOTION},
+                {"Soft CRT", SignatureEffect::SOFT_CRT},
+            }};
+            for (const auto& effect : effects) {
+                effectsMenu->addChild(createCheckMenuItem(
+                    effect.first, "", [=]() { return spectrum->hasSignatureEffect(effect.second); },
+                    [=]() { spectrum->toggleSignatureEffect(effect.second); }));
+            }
+        }));
         menu->addChild(createIndexSubmenuItem(
             "Theme", {"Classic", "Warm", "Cool"}, [=]() { return static_cast<size_t>(spectrum->currentTheme); },
             [=](size_t index) { spectrum->currentTheme = static_cast<Theme>(index); }));
