@@ -138,6 +138,17 @@
         "Switch",
         "Sequencer"
       ]
+    },
+    {
+      "slug": "FrequencyAnalyzer",
+      "name": "Frequency Analyzer",
+      "description": "Frequency analyzer",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#frequency-analyzer",
+      "keywords": "spectrum analyzer",
+      "tags": [
+        "Visual",
+        "Utility"
+      ]
     }
   ]
 }
