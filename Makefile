@@ -23,5 +23,11 @@ DISTRIBUTABLES += res
 DISTRIBUTABLES += $(wildcard LICENSE*)
 DISTRIBUTABLES += $(wildcard presets)
 
+include $(RACK_DIR)/arch.mk
+
+ifdef ARCH_WIN
+LDFLAGS += -lopengl32
+endif
+
 # Include the Rack plugin Makefile framework
 include $(RACK_DIR)/plugin.mk
