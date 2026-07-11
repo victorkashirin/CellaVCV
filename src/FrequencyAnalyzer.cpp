@@ -1,6 +1,3 @@
-#include "plugin.hpp"
-#include "spectrum/SpectrumAnalyzer.hpp"
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -10,6 +7,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "plugin.hpp"
+#include "spectrum/SpectrumAnalyzer.hpp"
 
 namespace {
 
@@ -90,7 +90,7 @@ const GLTheme& getTheme(Theme theme) {
 
 }  // namespace
 
-struct SpectrumGL : Module {
+struct FrequencyAnalyzer : Module {
     enum ParamIds { UPPER_PARAM, LOWER_PARAM, FALL_DELAY_PARAM, PEAK_FALL_DELAY_PARAM, NUM_PARAMS };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, NUM_INPUTS };
 
@@ -106,11 +106,12 @@ struct SpectrumGL : Module {
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::LIGHT_BLUE;
 
-    SpectrumGL() {
+    FrequencyAnalyzer() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
         configParam<GLQuantity>(UPPER_PARAM, UPPER_DB_MIN, UPPER_DB_MAX, UPPER_DB_DEFAULT, "Top", " dB");
         configParam<GLQuantity>(LOWER_PARAM, LOWER_DB_MIN, LOWER_DB_MAX, LOWER_DB_DEFAULT, "Bottom", " dB");
-        configParam<GLQuantity>(FALL_DELAY_PARAM, FALL_DELAY_MIN, FALL_DELAY_MAX, FALL_DELAY_DEFAULT, "Fall Delay", "s");
+        configParam<GLQuantity>(FALL_DELAY_PARAM, FALL_DELAY_MIN, FALL_DELAY_MAX, FALL_DELAY_DEFAULT, "Fall Delay",
+                                "s");
         configParam<GLQuantity>(PEAK_FALL_DELAY_PARAM, PEAK_FALL_DELAY_MIN, PEAK_FALL_DELAY_MAX,
                                 PEAK_FALL_DELAY_DEFAULT, "Peak Fall Delay", "s");
         configInput(IN_L_INPUT, "Left");
@@ -140,15 +141,14 @@ struct SpectrumGL : Module {
     }
 
     void dataFromJson(json_t* rootJ) override {
-        displayMode = static_cast<DisplayMode>(getJsonEnum(rootJ, "displayMode", static_cast<int>(DisplayMode::COUNT),
-                                                          static_cast<int>(displayMode)));
-        stereoMode = static_cast<StereoMode>(getJsonEnum(rootJ, "stereoMode", static_cast<int>(StereoMode::COUNT),
-                                                         static_cast<int>(stereoMode)));
-        intensityMode = static_cast<IntensityMode>(getJsonEnum(rootJ, "intensityMode",
-                                                               static_cast<int>(IntensityMode::COUNT),
-                                                               static_cast<int>(intensityMode)));
-        effectsMode = static_cast<EffectsMode>(getJsonEnum(rootJ, "effectsMode", static_cast<int>(EffectsMode::COUNT),
-                                                           static_cast<int>(effectsMode)));
+        displayMode = static_cast<DisplayMode>(
+            getJsonEnum(rootJ, "displayMode", static_cast<int>(DisplayMode::COUNT), static_cast<int>(displayMode)));
+        stereoMode = static_cast<StereoMode>(
+            getJsonEnum(rootJ, "stereoMode", static_cast<int>(StereoMode::COUNT), static_cast<int>(stereoMode)));
+        intensityMode = static_cast<IntensityMode>(getJsonEnum(
+            rootJ, "intensityMode", static_cast<int>(IntensityMode::COUNT), static_cast<int>(intensityMode)));
+        effectsMode = static_cast<EffectsMode>(
+            getJsonEnum(rootJ, "effectsMode", static_cast<int>(EffectsMode::COUNT), static_cast<int>(effectsMode)));
         json_t* signatureEffectsJ = json_object_get(rootJ, "signatureEffects");
         if (json_is_integer(signatureEffectsJ)) {
             const json_int_t storedEffects = json_integer_value(signatureEffectsJ);
@@ -160,8 +160,8 @@ struct SpectrumGL : Module {
             const int legacyMode = getJsonEnum(rootJ, "signatureMode", 5, 0);
             signatureEffects = legacyMode > 0 ? (1u << (legacyMode - 1)) : 0u;
         }
-        currentTheme = static_cast<Theme>(getJsonEnum(rootJ, "currentTheme", static_cast<int>(Theme::COUNT),
-                                                      static_cast<int>(currentTheme)));
+        currentTheme = static_cast<Theme>(
+            getJsonEnum(rootJ, "currentTheme", static_cast<int>(Theme::COUNT), static_cast<int>(currentTheme)));
         json_t* labelsJ = json_object_get(rootJ, "showLabels");
         if (json_is_boolean(labelsJ)) showLabels = json_boolean_value(labelsJ);
         json_t* unlitJ = json_object_get(rootJ, "showUnlitSegments");
@@ -177,7 +177,7 @@ struct SpectrumGL : Module {
 
 namespace {
 
-struct SpectrumGLRenderer {
+struct FrequencyAnalyzerRenderer {
     GLuint program = 0;
     GLuint dataTexture = 0;
     GLint dataLocation = -1;
@@ -215,7 +215,7 @@ struct SpectrumGLRenderer {
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
         std::vector<GLchar> log(static_cast<size_t>(std::max(logLength, 1)));
         glGetShaderInfoLog(shader, logLength, NULL, log.data());
-        WARN("Spectrum GL %s shader compilation failed: %s", name, log.data());
+        WARN("Frequency Analyzer %s shader compilation failed: %s", name, log.data());
         glDeleteShader(shader);
         return 0;
     }
@@ -250,7 +250,7 @@ struct SpectrumGLRenderer {
                 glGetProgramiv(candidate, GL_INFO_LOG_LENGTH, &logLength);
                 std::vector<GLchar> log(static_cast<size_t>(std::max(logLength, 1)));
                 glGetProgramInfoLog(candidate, logLength, NULL, log.data());
-                WARN("Spectrum GL shader link failed: %s", log.data());
+                WARN("Frequency Analyzer shader link failed: %s", log.data());
                 glDeleteProgram(candidate);
                 return false;
             }
@@ -281,7 +281,7 @@ struct SpectrumGLRenderer {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, empty.data());
             return true;
         } catch (const std::exception& e) {
-            WARN("Spectrum GL shader resources could not be loaded: %s", e.what());
+            WARN("Frequency Analyzer shader resources could not be loaded: %s", e.what());
             return false;
         }
     }
@@ -304,9 +304,9 @@ struct SpectrumGLRenderer {
     }
 };
 
-struct SpectrumGLDisplay : widget::OpenGlWidget {
-    SpectrumGL* module = NULL;
-    SpectrumGLRenderer renderer;
+struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
+    FrequencyAnalyzer* module = NULL;
+    FrequencyAnalyzerRenderer renderer;
     cella::spectrum::SpectrumFrame latestFrame;
     std::array<std::array<float, NUM_BANDS>, 3> displayed = {};
     std::array<std::array<float, NUM_BANDS>, 3> peaks = {};
@@ -316,7 +316,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     std::chrono::steady_clock::time_point lastDraw = std::chrono::steady_clock::now();
     float elapsed = 0.f;
 
-    ~SpectrumGLDisplay() override {}
+    ~FrequencyAnalyzerDisplay() override {}
 
     void onContextCreate(const ContextCreateEvent& e) override {
         widget::OpenGlWidget::onContextCreate(e);
@@ -344,8 +344,8 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     }
 
     float normalizedLevel(float db) const {
-        const float top = module ? module->params[SpectrumGL::UPPER_PARAM].getValue() : UPPER_DB_DEFAULT;
-        const float bottom = module ? module->params[SpectrumGL::LOWER_PARAM].getValue() : LOWER_DB_DEFAULT;
+        const float top = module ? module->params[FrequencyAnalyzer::UPPER_PARAM].getValue() : UPPER_DB_DEFAULT;
+        const float bottom = module ? module->params[FrequencyAnalyzer::LOWER_PARAM].getValue() : LOWER_DB_DEFAULT;
         return clampValue((db - bottom) / std::max(top - bottom, 1.f), 0.f, 1.f);
     }
 
@@ -355,8 +355,8 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     }
 
     void updateAnimation(float dt, bool receivedFrame) {
-        const float peakDelay = module ? std::max(module->params[SpectrumGL::PEAK_FALL_DELAY_PARAM].getValue(),
-                                                   cella::spectrum::SpectrumConfig::MIN_DELAY_TIME)
+        const float peakDelay = module ? std::max(module->params[FrequencyAnalyzer::PEAK_FALL_DELAY_PARAM].getValue(),
+                                                  cella::spectrum::SpectrumConfig::MIN_DELAY_TIME)
                                        : 1.f;
         const float peakDecay = std::exp(-dt / peakDelay);
         const float ghostDecay = std::exp(-dt / 0.9f);
@@ -382,8 +382,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                     // tone. Ignore that sub-segment jitter so it cannot keep
                     // refreshing what should be a transient-only envelope.
                     const float attackRise = std::max(rise - 0.018f, 0.f);
-                    attacks[row][band] =
-                        std::max(attacks[row][band], clampValue(attackRise * 6.f, 0.f, 1.f));
+                    attacks[row][band] = std::max(attacks[row][band], clampValue(attackRise * 6.f, 0.f, 1.f));
                     targets[row][band] = target;
                 }
                 // Keep the vintage analyzer's immediate response. This very short,
@@ -404,8 +403,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
                 pixels[offset] = static_cast<unsigned char>(clampValue(displayed[row][band], 0.f, 1.f) * 255.f);
                 pixels[offset + 1] = static_cast<unsigned char>(clampValue(peaks[row][band], 0.f, 1.f) * 255.f);
                 pixels[offset + 2] = static_cast<unsigned char>(clampValue(ghosts[row][band], 0.f, 1.f) * 255.f);
-                pixels[offset + 3] =
-                    static_cast<unsigned char>(clampValue(attacks[row][band], 0.f, 1.f) * 255.f);
+                pixels[offset + 3] = static_cast<unsigned char>(clampValue(attacks[row][band], 0.f, 1.f) * 255.f);
             }
         }
         glBindTexture(GL_TEXTURE_2D, renderer.dataTexture);
@@ -474,8 +472,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
             glUniform1f(renderer.timeLocation, elapsed);
             glUniform1i(renderer.displayModeLocation,
                         static_cast<int>(module ? module->displayMode : DisplayMode::BARS));
-            glUniform1i(renderer.stereoModeLocation,
-                        static_cast<int>(module ? module->stereoMode : StereoMode::MONO));
+            glUniform1i(renderer.stereoModeLocation, static_cast<int>(module ? module->stereoMode : StereoMode::MONO));
             glUniform1i(renderer.intensityModeLocation,
                         static_cast<int>(module ? module->intensityMode : IntensityMode::SOLID));
             glUniform1i(renderer.effectsModeLocation,
@@ -512,7 +509,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
 // Recreate the shallow recessed-glass bezel supplied by Rack's LedDisplay.
 // The animated surface stays entirely OpenGL; this sibling only draws the
 // static edge treatment over it with NanoVG.
-struct SpectrumGLBezel : TransparentWidget {
+struct FrequencyAnalyzerBezel : TransparentWidget {
     void draw(const DrawArgs& args) override {
         const float width = box.size.x;
         const float height = box.size.y;
@@ -520,7 +517,7 @@ struct SpectrumGLBezel : TransparentWidget {
         nvgSave(args.vg);
 
         // Outer shadow/highlight make the display opening feel cut into the
-        // panel, matching the original Spectrum's LedDisplay component.
+        // panel, matching the original Frequency Analyzer's LedDisplay component.
         nvgBeginPath(args.vg);
         nvgMoveTo(args.vg, 0.f, -0.5f);
         nvgLineTo(args.vg, width, -0.5f);
@@ -561,21 +558,8 @@ struct SpectrumGLBezel : TransparentWidget {
     }
 };
 
-struct SpectrumGLBadge : TransparentWidget {
-    void draw(const DrawArgs& args) override {
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 3.f);
-        nvgFillColor(args.vg, nvgRGB(18, 65, 72));
-        nvgFill(args.vg);
-        nvgFontSize(args.vg, 10.f);
-        nvgFillColor(args.vg, nvgRGB(147, 234, 255));
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgText(args.vg, box.size.x * 0.5f, box.size.y * 0.52f, "GL", NULL);
-    }
-};
-
-struct SpectrumGLLabels : TransparentWidget {
-    SpectrumGL* module = NULL;
+struct FrequencyAnalyzerLabels : TransparentWidget {
+    FrequencyAnalyzer* module = NULL;
 
     float labelX(float flatX) const {
         if (!module || !module->hasSignatureEffect(SignatureEffect::SOFT_CRT) ||
@@ -606,8 +590,7 @@ struct SpectrumGLLabels : TransparentWidget {
                 std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
             else
                 std::snprintf(label, sizeof(label), "%.0f", frequency);
-            nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 13.f, label,
-                    NULL);
+            nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 13.f, label, NULL);
         }
     }
 };
@@ -621,47 +604,41 @@ struct GLSlider : ui::Slider {
 
 }  // namespace
 
-struct SpectrumGLWidget : ModuleWidget {
-    SpectrumGLWidget(SpectrumGL* module) {
+struct FrequencyAnalyzerWidget : ModuleWidget {
+    FrequencyAnalyzerWidget(FrequencyAnalyzer* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/VFDFreqAnalyzer.svg"),
-                             asset::plugin(pluginInstance, "res/VFDFreqAnalyzer-dark.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/FrequencyAnalyzer.svg"),
+                             asset::plugin(pluginInstance, "res/FrequencyAnalyzer-dark.svg")));
 
-        SpectrumGLDisplay* display = new SpectrumGLDisplay();
+        FrequencyAnalyzerDisplay* display = new FrequencyAnalyzerDisplay();
         display->module = module;
         display->box.pos = Vec(0.f, DISPLAY_Y);
         display->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(display);
 
-        SpectrumGLBezel* bezel = new SpectrumGLBezel();
+        FrequencyAnalyzerBezel* bezel = new FrequencyAnalyzerBezel();
         bezel->box.pos = Vec(0.f, DISPLAY_Y);
         bezel->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(bezel);
 
-        SpectrumGLLabels* labels = new SpectrumGLLabels();
+        FrequencyAnalyzerLabels* labels = new FrequencyAnalyzerLabels();
         labels->module = module;
         labels->box.pos = Vec(0.f, DISPLAY_Y);
         labels->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(labels);
 
-        SpectrumGLBadge* badge = new SpectrumGLBadge();
-        badge->box.pos = Vec(460.f, 5.f);
-        badge->box.size = Vec(28.f, 15.f);
-        addChild(badge);
-
         const float jackY = DISPLAY_Y + DISPLAY_HEIGHT + 18.f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(12.f, jackY), module, SpectrumGL::IN_L_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(47.f, jackY), module, SpectrumGL::IN_R_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(15.f, jackY), module, FrequencyAnalyzer::IN_L_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(45.f, jackY), module, FrequencyAnalyzer::IN_R_INPUT));
     }
 
     void appendContextMenu(Menu* menu) override {
-        SpectrumGL* spectrum = dynamic_cast<SpectrumGL*>(module);
+        FrequencyAnalyzer* spectrum = dynamic_cast<FrequencyAnalyzer*>(module);
         if (!spectrum) return;
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createIndexSubmenuItem(
-            "Stereo View", {"Mono Energy", "L/R Split"},
-            [=]() { return static_cast<size_t>(spectrum->stereoMode); },
+            "Stereo View", {"Mono Energy", "L/R Split"}, [=]() { return static_cast<size_t>(spectrum->stereoMode); },
             [=](size_t index) { spectrum->stereoMode = static_cast<StereoMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
             "Display", {"Dots", "Bars"}, [=]() { return static_cast<size_t>(spectrum->displayMode); },
@@ -675,7 +652,7 @@ struct SpectrumGLWidget : ModuleWidget {
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         menu->addChild(createSubmenuItem("Signature Effects", "", [=](Menu* effectsMenu) {
             struct SignatureEffectMenuItem : MenuItem {
-                SpectrumGL* spectrum;
+                FrequencyAnalyzer* spectrum;
                 SignatureEffect effect;
 
                 void step() override {
@@ -703,7 +680,7 @@ struct SpectrumGLWidget : ModuleWidget {
             }
         }));
         struct ThemeMenuItem : MenuItem {
-            SpectrumGL* spectrum;
+            FrequencyAnalyzer* spectrum;
             Theme theme;
 
             void step() override {
@@ -718,7 +695,7 @@ struct SpectrumGLWidget : ModuleWidget {
         };
 
         struct ThemeSubmenuItem : MenuItem {
-            SpectrumGL* spectrum;
+            FrequencyAnalyzer* spectrum;
             std::vector<std::string> labels;
 
             void step() override {
@@ -751,11 +728,11 @@ struct SpectrumGLWidget : ModuleWidget {
             "Show Unlit Segments", "", [=]() { return spectrum->showUnlitSegments; },
             [=]() { spectrum->showUnlitSegments = !spectrum->showUnlitSegments; }));
         menu->addChild(new MenuSeparator);
-        menu->addChild(new GLSlider(spectrum->getParamQuantity(SpectrumGL::UPPER_PARAM)));
-        menu->addChild(new GLSlider(spectrum->getParamQuantity(SpectrumGL::LOWER_PARAM)));
-        menu->addChild(new GLSlider(spectrum->getParamQuantity(SpectrumGL::FALL_DELAY_PARAM)));
-        menu->addChild(new GLSlider(spectrum->getParamQuantity(SpectrumGL::PEAK_FALL_DELAY_PARAM)));
+        menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::UPPER_PARAM)));
+        menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::LOWER_PARAM)));
+        menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::FALL_DELAY_PARAM)));
+        menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::PEAK_FALL_DELAY_PARAM)));
     }
 };
 
-Model* modelSpectrumGL = createModel<SpectrumGL, SpectrumGLWidget>("SpectrumGL");
+Model* modelFrequencyAnalyzer = createModel<FrequencyAnalyzer, FrequencyAnalyzerWidget>("FrequencyAnalyzer");

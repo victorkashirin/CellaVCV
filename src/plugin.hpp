@@ -16,5 +16,4 @@ extern Model *modelLoudnessMeter;
 extern Model *modelLoud;
 extern Model *modelIntegral;
 extern Model *model2State;
-extern Model *modelSpectrum;
-extern Model *modelSpectrumGL;
+extern Model *modelFrequencyAnalyzer;

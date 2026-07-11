@@ -140,26 +140,14 @@
       ]
     },
     {
-      "slug": "Spectrum",
-      "name": "Spectrum",
-      "description": "Spectrum Analyzer",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
-      "keywords": "rnd curve smooth",
+      "slug": "FrequencyAnalyzer",
+      "name": "Frequency Analyzer",
+      "description": "Frequency analyzer",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#frequency-analyzer",
+      "keywords": "spectrum analyzer",
       "tags": [
-        "Utility",
-        "LFO",
-        "Random",
-        "Slew limiter"
-      ]
-    },
-    {
-      "slug": "SpectrumGL",
-      "name": "Spectrum GL",
-      "description": "Experimental OpenGL spectrum analyzer",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
-      "keywords": "spectrum analyzer opengl",
-      "tags": [
-        "Visual"
+        "Visual",
+        "Utility"
       ]
     }
   ]
