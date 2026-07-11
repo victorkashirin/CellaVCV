@@ -315,12 +315,12 @@ void main() {
         color += flashColor * attackFlash * effects * flashStrength;
     }
 
-    float peakY = (peakIndex + 0.5) / segmentRows;
-    float peakDistance = uDisplayMode == 0 ?
-                         abs(logicalY - (dotBottomCenter + peakIndex * 6.0)) * pixelScale :
-                         abs(contentY - peakY) * uResolution.y * (contentTop - contentBottom);
+    float peakDistance = abs(logicalY - (dotBottomCenter + peakIndex * 6.0)) * pixelScale;
     float peakCore = segmentMask * peakSegment * insideY;
-    float peakFlare = exp(-peakDistance * 0.18) * horizontalMask * insideY * hasPeak;
+    // The centered flare complements round dots, but creates a bright
+    // horizontal seam through the otherwise uniform peak in bar mode.
+    float peakFlare = uDisplayMode == 0 ?
+                      exp(-peakDistance * 0.18) * horizontalMask * insideY * hasPeak : 0.0;
     color += uPeakColor * peakCore * 1.35;
     color += mix(uPeakColor, vec3(1.0, 0.85, 0.58), data.a) * peakFlare *
              (0.08 + effects * (0.20 + 0.26 * data.a));
