@@ -1,8 +1,10 @@
 #include "plugin.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 
 // ============================================================================
 //  Configuration & Constants
@@ -42,6 +44,7 @@ static constexpr float DISPLAY_Y_OFFSET = 26.0f;
 static constexpr float DOT_RADIUS = 2.0f;
 static constexpr float DOT_SPACING = 2.0f;
 static constexpr float BAND_MARGIN = 3.0f;
+static constexpr float STEREO_SPLIT_GAP = 1.5f;
 static constexpr int MIN_COLUMNS = 3;
 static constexpr int MAX_COLUMNS = 100;
 
@@ -59,39 +62,61 @@ static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {25.f,  40.f,   63.
 }  // namespace VFDConfig
 
 // Display Modes
-enum class DisplayMode { DOTS, BARS };
+enum class DisplayMode { DOTS, BARS, COUNT };
+
+// Stereo Modes
+enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 
 // Intensity Modes
-enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN };
+enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 
 // Theme System
-enum class Theme { CLASSIC, WARM, COOL };
+enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 struct ThemeColors {
     NVGcolor active;
+    NVGcolor secondary;
     NVGcolor inactive;
     NVGcolor peak;
 };
 
-// Predefined themes
-static const std::array<ThemeColors, 3> THEMES = {
-    {// CLASSIC (original colors)
-     {nvgRGB(0x93, 0xEA, 0xFF), nvgRGB(0x20, 0x20, 0x20), nvgRGB(0xFF, 0x30, 0x30)},
-     // WARM
-     {nvgRGB(0xFF, 0xB3, 0x47), nvgRGB(0x2A, 0x1A, 0x10), nvgRGB(0xFF, 0x47, 0x47)},
-     // COOL
-     {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x10, 0x2A, 0x1A), nvgRGB(0xFF, 0x87, 0x47)}}};
-
-// Theme-based color functions
-static NVGcolor getActiveColor(Theme theme) { return THEMES[static_cast<int>(theme)].active; }
-
-static NVGcolor getInactiveColor(Theme theme) { return THEMES[static_cast<int>(theme)].inactive; }
-
-static NVGcolor getPeakColor(Theme theme) { return THEMES[static_cast<int>(theme)].peak; }
-
 template <typename T>
 static inline T clamp(T v, T lo, T hi) {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Predefined themes
+static const std::array<ThemeColors, static_cast<size_t>(Theme::COUNT)> THEMES = {{
+    // CLASSIC
+    {nvgRGB(0x93, 0xEA, 0xFF), nvgRGB(0xFF, 0x9A, 0xD7), nvgRGB(0x20, 0x20, 0x20),
+     nvgRGB(0xFF, 0x30, 0x30)},
+    // WARM
+    {nvgRGB(0xFF, 0xB3, 0x47), nvgRGB(0x7E, 0xD9, 0xFF), nvgRGB(0x2A, 0x1A, 0x10),
+     nvgRGB(0xFF, 0x47, 0x47)},
+    // COOL
+    {nvgRGB(0x47, 0xFF, 0x87), nvgRGB(0x8F, 0xB8, 0xFF), nvgRGB(0x10, 0x2A, 0x1A),
+     nvgRGB(0xFF, 0x87, 0x47)},
+}};
+
+// Theme-based color functions
+static size_t getThemeIndex(Theme theme) {
+    return static_cast<size_t>(clamp(static_cast<int>(theme), 0, static_cast<int>(Theme::COUNT) - 1));
+}
+
+static NVGcolor getActiveColor(Theme theme) { return THEMES[getThemeIndex(theme)].active; }
+
+static NVGcolor getSecondaryColor(Theme theme) { return THEMES[getThemeIndex(theme)].secondary; }
+
+static NVGcolor getInactiveColor(Theme theme) { return THEMES[getThemeIndex(theme)].inactive; }
+
+static NVGcolor getPeakColor(Theme theme) { return THEMES[getThemeIndex(theme)].peak; }
+
+static int getClampedJsonEnumIndex(json_t* rootJ, const char* key, int count, int fallback) {
+    json_t* valueJ = json_object_get(rootJ, key);
+    if (!json_is_integer(valueJ)) {
+        return fallback;
+    }
+    return clamp(static_cast<int>(json_integer_value(valueJ)), 0, count - 1);
 }
 
 // ============================================================================
@@ -169,12 +194,15 @@ struct Spectrum : Module {
     std::array<std::vector<float>, VFDConfig::NUM_AUDIO_CHANNELS> captures;
     std::vector<float> fftOutput;
     std::vector<float> magnitudes;
+    std::array<std::vector<float>, VFDConfig::NUM_AUDIO_CHANNELS> channelMagnitudes;
     std::array<bool, VFDConfig::NUM_AUDIO_CHANNELS> frameChannelActive = {};
     std::array<SpectrumBand, VFDConfig::NUM_BANDS> bands;
+    std::array<std::array<SpectrumBand, VFDConfig::NUM_BANDS>, VFDConfig::NUM_AUDIO_CHANNELS> channelBands;
     int writePos = 0;
 
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
+    StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
     bool showLabels = false;
     bool showUnlitSegments = true;
@@ -210,6 +238,9 @@ struct Spectrum : Module {
         }
         fftOutput.resize(VFDConfig::FFT_SIZE);
         magnitudes.resize(VFDConfig::SPEC_BINS);
+        for (auto& channelMagnitude : channelMagnitudes) {
+            channelMagnitude.resize(VFDConfig::SPEC_BINS);
+        }
 
         // Generate Hann window
         for (int i = 0; i < VFDConfig::FFT_SIZE; ++i) {
@@ -245,7 +276,15 @@ struct Spectrum : Module {
         DisplayRange range(params[UPPER_PARAM].getValue(), params[LOWER_PARAM].getValue());
         float peakDecay = calculateDecay(args.sampleTime, params[PEAK_FALL_DELAY_PARAM].getValue());
 
-        for (auto& band : bands) {
+        updateBandPeaks(bands, range, peakDecay);
+        for (auto& channelBandSet : channelBands) {
+            updateBandPeaks(channelBandSet, range, peakDecay);
+        }
+    }
+
+    void updateBandPeaks(std::array<SpectrumBand, VFDConfig::NUM_BANDS>& bandSet, const DisplayRange& range,
+                         float peakDecay) {
+        for (auto& band : bandSet) {
             float currentNormalized = range.normalizeDb(band.getDbLevel());
             band.updatePeak(currentNormalized, peakDecay);
         }
@@ -272,11 +311,18 @@ struct Spectrum : Module {
         auto frequencyEdges = getFrequencyEdges(sampleRate);
         float fallDecay = calculateFallDecay(sampleRate);
 
-        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate);
+        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate, bands);
+        for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
+            updateBandLevels(channelMagnitudes[channel], frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate,
+                             channelBands[channel]);
+        }
     }
 
     void performFFT() {
         std::fill(magnitudes.begin(), magnitudes.end(), 0.f);
+        for (auto& channelMagnitude : channelMagnitudes) {
+            std::fill(channelMagnitude.begin(), channelMagnitude.end(), 0.f);
+        }
 
         int activeChannels = 0;
         // Combine channel powers after the FFT so anti-phase stereo still reports energy.
@@ -288,7 +334,11 @@ struct Spectrum : Module {
             ++activeChannels;
             fft.rfft(captures[channel].data(), fftOutput.data());
             fft.scale(fftOutput.data());
-            addFFTBinPowers();
+            writeFFTBinMagnitudes(channelMagnitudes[channel]);
+
+            for (int k = 0; k < VFDConfig::SPEC_BINS; ++k) {
+                magnitudes[k] += channelMagnitudes[channel][k] * channelMagnitudes[channel][k];
+            }
         }
 
         if (activeChannels == 0) {
@@ -301,13 +351,13 @@ struct Spectrum : Module {
         }
     }
 
-    void addFFTBinPowers() {
-        magnitudes[0] += fftOutput[0] * fftOutput[0];
-        magnitudes[VFDConfig::FFT_SIZE / 2] += fftOutput[1] * fftOutput[1];
+    void writeFFTBinMagnitudes(std::vector<float>& outputMagnitudes) {
+        outputMagnitudes[0] = std::fabs(fftOutput[0]);
+        outputMagnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(fftOutput[1]);
         for (int k = 1; k < VFDConfig::FFT_SIZE / 2; ++k) {
             float re = fftOutput[2 * k];
             float im = fftOutput[2 * k + 1];
-            magnitudes[k] += re * re + im * im;
+            outputMagnitudes[k] = std::sqrt(re * re + im * im);
         }
     }
 
@@ -337,11 +387,11 @@ struct Spectrum : Module {
 
     void updateBandLevels(const std::vector<float>& magnitudes,
                           const std::array<float, VFDConfig::NUM_BANDS + 1>& edges, int specBins, float fallDecay,
-                          float sampleRate) {
+                          float sampleRate, std::array<SpectrumBand, VFDConfig::NUM_BANDS>& bandSet) {
         for (int b = 0; b < VFDConfig::NUM_BANDS; ++b) {
             float avgMagnitude = calculateBandMagnitude(magnitudes, edges[b], edges[b + 1], specBins, sampleRate);
             float newDb = 20.f * std::log10(avgMagnitude + VFDConfig::DENORMAL_THRESHOLD);
-            bands[b].updateLevel(newDb, fallDecay);
+            bandSet[b].updateLevel(newDb, fallDecay);
         }
     }
 
@@ -363,6 +413,7 @@ struct Spectrum : Module {
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
+        json_object_set_new(rootJ, "stereoMode", json_integer(static_cast<int>(stereoMode)));
         json_object_set_new(rootJ, "intensityMode", json_integer(static_cast<int>(intensityMode)));
         json_object_set_new(rootJ, "showLabels", json_boolean(showLabels));
         json_object_set_new(rootJ, "showUnlitSegments", json_boolean(showUnlitSegments));
@@ -373,12 +424,22 @@ struct Spectrum : Module {
     void dataFromJson(json_t* rootJ) override {
         json_t* displayModeJ = json_object_get(rootJ, "displayMode");
         if (displayModeJ) {
-            displayMode = static_cast<DisplayMode>(json_integer_value(displayModeJ));
+            displayMode =
+                static_cast<DisplayMode>(getClampedJsonEnumIndex(rootJ, "displayMode", static_cast<int>(DisplayMode::COUNT),
+                                                                 static_cast<int>(displayMode)));
+        }
+
+        json_t* stereoModeJ = json_object_get(rootJ, "stereoMode");
+        if (stereoModeJ) {
+            stereoMode =
+                static_cast<StereoMode>(getClampedJsonEnumIndex(rootJ, "stereoMode", static_cast<int>(StereoMode::COUNT),
+                                                                static_cast<int>(stereoMode)));
         }
 
         json_t* intensityModeJ = json_object_get(rootJ, "intensityMode");
         if (intensityModeJ) {
-            intensityMode = static_cast<IntensityMode>(json_integer_value(intensityModeJ));
+            intensityMode = static_cast<IntensityMode>(getClampedJsonEnumIndex(
+                rootJ, "intensityMode", static_cast<int>(IntensityMode::COUNT), static_cast<int>(intensityMode)));
         }
 
         json_t* showLabelsJ = json_object_get(rootJ, "showLabels");
@@ -393,7 +454,9 @@ struct Spectrum : Module {
 
         json_t* currentThemeJ = json_object_get(rootJ, "currentTheme");
         if (currentThemeJ) {
-            currentTheme = static_cast<Theme>(json_integer_value(currentThemeJ));
+            currentTheme =
+                static_cast<Theme>(getClampedJsonEnumIndex(rootJ, "currentTheme", static_cast<int>(Theme::COUNT),
+                                                           static_cast<int>(currentTheme)));
         }
     }
 };
@@ -438,6 +501,7 @@ struct DisplayGrid {
 struct VFDCustomDisplay : LedDisplay {
     Spectrum* module;
     std::array<float, VFDConfig::NUM_BANDS> ghostLevels = {};
+    std::array<std::array<float, VFDConfig::NUM_BANDS>, VFDConfig::NUM_AUDIO_CHANNELS> channelGhostLevels = {};
     std::chrono::steady_clock::time_point lastGhostUpdate = std::chrono::steady_clock::now();
 
     struct IntensityStyle {
@@ -479,17 +543,42 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawSingleBand(NVGcontext* vg, size_t bandIndex, float bandWidth, const DisplayRange& range) {
-        float level = range.normalizeDb(module->bands[bandIndex].getDbLevel());
-        float peakLevel = module->bands[bandIndex].getPeakLevel();
-        float ghostLevel = ghostLevels[bandIndex];
-
         float xOffset = VFDConfig::BAND_MARGIN + bandIndex * bandWidth;
         float availableWidth = bandWidth - VFDConfig::BAND_MARGIN * 2;
 
+        if (module->stereoMode == StereoMode::LEFT_RIGHT_SPLIT) {
+            drawStereoSplitBand(vg, bandIndex, xOffset, availableWidth, range);
+            return;
+        }
+
+        float level = range.normalizeDb(module->bands[bandIndex].getDbLevel());
+        float peakLevel = module->bands[bandIndex].getPeakLevel();
+        float ghostLevel = ghostLevels[bandIndex];
+        drawBandMeter(vg, level, peakLevel, ghostLevel, xOffset, availableWidth, getActiveColor(module->currentTheme));
+    }
+
+    void drawStereoSplitBand(NVGcontext* vg, size_t bandIndex, float xOffset, float availableWidth,
+                             const DisplayRange& range) {
+        float channelWidth = std::max((availableWidth - VFDConfig::STEREO_SPLIT_GAP) * 0.5f, 0.0f);
+
+        for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
+            float level = range.normalizeDb(module->channelBands[channel][bandIndex].getDbLevel());
+            float peakLevel = module->channelBands[channel][bandIndex].getPeakLevel();
+            float ghostLevel = channelGhostLevels[channel][bandIndex];
+            float channelXOffset = xOffset + channel * (channelWidth + VFDConfig::STEREO_SPLIT_GAP);
+            NVGcolor activeColor =
+                channel == 0 ? getActiveColor(module->currentTheme) : getSecondaryColor(module->currentTheme);
+
+            drawBandMeter(vg, level, peakLevel, ghostLevel, channelXOffset, channelWidth, activeColor);
+        }
+    }
+
+    void drawBandMeter(NVGcontext* vg, float level, float peakLevel, float ghostLevel, float xOffset,
+                       float availableWidth, NVGcolor activeColor) {
         if (module->displayMode == DisplayMode::DOTS) {
-            drawDotsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth);
+            drawDotsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth, activeColor);
         } else {
-            drawBarsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth);
+            drawBarsMode(vg, level, peakLevel, ghostLevel, xOffset, availableWidth, activeColor);
         }
     }
 
@@ -503,19 +592,28 @@ struct VFDCustomDisplay : LedDisplay {
 
         for (size_t b = 0; b < VFDConfig::NUM_BANDS; ++b) {
             float level = range.normalizeDb(module->bands[b].getDbLevel());
-            if (level >= ghostLevels[b]) {
-                ghostLevels[b] = level;
-            } else {
-                ghostLevels[b] *= ghostDecay;
-                if (ghostLevels[b] < VFDConfig::DENORMAL_THRESHOLD) {
-                    ghostLevels[b] = 0.0f;
-                }
+            updateGhostLevel(ghostLevels[b], level, ghostDecay);
+
+            for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
+                float channelLevel = range.normalizeDb(module->channelBands[channel][b].getDbLevel());
+                updateGhostLevel(channelGhostLevels[channel][b], channelLevel, ghostDecay);
+            }
+        }
+    }
+
+    void updateGhostLevel(float& ghostLevel, float level, float ghostDecay) {
+        if (level >= ghostLevel) {
+            ghostLevel = level;
+        } else {
+            ghostLevel *= ghostDecay;
+            if (ghostLevel < VFDConfig::DENORMAL_THRESHOLD) {
+                ghostLevel = 0.0f;
             }
         }
     }
 
     void drawDotsMode(NVGcontext* vg, float level, float peakLevel, float ghostLevel, float xOffset,
-                      float availableWidth) {
+                      float availableWidth, NVGcolor activeColor) {
         DisplayGrid grid(availableWidth, getAvailableDisplayHeight(),
                          xOffset + VFDConfig::BAND_MARGIN + VFDConfig::DOT_RADIUS);
 
@@ -527,11 +625,11 @@ struct VFDCustomDisplay : LedDisplay {
         }
 
         if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
-            drawGhostDots(vg, grid, level, ghostLevel, peakRow);
+            drawGhostDots(vg, grid, level, ghostLevel, peakRow, activeColor);
         }
 
         if (level > 0.0f) {
-            drawActiveDots(vg, grid, level, style, peakRow);
+            drawActiveDots(vg, grid, level, style, peakRow, activeColor);
         }
 
         if (peakRow >= 0) {
@@ -540,7 +638,7 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawBarsMode(NVGcontext* vg, float level, float peakLevel, float ghostLevel, float xOffset,
-                      float availableWidth) {
+                      float availableWidth, NVGcolor activeColor) {
         float barX = xOffset + VFDConfig::BAND_MARGIN;
         float barWidth = availableWidth;
         float barHeight = getAvailableDisplayHeight();
@@ -583,13 +681,12 @@ struct VFDCustomDisplay : LedDisplay {
 
         if (module->intensityMode == IntensityMode::GHOST && ghostLevel > level) {
             drawGhostBars(vg, barX, barWidth, startY, numSegments, segmentHeight, segmentSpacing, level, ghostLevel,
-                          peakSegment);
+                          peakSegment, activeColor);
         }
 
         // Draw active segments
         if (level > 0.0f) {
             int activeSegments = static_cast<int>(std::ceil(level * numSegments));
-            NVGcolor activeColor = getActiveColor(module->currentTheme);
 
             for (int i = 0; i < activeSegments && i < numSegments; i++) {
                 int segmentIndex = numSegments - 1 - i;  // Start from bottom
@@ -682,13 +779,13 @@ struct VFDCustomDisplay : LedDisplay {
         return peakSegment;
     }
 
-    void drawGhostDots(NVGcontext* vg, const DisplayGrid& grid, float level, float ghostLevel, int skipRow) {
+    void drawGhostDots(NVGcontext* vg, const DisplayGrid& grid, float level, float ghostLevel, int skipRow,
+                       NVGcolor activeColor) {
         int activeRows = getActiveRows(grid, level);
         int ghostRows = clamp(static_cast<int>(std::ceil(ghostLevel * grid.rows)), 0, grid.rows);
         int firstGhostRow = grid.rows - ghostRows;
         int firstActiveRow = grid.rows - activeRows;
         int trailRows = std::max(firstActiveRow - firstGhostRow, 1);
-        NVGcolor activeColor = getActiveColor(module->currentTheme);
 
         for (int c = 0; c < grid.columns; c++) {
             for (int r = firstGhostRow; r < firstActiveRow; r++) {
@@ -708,11 +805,10 @@ struct VFDCustomDisplay : LedDisplay {
     }
 
     void drawGhostBars(NVGcontext* vg, float x, float width, float startY, int numSegments, float segmentHeight,
-                       float segmentSpacing, float level, float ghostLevel, int skipSegment) {
+                       float segmentSpacing, float level, float ghostLevel, int skipSegment, NVGcolor activeColor) {
         int activeSegments = clamp(static_cast<int>(std::ceil(level * numSegments)), 0, numSegments);
         int ghostSegments = clamp(static_cast<int>(std::ceil(ghostLevel * numSegments)), 0, numSegments);
         int trailSegments = std::max(ghostSegments - activeSegments, 1);
-        NVGcolor activeColor = getActiveColor(module->currentTheme);
 
         for (int i = activeSegments; i < ghostSegments; i++) {
             int segmentIndex = numSegments - 1 - i;
@@ -726,7 +822,8 @@ struct VFDCustomDisplay : LedDisplay {
         }
     }
 
-    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, const IntensityStyle& style, int skipRow) {
+    void drawActiveDots(NVGcontext* vg, const DisplayGrid& grid, float level, const IntensityStyle& style, int skipRow,
+                        NVGcolor activeColor) {
         int activeRows = getActiveRows(grid, level);
         int firstActiveRow = grid.rows - activeRows;
 
@@ -737,15 +834,14 @@ struct VFDCustomDisplay : LedDisplay {
                 }
                 float dy = grid.yStart + r * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
                 float dx = grid.xStart + c * (VFDConfig::DOT_RADIUS * 2 + VFDConfig::DOT_SPACING);
-                drawActiveDot(vg, dx, dy, style);
+                drawActiveDot(vg, dx, dy, style, activeColor);
             }
         }
     }
 
-    void drawActiveDot(NVGcontext* vg, float x, float y, const IntensityStyle& style) {
+    void drawActiveDot(NVGcontext* vg, float x, float y, const IntensityStyle& style, NVGcolor activeColor) {
         if (!module) return;
 
-        NVGcolor activeColor = getActiveColor(module->currentTheme);
         drawDotGlow(vg, x, y, activeColor, style.activeGlowRadius, style.activeGlowAlpha);
 
         // Core dot
@@ -907,6 +1003,12 @@ struct SpectrumWidget : ModuleWidget {
         if (!module) return;
 
         menu->addChild(new MenuSeparator);
+        menu->addChild(createIndexSubmenuItem(
+            "Stereo View",
+            {"Mono Energy", "L/R Split"},
+            [=]() { return static_cast<size_t>(module->stereoMode); },
+            [=](size_t index) { module->stereoMode = static_cast<StereoMode>(index); }));
+
         menu->addChild(createIndexSubmenuItem(
             "Display Mode",
             {"Dots", "Bars"},
