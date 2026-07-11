@@ -127,6 +127,15 @@ struct FrequencyAnalyzer : Module {
         }
     }
 
+    void onRandomize(const RandomizeEvent&) override {
+        currentTheme = static_cast<Theme>(random::u32() % static_cast<uint32_t>(Theme::COUNT));
+        signatureEffects = random::u32() & ALL_SIGNATURE_EFFECTS;
+        effectsMode = static_cast<EffectsMode>(random::u32() % static_cast<uint32_t>(EffectsMode::COUNT));
+        intensityMode = static_cast<IntensityMode>(random::u32() % static_cast<uint32_t>(IntensityMode::COUNT));
+        displayMode = static_cast<DisplayMode>(random::u32() % static_cast<uint32_t>(DisplayMode::COUNT));
+        showUnlitSegments = (random::u32() & 1u) != 0u;
+    }
+
     json_t* dataToJson() override {
         json_t* rootJ = json_object();
         json_object_set_new(rootJ, "displayMode", json_integer(static_cast<int>(displayMode)));
