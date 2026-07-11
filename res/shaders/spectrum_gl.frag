@@ -256,8 +256,8 @@ void main() {
     float coreAlpha = 1.0;
     float glowAlpha = 0.30;
     if (uIntensityMode == 1) {
-        coreAlpha = 0.45 + 0.70 * levelBrightness;
-        glowAlpha = 0.30 + 0.38 * levelBrightness;
+        coreAlpha = 0.04 + 1.05 * levelBrightness;
+        glowAlpha = 0.10 + 0.58 * levelBrightness;
     } else if (uIntensityMode == 2) {
         coreAlpha = 0.92;
         glowAlpha = 0.38;
