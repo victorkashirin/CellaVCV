@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.10.0 (2026-07-12)
+
+New modules:
+* Frequency Analyzer - vintage frequency analyzer.
+
 ### 2.9.0 (2025-05-24)
 
 New modules:
