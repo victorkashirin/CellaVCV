@@ -425,8 +425,10 @@ void main() {
                        (1.0 - smoothstep(0.992, 1.0, screenUv.y));
         float topWash = smoothstep(0.70, 0.98, screenUv.y) *
                         (1.0 - smoothstep(0.965, 1.0, screenUv.y));
-        float sheenSides = smoothstep(0.015, 0.10, screenUv.x) *
-                           smoothstep(0.015, 0.10, 1.0 - screenUv.x);
+        // Let the overhead highlight nearly meet the full-width bezel line;
+        // retain only a short corner taper instead of losing 10% per side.
+        float sheenSides = smoothstep(0.004, 0.040, screenUv.x) *
+                           smoothstep(0.004, 0.040, 1.0 - screenUv.x);
         color += vec3(0.070, 0.085, 0.084) * topRim * sheenSides * glassEffects;
         color += vec3(0.018, 0.026, 0.026) * topWash * sheenSides * glassEffects;
 
