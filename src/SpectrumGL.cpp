@@ -583,7 +583,7 @@ struct SpectrumGLLabels : TransparentWidget {
         // with the curved meter columns.
         const float curvature = module->effectsMode == EffectsMode::FULL ? 0.036f : 0.016f;
         const float normalizedX = flatX / box.size.x * 2.f - 1.f;
-        const float normalizedY = ((box.size.y - 12.f) / box.size.y) * 2.f - 1.f;
+        const float normalizedY = ((box.size.y - 13.f) / box.size.y) * 2.f - 1.f;
         const float curvedX = normalizedX / (1.f + curvature * normalizedY * normalizedY);
         return (curvedX * 0.5f + 0.5f) * box.size.x;
     }
@@ -602,7 +602,7 @@ struct SpectrumGLLabels : TransparentWidget {
                 std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
             else
                 std::snprintf(label, sizeof(label), "%.0f", frequency);
-            nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 12.f, label,
+            nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 13.f, label,
                     NULL);
         }
     }

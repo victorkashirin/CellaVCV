@@ -101,11 +101,10 @@ void main() {
     float effects = uEffectsMode == 0 ? 0.0 : (uEffectsMode == 1 ? 0.48 : 1.0);
 
     vec3 color = mix(vec3(0.004, 0.009, 0.012), vec3(0.018, 0.044, 0.050), contentUv.y);
-    // Bars need a slightly lower content origin than dots: their first cell
-    // is centered half a pitch above it, while the first dot center is fixed.
-    // Ten logical pixels makes their antialiased lower edges align when the
-    // frequency-label row is present.
-    float contentBottom = uLabels != 0 ? (uDisplayMode == 0 ? 0.04375 : 0.03125) : 0.01875;
+    // Leave a deliberate gap above the label row. Dot bloom begins at the
+    // lower edge of its first cell; bars use a slightly lower origin because
+    // their first cell is centered half a pitch above it.
+    float contentBottom = uLabels != 0 ? (uDisplayMode == 0 ? 0.05 : 0.04375) : 0.03125;
     float contentTop = 0.98125;
     float contentY = (contentUv.y - contentBottom) / (contentTop - contentBottom);
     float insideY = step(0.0, contentY) * step(contentY, 1.0);
@@ -140,8 +139,8 @@ void main() {
     float coreMask;
     float glowMask;
     float dotColumns = uStereoMode == 0 ? 6.0 : 3.0;
-    float segmentRows = uDisplayMode == 0 ? (uLabels != 0 ? 51.0 : 52.0) : 30.0;
-    float dotBottomCenter = uLabels != 0 ? 14.0 : 8.0;
+    float segmentRows = uDisplayMode == 0 ? (uLabels != 0 ? 50.0 : 51.0) : 30.0;
+    float dotBottomCenter = uLabels != 0 ? 18.0 : 12.0;
     float dotSegmentIndex = 0.0;
     if (uDisplayMode == 0) {
         float dotOrigin = bandStart + (uStereoMode == 0 ? 5.4167 : (channel < 0.5 ? 5.3333 : 23.5));
