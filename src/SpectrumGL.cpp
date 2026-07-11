@@ -37,7 +37,7 @@ T clampValue(T value, T low, T high) {
 
 enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
-enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
+enum class IntensityMode { SOLID, DYNAMIC, PERSISTENCE, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
 enum class SignatureEffect : uint32_t {
     PHOSPHOR_BLOOM = 1u << 0,
@@ -473,7 +473,7 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
             glUniform1i(renderer.stereoModeLocation,
                         static_cast<int>(module ? module->stereoMode : StereoMode::MONO));
             glUniform1i(renderer.intensityModeLocation,
-                        static_cast<int>(module ? module->intensityMode : IntensityMode::GLOW));
+                        static_cast<int>(module ? module->intensityMode : IntensityMode::SOLID));
             glUniform1i(renderer.effectsModeLocation,
                         static_cast<int>(module ? module->effectsMode : EffectsMode::SUBTLE));
             const uint32_t signatureEffects =
@@ -663,7 +663,7 @@ struct SpectrumGLWidget : ModuleWidget {
             "Display", {"Dots", "Bars"}, [=]() { return static_cast<size_t>(spectrum->displayMode); },
             [=](size_t index) { spectrum->displayMode = static_cast<DisplayMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
-            "Light Response", {"Solid", "Dynamic", "Bloom", "Persistence", "Clean"},
+            "Light Response", {"Solid", "Dynamic", "Persistence"},
             [=]() { return static_cast<size_t>(spectrum->intensityMode); },
             [=](size_t index) { spectrum->intensityMode = static_cast<IntensityMode>(index); }));
         menu->addChild(createIndexSubmenuItem(

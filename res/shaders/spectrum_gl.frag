@@ -185,7 +185,7 @@ void main() {
     float nonPeakSegment = 1.0 - peakSegment;
     float active = step(segmentIndex + 0.5, activeCount) * insideY * nonPeakSegment;
     float ghost = step(segmentIndex + 0.5, ghostCount) * (1.0 - active) * insideY * nonPeakSegment;
-    float inactiveAlpha = uShowUnlit != 0 ? (uIntensityMode == 3 ? 0.18 : 0.42) : 0.0;
+    float inactiveAlpha = uShowUnlit != 0 ? (uIntensityMode == 2 ? 0.18 : 0.42) : 0.0;
     color += uInactive * segmentMask * inactiveAlpha;
 
     float levelBrightness = sqrt(max(data.r, 0.0));
@@ -259,13 +259,8 @@ void main() {
         coreAlpha = 0.45 + 0.70 * levelBrightness;
         glowAlpha = 0.30 + 0.38 * levelBrightness;
     } else if (uIntensityMode == 2) {
-        coreAlpha = 0.76 + 0.24 * levelBrightness;
-        glowAlpha = 0.62;
-    } else if (uIntensityMode == 3) {
         coreAlpha = 0.92;
         glowAlpha = 0.38;
-    } else if (uIntensityMode == 4) {
-        glowAlpha = 0.0;
     }
 
     // Phase 4 Micro Motion signature. Movement is deliberately sub-segment:
@@ -311,7 +306,7 @@ void main() {
                              effects * smoothstep(0.86, 1.0, data.r));
     color += overloadColor * segmentMask * active * coreAlpha * motionGain;
     color += overloadColor * glowMask * active * glowAlpha * effects * 0.25 * motionGain;
-    if (uIntensityMode == 3) {
+    if (uIntensityMode == 2) {
         color += emissionColor * segmentMask * ghost * 0.28 * motionGain;
     }
     if (uSignatureEffects.z > 0.5 && effects > 0.0) {
