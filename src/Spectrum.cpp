@@ -1,8 +1,8 @@
 #include "plugin.hpp"
+#include "spectrum/SpectrumAnalyzer.hpp"
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 
@@ -11,14 +11,10 @@
 // ============================================================================
 namespace VFDConfig {
 // DSP Constants
-static constexpr int FFT_SIZE = 2048;
-static constexpr int SPEC_BINS = FFT_SIZE / 2 + 1;
-static constexpr int NUM_BANDS = 12;
-static constexpr float INPUT_GAIN = 0.1f;
-static constexpr float MIN_DELAY_TIME = 0.001f;
-static constexpr float NOISE_FLOOR_DB = -120.0f;
-static constexpr float DENORMAL_THRESHOLD = 1e-6f;
-static constexpr int NUM_AUDIO_CHANNELS = 2;
+static constexpr int NUM_BANDS = cella::spectrum::SpectrumConfig::NUM_BANDS;
+static constexpr float MIN_DELAY_TIME = cella::spectrum::SpectrumConfig::MIN_DELAY_TIME;
+static constexpr float DENORMAL_THRESHOLD = cella::spectrum::SpectrumConfig::DENORMAL_THRESHOLD;
+static constexpr int NUM_AUDIO_CHANNELS = cella::spectrum::SpectrumConfig::NUM_AUDIO_CHANNELS;
 
 // Parameter Ranges
 static constexpr float UPPER_DB_MIN = -40.0f;
@@ -57,8 +53,7 @@ static constexpr float LABEL_HEIGHT = 12.0f;  // Space reserved for frequency la
 static constexpr float LABEL_FONT_SIZE = 9.0f;
 
 // Frequency band edges (Hz)
-static constexpr std::array<float, NUM_BANDS> BAND_CENTERS = {25.f,  40.f,   63.f,   100.f,  160.f,  250.f,
-                                                              500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
+static const std::array<float, NUM_BANDS>& BAND_CENTERS = cella::spectrum::SpectrumConfig::BAND_CENTERS;
 }  // namespace VFDConfig
 
 // Display Modes
@@ -119,51 +114,6 @@ static int getClampedJsonEnumIndex(json_t* rootJ, const char* key, int count, in
     return clamp(static_cast<int>(json_integer_value(valueJ)), 0, count - 1);
 }
 
-// ============================================================================
-//  DSP Helper Structures
-// ============================================================================
-struct SpectrumBand {
-    // Written by the audio thread and read by the UI thread.
-    std::atomic<float> dbLevel;
-    std::atomic<float> peakLevel;
-
-    SpectrumBand() : dbLevel(VFDConfig::NOISE_FLOOR_DB), peakLevel(0.0f) {}
-
-    float getDbLevel() const { return dbLevel.load(std::memory_order_relaxed); }
-
-    void setDbLevel(float value) { dbLevel.store(value, std::memory_order_relaxed); }
-
-    float getPeakLevel() const { return peakLevel.load(std::memory_order_relaxed); }
-
-    void updateLevel(float newDb, float fallDecay) {
-        float currentDb = getDbLevel();
-        float updatedDb;
-        if (newDb >= currentDb) {
-            updatedDb = newDb;  // Fast attack
-        } else {
-            updatedDb = currentDb * fallDecay + newDb * (1.0f - fallDecay);
-        }
-
-        // Prevent excessive decay
-        updatedDb = std::max(updatedDb, VFDConfig::NOISE_FLOOR_DB);
-        setDbLevel(updatedDb);
-    }
-
-    void updatePeak(float currentNormalized, float peakDecay) {
-        float currentPeak = getPeakLevel();
-        float updatedPeak;
-        if (currentNormalized >= currentPeak) {
-            updatedPeak = currentNormalized;
-        } else {
-            updatedPeak = currentPeak * peakDecay;
-            if (updatedPeak < VFDConfig::DENORMAL_THRESHOLD) {
-                updatedPeak = 0.0f;
-            }
-        }
-        peakLevel.store(clamp(updatedPeak, 0.0f, 1.0f), std::memory_order_relaxed);
-    }
-};
-
 struct DisplayRange {
     float topDb;
     float bottomDb;
@@ -189,16 +139,8 @@ struct Spectrum : Module {
     enum InputIds { IN_L_INPUT, IN_R_INPUT, NUM_INPUTS };
 
     // DSP state
-    dsp::RealFFT fft{VFDConfig::FFT_SIZE};
-    std::vector<float> window;
-    std::array<std::vector<float>, VFDConfig::NUM_AUDIO_CHANNELS> captures;
-    std::vector<float> fftOutput;
-    std::vector<float> magnitudes;
-    std::array<std::vector<float>, VFDConfig::NUM_AUDIO_CHANNELS> channelMagnitudes;
-    std::array<bool, VFDConfig::NUM_AUDIO_CHANNELS> frameChannelActive = {};
-    std::array<SpectrumBand, VFDConfig::NUM_BANDS> bands;
-    std::array<std::array<SpectrumBand, VFDConfig::NUM_BANDS>, VFDConfig::NUM_AUDIO_CHANNELS> channelBands;
-    int writePos = 0;
+    cella::spectrum::SpectrumAnalyzer analyzer;
+    dsp::RingBuffer<cella::spectrum::SpectrumFrame, 16> displayFrames;
 
     // Display state
     DisplayMode displayMode = DisplayMode::DOTS;
@@ -212,7 +154,6 @@ struct Spectrum : Module {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
         configureParameters();
         configureInputs();
-        initializeDSP();
     }
 
     void configureParameters() {
@@ -231,183 +172,13 @@ struct Spectrum : Module {
         configInput(IN_R_INPUT, "Right");
     }
 
-    void initializeDSP() {
-        window.resize(VFDConfig::FFT_SIZE);
-        for (auto& capture : captures) {
-            capture.resize(VFDConfig::FFT_SIZE);
-        }
-        fftOutput.resize(VFDConfig::FFT_SIZE);
-        magnitudes.resize(VFDConfig::SPEC_BINS);
-        for (auto& channelMagnitude : channelMagnitudes) {
-            channelMagnitude.resize(VFDConfig::SPEC_BINS);
-        }
-
-        // Generate Hann window
-        for (int i = 0; i < VFDConfig::FFT_SIZE; ++i) {
-            window[i] = 0.5f * (1.f - std::cos(2.f * M_PI * i / (VFDConfig::FFT_SIZE - 1)));
-        }
-    }
-
     void process(const ProcessArgs& args) override {
-        processWindowedInput(args.sampleRate);
-        updateDecayAndPeaks(args);
-        // handleNoInputDecay(args);
-    }
-
-    void processWindowedInput(float sampleRate) {
-        const bool leftConnected = inputs[IN_L_INPUT].isConnected();
-        const bool rightConnected = inputs[IN_R_INPUT].isConnected();
-        const float windowValue = window[writePos] * VFDConfig::INPUT_GAIN;
-
-        captures[0][writePos] = leftConnected ? inputs[IN_L_INPUT].getVoltage() * windowValue : 0.f;
-        captures[1][writePos] = rightConnected ? inputs[IN_R_INPUT].getVoltage() * windowValue : 0.f;
-
-        frameChannelActive[0] = frameChannelActive[0] || leftConnected;
-        frameChannelActive[1] = frameChannelActive[1] || rightConnected;
-
-        if (++writePos >= VFDConfig::FFT_SIZE) {
-            writePos = 0;
-            analyzeFFT(sampleRate);
-            frameChannelActive.fill(false);
+        const bool frameReady = analyzer.process(inputs[IN_L_INPUT].getVoltage(), inputs[IN_R_INPUT].getVoltage(),
+                                                 inputs[IN_L_INPUT].isConnected(), inputs[IN_R_INPUT].isConnected(),
+                                                 args.sampleRate, params[FALL_DELAY_PARAM].getValue());
+        if (frameReady && !displayFrames.full()) {
+            displayFrames.push(analyzer.getFrame());
         }
-    }
-
-    void updateDecayAndPeaks(const ProcessArgs& args) {
-        DisplayRange range(params[UPPER_PARAM].getValue(), params[LOWER_PARAM].getValue());
-        float peakDecay = calculateDecay(args.sampleTime, params[PEAK_FALL_DELAY_PARAM].getValue());
-
-        updateBandPeaks(bands, range, peakDecay);
-        for (auto& channelBandSet : channelBands) {
-            updateBandPeaks(channelBandSet, range, peakDecay);
-        }
-    }
-
-    void updateBandPeaks(std::array<SpectrumBand, VFDConfig::NUM_BANDS>& bandSet, const DisplayRange& range,
-                         float peakDecay) {
-        for (auto& band : bandSet) {
-            float currentNormalized = range.normalizeDb(band.getDbLevel());
-            band.updatePeak(currentNormalized, peakDecay);
-        }
-    }
-
-    void handleNoInputDecay(const ProcessArgs& args) {
-        if (!inputs[IN_L_INPUT].isConnected() && !inputs[IN_R_INPUT].isConnected()) {
-            float fallDecay = calculateDecay(args.sampleTime, params[FALL_DELAY_PARAM].getValue());
-
-            for (auto& band : bands) {
-                float decayedDb = std::max(band.getDbLevel() * fallDecay, VFDConfig::NOISE_FLOOR_DB);
-                band.setDbLevel(decayedDb);
-            }
-        }
-    }
-
-    float calculateDecay(float deltaTime, float delayParam) {
-        float delay = std::max(VFDConfig::MIN_DELAY_TIME, delayParam);
-        return std::exp(-deltaTime / delay);
-    }
-
-    void analyzeFFT(float sampleRate) {
-        performFFT();
-        auto frequencyEdges = getFrequencyEdges(sampleRate);
-        float fallDecay = calculateFallDecay(sampleRate);
-
-        updateBandLevels(magnitudes, frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate, bands);
-        for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
-            updateBandLevels(channelMagnitudes[channel], frequencyEdges, VFDConfig::SPEC_BINS, fallDecay, sampleRate,
-                             channelBands[channel]);
-        }
-    }
-
-    void performFFT() {
-        std::fill(magnitudes.begin(), magnitudes.end(), 0.f);
-        for (auto& channelMagnitude : channelMagnitudes) {
-            std::fill(channelMagnitude.begin(), channelMagnitude.end(), 0.f);
-        }
-
-        int activeChannels = 0;
-        // Combine channel powers after the FFT so anti-phase stereo still reports energy.
-        for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
-            if (!frameChannelActive[channel]) {
-                continue;
-            }
-
-            ++activeChannels;
-            fft.rfft(captures[channel].data(), fftOutput.data());
-            fft.scale(fftOutput.data());
-            writeFFTBinMagnitudes(channelMagnitudes[channel]);
-
-            for (int k = 0; k < VFDConfig::SPEC_BINS; ++k) {
-                magnitudes[k] += channelMagnitudes[channel][k] * channelMagnitudes[channel][k];
-            }
-        }
-
-        if (activeChannels == 0) {
-            return;
-        }
-
-        const float channelScale = 1.f / activeChannels;
-        for (float& magnitude : magnitudes) {
-            magnitude = std::sqrt(magnitude * channelScale);
-        }
-    }
-
-    void writeFFTBinMagnitudes(std::vector<float>& outputMagnitudes) {
-        outputMagnitudes[0] = std::fabs(fftOutput[0]);
-        outputMagnitudes[VFDConfig::FFT_SIZE / 2] = std::fabs(fftOutput[1]);
-        for (int k = 1; k < VFDConfig::FFT_SIZE / 2; ++k) {
-            float re = fftOutput[2 * k];
-            float im = fftOutput[2 * k + 1];
-            outputMagnitudes[k] = std::sqrt(re * re + im * im);
-        }
-    }
-
-    std::array<float, VFDConfig::NUM_BANDS + 1> getFrequencyEdges(float sampleRate) {
-        std::array<float, VFDConfig::NUM_BANDS + 1> edges;
-
-        // First edge: geometric mean between first center and a reasonable low
-        // frequency
-        edges[0] = std::sqrt(VFDConfig::BAND_CENTERS[0] * (VFDConfig::BAND_CENTERS[0] / 2.0f));
-
-        // Middle edges: geometric mean between adjacent centers
-        for (int i = 1; i < VFDConfig::NUM_BANDS; ++i) {
-            edges[i] = std::sqrt(VFDConfig::BAND_CENTERS[i - 1] * VFDConfig::BAND_CENTERS[i]);
-        }
-
-        // Last edge: Nyquist frequency
-        edges[VFDConfig::NUM_BANDS] = sampleRate * 0.5f;
-
-        return edges;
-    }
-
-    float calculateFallDecay(float sampleRate) {
-        float fallDelay = std::max(VFDConfig::MIN_DELAY_TIME, params[FALL_DELAY_PARAM].getValue());
-        float deltaTime = static_cast<float>(VFDConfig::FFT_SIZE) / sampleRate;
-        return std::exp(-deltaTime / fallDelay);
-    }
-
-    void updateBandLevels(const std::vector<float>& magnitudes,
-                          const std::array<float, VFDConfig::NUM_BANDS + 1>& edges, int specBins, float fallDecay,
-                          float sampleRate, std::array<SpectrumBand, VFDConfig::NUM_BANDS>& bandSet) {
-        for (int b = 0; b < VFDConfig::NUM_BANDS; ++b) {
-            float avgMagnitude = calculateBandMagnitude(magnitudes, edges[b], edges[b + 1], specBins, sampleRate);
-            float newDb = 20.f * std::log10(avgMagnitude + VFDConfig::DENORMAL_THRESHOLD);
-            bandSet[b].updateLevel(newDb, fallDecay);
-        }
-    }
-
-    float calculateBandMagnitude(const std::vector<float>& magnitudes, float fLo, float fHi, int specBins,
-                                 float sampleRate) {
-        int binLo = clamp<int>(std::floor(fLo * VFDConfig::FFT_SIZE / sampleRate), 0, specBins - 1);
-        int binHi = clamp<int>(std::ceil(fHi * VFDConfig::FFT_SIZE / sampleRate), binLo + 1, specBins);
-        if (fHi >= sampleRate * 0.5f) {
-            binHi = specBins;
-        }
-
-        float sum = 0.f;
-        for (int k = binLo; k < binHi; ++k) {
-            sum += magnitudes[k];
-        }
-        return sum / (binHi - binLo);
     }
 
     json_t* dataToJson() override {
@@ -500,8 +271,10 @@ struct DisplayGrid {
 // ============================================================================
 struct VFDCustomDisplay : LedDisplay {
     Spectrum* module;
+    cella::spectrum::SpectrumFrame latestFrame;
     std::array<float, VFDConfig::NUM_BANDS> ghostLevels = {};
     std::array<std::array<float, VFDConfig::NUM_BANDS>, VFDConfig::NUM_AUDIO_CHANNELS> channelGhostLevels = {};
+    std::chrono::steady_clock::time_point lastPeakUpdate = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point lastGhostUpdate = std::chrono::steady_clock::now();
 
     struct IntensityStyle {
@@ -516,6 +289,13 @@ struct VFDCustomDisplay : LedDisplay {
 
     void drawLayer(const DrawArgs& args, int layer) override {
         if (layer != 1 || !module) return;
+
+        while (!module->displayFrames.empty()) {
+            cella::spectrum::SpectrumFrame nextFrame = module->displayFrames.shift();
+            nextFrame.peaks = latestFrame.peaks;
+            nextFrame.channelPeaks = latestFrame.channelPeaks;
+            latestFrame = nextFrame;
+        }
 
         nvgSave(args.vg);
         nvgScissor(args.vg, 0.0f, 0.0f, box.size.x, getBandClipBottomY());
@@ -535,6 +315,7 @@ struct VFDCustomDisplay : LedDisplay {
         const float bandWidth = totalWidth / numBands;
 
         DisplayRange range(module->params[0].getValue(), module->params[1].getValue());
+        updatePeakLevels(range);
         updateGhostLevels(range);
 
         for (size_t b = 0; b < numBands; b++) {
@@ -551,8 +332,8 @@ struct VFDCustomDisplay : LedDisplay {
             return;
         }
 
-        float level = range.normalizeDb(module->bands[bandIndex].getDbLevel());
-        float peakLevel = module->bands[bandIndex].getPeakLevel();
+        float level = range.normalizeDb(latestFrame.levels[bandIndex]);
+        float peakLevel = latestFrame.peaks[bandIndex];
         float ghostLevel = ghostLevels[bandIndex];
         drawBandMeter(vg, level, peakLevel, ghostLevel, xOffset, availableWidth, getActiveColor(module->currentTheme));
     }
@@ -562,8 +343,8 @@ struct VFDCustomDisplay : LedDisplay {
         float channelWidth = std::max((availableWidth - VFDConfig::STEREO_SPLIT_GAP) * 0.5f, 0.0f);
 
         for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
-            float level = range.normalizeDb(module->channelBands[channel][bandIndex].getDbLevel());
-            float peakLevel = module->channelBands[channel][bandIndex].getPeakLevel();
+            float level = range.normalizeDb(latestFrame.channelLevels[channel][bandIndex]);
+            float peakLevel = latestFrame.channelPeaks[channel][bandIndex];
             float ghostLevel = channelGhostLevels[channel][bandIndex];
             float channelXOffset = xOffset + channel * (channelWidth + VFDConfig::STEREO_SPLIT_GAP);
             NVGcolor activeColor =
@@ -591,14 +372,43 @@ struct VFDCustomDisplay : LedDisplay {
         float ghostDecay = std::exp(-deltaTime / 0.9f);
 
         for (size_t b = 0; b < VFDConfig::NUM_BANDS; ++b) {
-            float level = range.normalizeDb(module->bands[b].getDbLevel());
+            float level = range.normalizeDb(latestFrame.levels[b]);
             updateGhostLevel(ghostLevels[b], level, ghostDecay);
 
             for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
-                float channelLevel = range.normalizeDb(module->channelBands[channel][b].getDbLevel());
+                float channelLevel = range.normalizeDb(latestFrame.channelLevels[channel][b]);
                 updateGhostLevel(channelGhostLevels[channel][b], channelLevel, ghostDecay);
             }
         }
+    }
+
+    void updatePeakLevels(const DisplayRange& range) {
+        const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        const float deltaTime = std::chrono::duration<float>(now - lastPeakUpdate).count();
+        lastPeakUpdate = now;
+        const float delay = std::max(VFDConfig::MIN_DELAY_TIME,
+                                     module->params[Spectrum::PEAK_FALL_DELAY_PARAM].getValue());
+        const float peakDecay = std::exp(-deltaTime / delay);
+
+        for (int band = 0; band < VFDConfig::NUM_BANDS; ++band) {
+            updatePeakLevel(latestFrame.peaks[band], range.normalizeDb(latestFrame.levels[band]), peakDecay);
+            for (int channel = 0; channel < VFDConfig::NUM_AUDIO_CHANNELS; ++channel) {
+                updatePeakLevel(latestFrame.channelPeaks[channel][band],
+                                range.normalizeDb(latestFrame.channelLevels[channel][band]), peakDecay);
+            }
+        }
+    }
+
+    void updatePeakLevel(float& peakLevel, float level, float peakDecay) {
+        if (level >= peakLevel) {
+            peakLevel = level;
+        } else {
+            peakLevel *= peakDecay;
+            if (peakLevel < VFDConfig::DENORMAL_THRESHOLD) {
+                peakLevel = 0.0f;
+            }
+        }
+        peakLevel = clamp(peakLevel, 0.0f, 1.0f);
     }
 
     void updateGhostLevel(float& ghostLevel, float level, float ghostDecay) {
