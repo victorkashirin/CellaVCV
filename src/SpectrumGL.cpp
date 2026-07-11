@@ -480,6 +480,58 @@ struct SpectrumGLDisplay : widget::OpenGlWidget {
     }
 };
 
+// Recreate the shallow recessed-glass bezel supplied by Rack's LedDisplay.
+// The animated surface stays entirely OpenGL; this sibling only draws the
+// static edge treatment over it with NanoVG.
+struct SpectrumGLBezel : TransparentWidget {
+    void draw(const DrawArgs& args) override {
+        const float width = box.size.x;
+        const float height = box.size.y;
+
+        nvgSave(args.vg);
+
+        // Outer shadow/highlight make the display opening feel cut into the
+        // panel, matching the original Spectrum's LedDisplay component.
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, -0.5f);
+        nvgLineTo(args.vg, width, -0.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(0.f, 0.f, 0.f, 0.24f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, height + 0.5f);
+        nvgLineTo(args.vg, width, height + 0.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.25f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        // Soft reflections just inside the glass face.
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, 2.5f);
+        nvgLineTo(args.vg, width, 2.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, height - 2.5f);
+        nvgLineTo(args.vg, width, height - 2.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        // Crisp dark lip separating the panel from the illuminated surface.
+        nvgBeginPath(args.vg);
+        nvgRect(args.vg, 1.f, 1.f, std::max(width - 2.f, 0.f), std::max(height - 2.f, 0.f));
+        nvgStrokeColor(args.vg, nvgRGB(0x12, 0x12, 0x12));
+        nvgStrokeWidth(args.vg, 2.f);
+        nvgStroke(args.vg);
+
+        nvgRestore(args.vg);
+    }
+};
+
 struct SpectrumGLBadge : TransparentWidget {
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
@@ -551,6 +603,11 @@ struct SpectrumGLWidget : ModuleWidget {
         display->box.pos = Vec(0.f, DISPLAY_Y);
         display->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(display);
+
+        SpectrumGLBezel* bezel = new SpectrumGLBezel();
+        bezel->box.pos = Vec(0.f, DISPLAY_Y);
+        bezel->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        addChild(bezel);
 
         SpectrumGLLabels* labels = new SpectrumGLLabels();
         labels->module = module;
