@@ -670,6 +670,21 @@ struct SpectrumGLWidget : ModuleWidget {
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         menu->addChild(createSubmenuItem("Signature Effects", "", [=](Menu* effectsMenu) {
+            struct SignatureEffectMenuItem : MenuItem {
+                SpectrumGL* spectrum;
+                SignatureEffect effect;
+
+                void step() override {
+                    rightText = CHECKMARK(spectrum->hasSignatureEffect(effect));
+                    MenuItem::step();
+                }
+
+                void onAction(const event::Action& e) override {
+                    spectrum->toggleSignatureEffect(effect);
+                    e.unconsume();
+                }
+            };
+
             const std::array<std::pair<const char*, SignatureEffect>, 4> effects = {{
                 {"Phosphor Bloom", SignatureEffect::PHOSPHOR_BLOOM},
                 {"Glass Face", SignatureEffect::GLASS_FACE},
@@ -677,9 +692,10 @@ struct SpectrumGLWidget : ModuleWidget {
                 {"Soft CRT", SignatureEffect::SOFT_CRT},
             }};
             for (const auto& effect : effects) {
-                effectsMenu->addChild(createCheckMenuItem(
-                    effect.first, "", [=]() { return spectrum->hasSignatureEffect(effect.second); },
-                    [=]() { spectrum->toggleSignatureEffect(effect.second); }));
+                SignatureEffectMenuItem* item = createMenuItem<SignatureEffectMenuItem>(effect.first);
+                item->spectrum = spectrum;
+                item->effect = effect.second;
+                effectsMenu->addChild(item);
             }
         }));
         menu->addChild(createIndexSubmenuItem(
