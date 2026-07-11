@@ -100,11 +100,12 @@ struct FrequencyAnalyzer : Module {
     DisplayMode displayMode = DisplayMode::BARS;
     StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
-    EffectsMode effectsMode = EffectsMode::SUBTLE;
-    uint32_t signatureEffects = static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM);
-    bool showLabels = false;
+    EffectsMode effectsMode = EffectsMode::FULL;
+    uint32_t signatureEffects = static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM) |
+                                static_cast<uint32_t>(SignatureEffect::GLASS_FACE);
+    bool showLabels = true;
     bool showUnlitSegments = true;
-    Theme currentTheme = Theme::LIGHT_BLUE;
+    Theme currentTheme = Theme::VINTAGE_BLUE;
 
     FrequencyAnalyzer() {
         config(NUM_PARAMS, NUM_INPUTS, 0, 0);
@@ -755,10 +756,7 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
             "Light Response", {"Solid", "Dynamic", "Persistence"},
             [=]() { return static_cast<size_t>(spectrum->intensityMode); },
             [=](size_t index) { spectrum->intensityMode = static_cast<IntensityMode>(index); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
-            [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
-        menu->addChild(createSubmenuItem("Signature Effects", "", [=](Menu* effectsMenu) {
+        menu->addChild(createSubmenuItem("Effects", "", [=](Menu* effectsMenu) {
             struct SignatureEffectMenuItem : MenuItem {
                 FrequencyAnalyzer* spectrum;
                 SignatureEffect effect;
@@ -775,10 +773,10 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
             };
 
             const std::array<std::pair<const char*, SignatureEffect>, 4> effects = {{
-                {"Phosphor Bloom", SignatureEffect::PHOSPHOR_BLOOM},
-                {"Glass Face", SignatureEffect::GLASS_FACE},
-                {"Micro Motion", SignatureEffect::MICRO_MOTION},
-                {"Soft CRT", SignatureEffect::SOFT_CRT},
+                {"Bloom", SignatureEffect::PHOSPHOR_BLOOM},
+                {"Glass", SignatureEffect::GLASS_FACE},
+                {"Shimmer", SignatureEffect::MICRO_MOTION},
+                {"CRT", SignatureEffect::SOFT_CRT},
             }};
             for (const auto& effect : effects) {
                 SignatureEffectMenuItem* item = createMenuItem<SignatureEffectMenuItem>(effect.first);
@@ -787,6 +785,10 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
                 effectsMenu->addChild(item);
             }
         }));
+        menu->addChild(createIndexSubmenuItem(
+            "Effects Strength", {"Off", "Subtle", "Full"},
+            [=]() { return static_cast<size_t>(spectrum->effectsMode); },
+            [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         struct ThemeMenuItem : MenuItem {
             FrequencyAnalyzer* spectrum;
             Theme theme;
