@@ -257,5 +257,58 @@ void main() {
         color *= mix(1.0, 0.70 + 0.30 * pow(saturate(vignette), 0.28), effects);
     }
 
+    // Phase 4 Glass Face signature. This is composited after the emitters so
+    // the faceplate reads as a physical layer over the display. Subtle keeps
+    // to cheap gradients; Full adds a second reflection and static dust.
+    if (uSignatureMode == 2 && effects > 0.0) {
+        float edgeDistance = min(min(logicalX, 496.0 - logicalX),
+                                 min(logicalY, 320.0 - logicalY));
+        float innerBezel = 1.0 - smoothstep(1.5, 13.0, edgeDistance);
+        float cornerBezel = 1.0 - smoothstep(0.0, 0.075,
+                                            min(min(uv.x, 1.0 - uv.x),
+                                                min(uv.y, 1.0 - uv.y)));
+        color *= 1.0 - effects * (0.13 * innerBezel + 0.055 * cornerBezel);
+
+        // Rack's panel light comes from above. Keep the face brightest at the
+        // top and let the tint and reflection fall naturally toward the base.
+        float overheadLight = smoothstep(0.05, 1.0, uv.y);
+        color += mix(vec3(0.001, 0.004, 0.004),
+                     vec3(0.010, 0.022, 0.024), overheadLight) * effects;
+        color *= 1.0 - (1.0 - overheadLight) * 0.035 * effects;
+
+        // Full-frame glass falloff. The upper edge stays relatively open to
+        // the panel light while the sides and lower edge gain depth.
+        float frameEdge = min(min(uv.x, 1.0 - uv.x),
+                              min(uv.y, 1.0 - uv.y));
+        float frameVignette = 1.0 - smoothstep(0.0, 0.16, frameEdge);
+        float vignetteStrength = mix(0.15, 0.075, uv.y);
+        color *= 1.0 - frameVignette * vignetteStrength * effects;
+
+        float topRim = smoothstep(0.955, 0.985, uv.y) *
+                       (1.0 - smoothstep(0.992, 1.0, uv.y));
+        float topWash = smoothstep(0.70, 0.98, uv.y) *
+                        (1.0 - smoothstep(0.965, 1.0, uv.y));
+        float sheenSides = smoothstep(0.015, 0.10, uv.x) *
+                           smoothstep(0.015, 0.10, 1.0 - uv.x);
+        color += vec3(0.070, 0.085, 0.084) * topRim * sheenSides * effects;
+        color += vec3(0.018, 0.026, 0.026) * topWash * sheenSides * effects;
+
+        if (uEffectsMode == 2) {
+            float topReflection = smoothstep(0.82, 0.94, uv.y) *
+                                  (1.0 - smoothstep(0.94, 0.985, uv.y));
+            color += vec3(0.018, 0.024, 0.023) * topReflection * sheenSides;
+
+            vec2 dustCell = floor(vec2(logicalX, logicalY) * 0.72);
+            float dustSeed = hash(dustCell + vec2(19.3, 7.1));
+            float dust = smoothstep(0.994, 0.999, dustSeed);
+            float dustBody = hash(dustCell + vec2(3.7, 41.9));
+            vec3 dustColor = mix(vec3(-0.012), vec3(0.050, 0.055, 0.052), dustBody);
+            color += dustColor * dust * (0.25 + 0.75 * overheadLight);
+
+            float fineGrain = hash(floor(vec2(logicalX, logicalY) * 1.35) + vec2(83.1, 12.4)) - 0.5;
+            color += fineGrain * 0.0045;
+        }
+    }
+
     gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
 }

@@ -37,7 +37,9 @@ enum class DisplayMode { DOTS, BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, ALPHA, GLOW, GHOST, CLEAN, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
-enum class SignatureMode { OFF, PHOSPHOR_BLOOM, COUNT };
+// Keep existing values stable: patches saved before Glass Face was added use
+// 0 for Off and 1 for Phosphor Bloom.
+enum class SignatureMode { OFF, PHOSPHOR_BLOOM, GLASS_FACE, COUNT };
 enum class Theme { CLASSIC, WARM, COOL, COUNT };
 
 int getJsonEnum(json_t* rootJ, const char* key, int count, int fallback) {
@@ -554,7 +556,7 @@ struct SpectrumGLWidget : ModuleWidget {
             "Effects", {"Off", "Subtle", "Full"}, [=]() { return static_cast<size_t>(spectrum->effectsMode); },
             [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
-            "Signature Mode", {"Off", "Phosphor Bloom"},
+            "Signature Mode", {"Off", "Phosphor Bloom", "Glass Face"},
             [=]() { return static_cast<size_t>(spectrum->signatureMode); },
             [=](size_t index) { spectrum->signatureMode = static_cast<SignatureMode>(index); }));
         menu->addChild(createIndexSubmenuItem(

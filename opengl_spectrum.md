@@ -355,7 +355,9 @@ Implementation status:
 - Full bloom samples neighboring bands and the opposite stereo channel so the field spreads horizontally. It is composited as a background plane and occluded by lit/peak segment cores, preserving their foreground colors.
 - In `Solid` light response, bloom energy is independent of bar height; other light responses retain level-dependent bloom intensity.
 - `Subtle` uses a single broader near-halo at about 65% of Full's maximum bloom energy, keeping the lower-cost path visibly distinct from Off.
-- Glass-face refinement and micro-motion remain as the next phase-4 experiments and should be evaluated separately.
+- Glass Face is implemented as a second optional signature mode without changing the persisted values of Off or Phosphor Bloom.
+- The glass pass is composited over the emitters and follows Rack's top-down panel lighting with a bright top rim, shallow overhead reflection, vertical face tint, full-frame edge vignette, and faint inner-bezel shadow. `Full` additionally enables a broader top reflection, static dust, and fine glass grain; `Subtle` retains only the cheaper layered gradients.
+- Micro-motion remains as the next phase-4 experiment and should be evaluated separately.
 
 ### Phase 5: hardening and decision
 
