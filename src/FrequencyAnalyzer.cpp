@@ -755,6 +755,26 @@ MenuItem* createNonClosingEnumSubmenuItem(const std::string& text, Enum* value,
     return item;
 }
 
+struct NonClosingBoolMenuItem : MenuItem {
+    bool* value;
+
+    void step() override {
+        rightText = CHECKMARK(*value);
+        MenuItem::step();
+    }
+
+    void onAction(const event::Action& e) override {
+        *value = !*value;
+        e.unconsume();
+    }
+};
+
+MenuItem* createNonClosingBoolMenuItem(const std::string& text, bool* value) {
+    NonClosingBoolMenuItem* item = createMenuItem<NonClosingBoolMenuItem>(text);
+    item->value = value;
+    return item;
+}
+
 }  // namespace
 
 struct FrequencyAnalyzerWidget : ModuleWidget {
@@ -835,12 +855,8 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
         menu->addChild(createNonClosingEnumSubmenuItem(
             "Theme", &spectrum->currentTheme,
             {"Red", "Orange", "Amber", "Green", "Light Blue", "Vintage Blue", "Ivory"}));
-        menu->addChild(createCheckMenuItem(
-            "Show Labels", "", [=]() { return spectrum->showLabels; },
-            [=]() { spectrum->showLabels = !spectrum->showLabels; }));
-        menu->addChild(createCheckMenuItem(
-            "Show Unlit Segments", "", [=]() { return spectrum->showUnlitSegments; },
-            [=]() { spectrum->showUnlitSegments = !spectrum->showUnlitSegments; }));
+        menu->addChild(createNonClosingBoolMenuItem("Show Labels", &spectrum->showLabels));
+        menu->addChild(createNonClosingBoolMenuItem("Show Unlit Segments", &spectrum->showUnlitSegments));
         menu->addChild(new MenuSeparator);
         menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::UPPER_PARAM)));
         menu->addChild(new GLSlider(spectrum->getParamQuantity(FrequencyAnalyzer::LOWER_PARAM)));

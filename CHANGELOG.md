@@ -4,6 +4,10 @@
 
 New modules:
 * Frequency Analyzer - vintage frequency analyzer.
+* Loudness CV - extension module for Loud and Loudness Meter with overshoot signal
+
+Bugfix:
+* Twin Peaks - Improve stability
 
 ### 2.9.0 (2025-05-24)
 
