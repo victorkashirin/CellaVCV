@@ -28,8 +28,7 @@ namespace ripples {
 // Frequency knob
 static const float kFreqKnobMin = 20.f;
 static const float kFreqKnobMax = 20000.f;
-static const float kFreqKnobVoltage =
-    std::log2f(kFreqKnobMax / kFreqKnobMin);
+static const float kFreqKnobVoltage = std::log2f(kFreqKnobMax / kFreqKnobMin);
 
 // Calculate base and multiplier values to pass to configParam so that the
 // knob value is labeled in Hz.
@@ -71,8 +70,7 @@ static const float kGainAmpC = 560e-12f;
 // Filter core
 static const float kFilterMaxCutoff = kFreqKnobMax;
 static const float kFilterCellR = 33e3f;
-static const float kFilterCellRC =
-    1.f / (2.f * M_PI * kFilterMaxCutoff);
+static const float kFilterCellRC = 1.f / (2.f * M_PI * kFilterMaxCutoff);
 static const float kFilterCellC = kFilterCellRC / kFilterCellR;
 static const float kFilterInputR = 100e3f;
 static const float kFilterInputGain = kFilterCellR / kFilterInputR;
@@ -93,7 +91,7 @@ static const float kFeedforwardC = 220e-9f;
 
 // Filter output amplifiers
 static const float kLP2Gain = -100e3f / 39e3f;
-static const float kLP3Gain = -100e3f / 36e3f;
+static const float kLP3Gain = 100e3f / 36e3f;
 static const float kLP4Gain = -100e3f / 33e3f;
 static const float kBP2Gain = -100e3f / 39e3f;
 
@@ -116,7 +114,7 @@ class RipplesEngine {
         float fm_global_knob = 0.f;  // -1 to 1 linear
         float track_knob = 0.f;      //  -1 to 1 linear
         float xfm_knob = 0.f;        //  -1 to 1 linear
-        int mode = 0;                 //  0, 1, 2, or 3
+        int mode = 0;                //  0, 1, 2, or 3
 
         // Inputs
         float res_cv = 0.f;
@@ -129,9 +127,7 @@ class RipplesEngine {
         float output = 0.f;
     };
 
-    RipplesEngine() {
-        setSampleRate(1.f);
-    }
+    RipplesEngine() { setSampleRate(1.f); }
 
     void setSampleRate(float sample_rate) {
         sample_time_ = 1.f / sample_rate;
@@ -139,8 +135,7 @@ class RipplesEngine {
 
         aa_filter_.Init(sample_rate);
 
-        float oversample_rate =
-            sample_rate * aa_filter_.GetOversamplingFactor();
+        float oversample_rate = sample_rate * aa_filter_.GetOversamplingFactor();
 
         float freq_cut = 1.f / (2.f * M_PI * kFreqAmpR * kFreqAmpC);
         float res_cut = 1.f / (2.f * M_PI * kResAmpR * kResAmpC);
@@ -156,14 +151,12 @@ class RipplesEngine {
         float v_oct = 0.f;
         v_oct += (frame.freq_knob - 1.f) * kFreqKnobVoltage;
         v_oct += frame.freq_cv;
-        v_oct += frame.fm_global_knob * (frame.fm_cv * frame.fm_knob +
-                                         frame.track_knob * frame.input +
-                                         frame.xfm_knob * frame.b_output);
+        v_oct += frame.fm_global_knob *
+                 (frame.fm_cv * frame.fm_knob + frame.track_knob * frame.input + frame.xfm_knob * frame.b_output);
         v_oct = std::min(v_oct, 0.f);
 
         // Calculate resonance control current
-        float i_reso = VtoIConverter(kResAmpR, frame.res_cv, kResInputR,
-                                     frame.res_knob * kResKnobV, kResKnobR);
+        float i_reso = VtoIConverter(kResAmpR, frame.res_cv, kResInputR, frame.res_knob * kResKnobV, kResKnobR);
 
         // Pack and upsample inputs
         int oversampling_factor = aa_filter_.GetOversamplingFactor();
@@ -211,8 +204,7 @@ class RipplesEngine {
             // vout contains the initial cell voltages (v0, v1 v2, v3)
 
             // Rotate cell voltages. vin will contain (v3, v0, v1, v2)
-            simd::float_4 vin =
-                _mm_shuffle_ps(vout.v, vout.v, _MM_SHUFFLE(2, 1, 0, 3));
+            simd::float_4 vin = _mm_shuffle_ps(vout.v, vout.v, _MM_SHUFFLE(2, 1, 0, 3));
 
             // The core input is the filter input plus the resonance signal
             float vp = feedforward * kFeedforwardGain;
@@ -257,10 +249,9 @@ class RipplesEngine {
     }
 
     // Model of Ripples nonlinear CV voltage-to-current converters
-    float VtoIConverter(
-        float rfb,                         // Amplifier feedback resistor
-        float vc, float rc,                // CV voltage and input resistor
-        float vp = 0.f, float rp = 1e12f)  // Knob voltage and resistor
+    float VtoIConverter(float rfb,                         // Amplifier feedback resistor
+                        float vc, float rc,                // CV voltage and input resistor
+                        float vp = 0.f, float rp = 1e12f)  // Knob voltage and resistor
     {
         // Find nominal voltage at the BJT collector, ignoring nonlinearity
         float vnom = -(vc * rfb / rc + vp * rfb / rp);
