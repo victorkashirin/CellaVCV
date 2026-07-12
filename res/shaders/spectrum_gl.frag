@@ -19,6 +19,13 @@ float saturate(float value) {
     return clamp(value, 0.0, 1.0);
 }
 
+float roundedBoxMask(vec2 point, vec2 halfSize, float radius, float aa) {
+    vec2 offset = abs(point) - (halfSize - vec2(radius));
+    float distance = length(max(offset, vec2(0.0))) +
+                     min(max(offset.x, offset.y), 0.0) - radius;
+    return 1.0 - smoothstep(-aa, aa, distance);
+}
+
 float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -156,6 +163,19 @@ void main() {
         glowMask = exp(-max(0.0, distanceToDot - dotRadius * 0.55) /
                        2.6) * horizontalMask;
         segmentMask = coreMask * horizontalMask;
+    } else if (uDisplayMode == 2) {
+        // Continuous bars share the same meter bounds as segmented bars, but
+        // use a single rounded column so their top can move smoothly.
+        float solidBottomY = contentBottom * 320.0;
+        float solidTopY = contentTop * 320.0;
+        vec2 solidHalfSize = vec2((meterRight - meterLeft) * 0.5,
+                                  (solidTopY - solidBottomY) * 0.5);
+        vec2 solidPoint = vec2(logicalX - (meterLeft + meterRight) * 0.5,
+                               logicalY - (solidBottomY + solidTopY) * 0.5);
+        float solidAa = max(0.35, 0.60 / (pixelScale * focusScale));
+        coreMask = roundedBoxMask(solidPoint, solidHalfSize, 2.0, solidAa);
+        glowMask = exp(-max(max(meterLeft - logicalX, logicalX - meterRight), 0.0) / 2.8) * insideY;
+        segmentMask = coreMask;
     } else {
         float cellY = fract(contentY * 30.0);
         float segmentPitch = (contentTop - contentBottom) * 320.0 / 30.0;
@@ -185,10 +205,34 @@ void main() {
     float ghostCount = ceil(data.b * segmentRows - 0.0001);
     float hasPeak = step(0.002, data.g);
     float peakIndex = clamp(ceil(data.g * segmentRows - 0.0001) - 1.0, 0.0, segmentRows - 1.0);
-    float peakSegment = (1.0 - step(0.5, abs(segmentIndex - peakIndex))) * hasPeak;
+    float solidBar = uDisplayMode == 2 ? 1.0 : 0.0;
+    float contentHeightPixels = (contentTop - contentBottom) * 320.0;
+    float barBottomY = contentBottom * 320.0;
+    float barHalfWidth = (meterRight - meterLeft) * 0.5;
+    float barCenterX = (meterLeft + meterRight) * 0.5;
+    float barAa = max(0.35, 0.60 / (pixelScale * focusScale));
+    float activeHalfHeight = max(data.r * contentHeightPixels * 0.5, 0.001);
+    float activeRadius = min(2.0, min(barHalfWidth, activeHalfHeight));
+    float solidActive = roundedBoxMask(
+        vec2(logicalX - barCenterX, logicalY - (barBottomY + activeHalfHeight)),
+        vec2(barHalfWidth, activeHalfHeight), activeRadius, barAa) * step(0.002, data.r);
+    float ghostHalfHeight = max(data.b * contentHeightPixels * 0.5, 0.001);
+    float ghostRadius = min(2.0, min(barHalfWidth, ghostHalfHeight));
+    float solidGhost = roundedBoxMask(
+        vec2(logicalX - barCenterX, logicalY - (barBottomY + ghostHalfHeight)),
+        vec2(barHalfWidth, ghostHalfHeight), ghostRadius, barAa) * step(0.002, data.b);
+    float peakY = barBottomY + data.g * contentHeightPixels;
+    float peakHalfHeight = 1.15;
+    float solidPeak = roundedBoxMask(vec2(logicalX - barCenterX, logicalY - peakY),
+                                     vec2(barHalfWidth, peakHalfHeight), peakHalfHeight, barAa) *
+                      hasPeak * insideY;
+    float peakSegment = mix((1.0 - step(0.5, abs(segmentIndex - peakIndex))) * hasPeak,
+                            solidPeak, solidBar);
     float nonPeakSegment = 1.0 - peakSegment;
-    float active = step(segmentIndex + 0.5, activeCount) * insideY * nonPeakSegment;
-    float ghost = step(segmentIndex + 0.5, ghostCount) * (1.0 - active) * insideY * nonPeakSegment;
+    float active = mix(step(segmentIndex + 0.5, activeCount) * insideY * nonPeakSegment,
+                       solidActive, solidBar);
+    float ghost = mix(step(segmentIndex + 0.5, ghostCount) * (1.0 - active) * insideY * nonPeakSegment,
+                      solidGhost * (1.0 - active), solidBar);
     float inactiveAlpha = uShowUnlit != 0 ? (uIntensityMode == 2 ? 0.18 : 0.42) : 0.0;
 
     // Three brighter unlit rows divide the scale into quarters, echoing the
@@ -200,12 +244,21 @@ void main() {
     float referenceDistance = min(abs(segmentIndex - quarterRow),
                                   min(abs(segmentIndex - halfRow),
                                       abs(segmentIndex - threeQuarterRow)));
-    float referenceRow = (1.0 - step(0.5, referenceDistance)) * (uLabels != 0 ? 1.0 : 0.0);
+    float segmentedReference = (1.0 - step(0.5, referenceDistance)) * (1.0 - solidBar);
+    float solidReferenceDistance = min(abs(contentY - 0.25),
+                                       min(abs(contentY - 0.50), abs(contentY - 0.75))) *
+                                   contentHeightPixels;
+    float solidReference = (1.0 - smoothstep(0.45, 1.10, solidReferenceDistance)) * solidBar;
+    float referenceRow = mix(segmentedReference, solidReference, solidBar) *
+                         (uLabels != 0 ? 1.0 : 0.0);
     float occupied = max(active, peakSegment);
     if (uIntensityMode == 2) occupied = max(occupied, ghost);
-    float referenceAlpha = uShowUnlit != 0 ? (uIntensityMode == 2 ? 0.20 : 0.18) : 0.0;
+    float segmentedReferenceAlpha = uIntensityMode == 2 ? 0.20 : 0.18;
+    float referenceAlpha = uShowUnlit != 0 ? mix(segmentedReferenceAlpha, 0.24, solidBar) : 0.0;
     float unlitReference = referenceRow * (1.0 - occupied);
-    color += uInactive * segmentMask * (inactiveAlpha + referenceAlpha * unlitReference);
+    vec3 referenceColor = mix(uInactive, emissionColor, 0.30 * solidBar);
+    color += segmentMask * (uInactive * inactiveAlpha +
+                            referenceColor * referenceAlpha * unlitReference);
 
     float levelBrightness = sqrt(max(data.r, 0.0));
 
@@ -377,7 +430,7 @@ void main() {
     }
 #endif
 
-    float peakDistance = abs(logicalY - (dotBottomCenter + peakIndex * 6.0)) * pixelScale;
+    float peakDistance = abs(logicalY - mix(dotBottomCenter + peakIndex * 6.0, peakY, solidBar)) * pixelScale;
     float peakCore = segmentMask * peakSegment * insideY;
     // The centered flare complements round dots, but creates a bright
     // horizontal seam through the otherwise uniform peak in bar mode.

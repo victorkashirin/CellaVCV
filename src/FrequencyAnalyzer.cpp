@@ -29,13 +29,14 @@ constexpr float FALL_DELAY_DEFAULT = 0.01f;
 constexpr float PEAK_FALL_DELAY_MIN = 0.01f;
 constexpr float PEAK_FALL_DELAY_MAX = 3.f;
 constexpr float PEAK_FALL_DELAY_DEFAULT = 1.f;
+constexpr float DISPLAY_SMOOTH_TIME = 0.012f;
 
 template <typename T>
 T clampValue(T value, T low, T high) {
     return value < low ? low : (value > high ? high : value);
 }
 
-enum class DisplayMode { DOTS, BARS, COUNT };
+enum class DisplayMode { DOTS, BARS, SOLID_BARS, COUNT };
 enum class StereoMode { MONO, LEFT_RIGHT_SPLIT, COUNT };
 enum class IntensityMode { SOLID, DYNAMIC, PERSISTENCE, COUNT };
 enum class EffectsMode { OFF, SUBTLE, FULL, COUNT };
@@ -473,7 +474,7 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         const float peakDecay = std::exp(-dt / peakDelay);
         const float ghostDecay = std::exp(-dt / 0.9f);
         const float attackDecay = std::exp(-dt / 0.18f);
-        const float displayBlend = 1.f - std::exp(-dt / 0.012f);
+        const float displayBlend = 1.f - std::exp(-dt / DISPLAY_SMOOTH_TIME);
         const float top = module ? module->params[FrequencyAnalyzer::UPPER_PARAM].getValue() : UPPER_DB_DEFAULT;
         const float bottom = module ? module->params[FrequencyAnalyzer::LOWER_PARAM].getValue() : LOWER_DB_DEFAULT;
         const float inverseDbRange = 1.f / std::max(top - bottom, 1.f);
@@ -750,7 +751,8 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
             "Stereo View", {"Mono Energy", "L/R Split"}, [=]() { return static_cast<size_t>(spectrum->stereoMode); },
             [=](size_t index) { spectrum->stereoMode = static_cast<StereoMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
-            "Display", {"Dots", "Bars"}, [=]() { return static_cast<size_t>(spectrum->displayMode); },
+            "Display", {"Dots", "Segmented Bars", "Solid Bars"},
+            [=]() { return static_cast<size_t>(spectrum->displayMode); },
             [=](size_t index) { spectrum->displayMode = static_cast<DisplayMode>(index); }));
         menu->addChild(createIndexSubmenuItem(
             "Light Response", {"Solid", "Dynamic", "Persistence"},
