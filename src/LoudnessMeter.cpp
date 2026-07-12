@@ -255,6 +255,7 @@ struct LoudnessMeterWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(22.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_L));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(67.5f, inputYPx), module, LoudnessMeter::AUDIO_INPUT_R));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(112.5f, inputYPx), module, LoudnessMeter::RESET_INPUT));
+        addOutput(createOutputCentered<ThemedPJ301MPort>(Vec(196.760f, 361.120f), module, LoudnessMeter::OVERSHOOT_OUTPUT));
         addParam(createParamCentered<VCVButton>(Vec(157.5f, inputYPx), module, LoudnessMeter::RESET_PARAM));
         addParam(createParamCentered<RoundSmallBlackKnob>(Vec(202.5f, inputYPx), module, LoudnessMeter::TARGET_PARAM));
 
