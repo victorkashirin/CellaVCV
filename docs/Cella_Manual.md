@@ -480,6 +480,18 @@ Right-clicking the panel opens the context menu, which includes:
     *   **Disabled**: Disables Short-Term Loudness and PSR calculations and display. This can slightly reduce CPU usage if these metrics are not needed.
 
 
+# Loudness Out
+
+**Loudness Out** is a 2 HP expander for **Loud** and **Loudness Meter**. Place it immediately to the right of either meter. By default, its output represents only loudness above the meter's target. A bipolar mode is available for feedback controllers that need the signed error on both sides of the target.
+
+### Controls and output
+
+*   **Response** selects Momentary (400 ms, upper position) or Short-term (3 s, lower position). Momentary is the default. If Short-term processing is disabled on the meter while that response is selected, the output is 0 V.
+*   **Scale** sets sensitivity logarithmically from 0.125 V/LU to 2 V/LU. The default is 0.5 V/LU, equivalent to a +/-20 LU range across the +/-10 V output. Lower settings provide more headroom; higher settings provide finer control close to the target.
+*   **Output mode (+ / +/-)** selects overshoot-only or bipolar operation. The lower **+** position (default) outputs only positive overshoot above the target. The upper **+/-** position outputs the signed loudness error on both sides of the target.
+*   **Out** supplies the scaled loudness signal, limited to +/-10 V. It outputs 0 V when there is no compatible meter directly to its left or while the selected measurement is unavailable.
+
+
 # **2State**
 
 <img src="images/2State.png" alt="Cella - 2STATE" style="height: 380px;">

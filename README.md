@@ -44,6 +44,8 @@ Main differentiator from other implementations is the ability to output triggers
 
 **Loudness Meter** and its narrow version **Loud** are a comprehensive audio loudness meters based on the EBU R128 standard, utilizing the [libebur128](https://github.com/jiixyj/libebur128) library for accurate measurements.
 
+**Loudness Out** is their 2 HP expander, providing a selectable Momentary or Short-term overshoot CV with adjustable output scaling and an optional bipolar signed-error mode.
+
 ### Euler
 **Euler** calculates rate of change of any signal. It finds angle *theta* of a slope of incoming signal, normalises it by 90 degrees and scales to -10..10V. *Frequency* parameter is required to adjust calculation sensitivity, while parameter *Smooth* removes irregularities from the input. There are four outputs: theta, absolute value of theta, positive component of theta and negative component of theta.
 Suggested use: connect controller such as fader to Euler. The faster you move the fader, the higher a peak out of Euler will be before it subsides.

@@ -117,6 +117,17 @@
       ]
     },
     {
+      "slug": "LoudnessOut",
+      "name": "Loudness Out",
+      "description": "Loud and Loudness Meter expander with scaled overshoot and signed-error output modes",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#loudness-out",
+      "keywords": "loudness lufs overshoot error expander cv",
+      "tags": [
+        "Expander",
+        "Utility"
+      ]
+    },
+    {
       "slug": "Integral",
       "name": "Integral",
       "description": "Signal integrator, essential for feedback, chaotic and cybernetic patches",
