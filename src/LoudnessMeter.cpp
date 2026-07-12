@@ -357,6 +357,15 @@ struct LoudnessMeterWidget : ModuleWidget {
                                                  {"Disabled",
                                                   "Enabled"},
                                                  &module->shortTermEnabled));
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Expander"));
+        if (module->rightExpander.module && module->rightExpander.module->model == modelLoudnessCV) {
+            menu->addChild(createMenuLabel("Loudness CV connected"));
+        } else {
+            menu->addChild(createMenuItem("Add Loudness CV", "", [this]() {
+                addLoudnessCVExpander(this);
+            }));
+        }
     }
 };
 

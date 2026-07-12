@@ -117,10 +117,10 @@
       ]
     },
     {
-      "slug": "LoudnessOut",
-      "name": "Loudness Out",
+      "slug": "LoudnessCV",
+      "name": "Loudness CV",
       "description": "Loud and Loudness Meter expander with scaled overshoot and signed-error output modes",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#loudness-out",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#loudness-cv",
       "keywords": "loudness lufs overshoot error expander cv",
       "tags": [
         "Expander",

@@ -253,6 +253,15 @@ struct LoudWidget : ModuleWidget {
                                                   "Enabled"},
                                                  &module->shortTermEnabled));
         menu->addChild(new LoudnessSliderMenuItem<TargetQuantity>(module, "Target loudness"));
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Expander"));
+        if (module->rightExpander.module && module->rightExpander.module->model == modelLoudnessCV) {
+            menu->addChild(createMenuLabel("Loudness CV connected"));
+        } else {
+            menu->addChild(createMenuItem("Add Loudness CV", "", [this]() {
+                addLoudnessCVExpander(this);
+            }));
+        }
     }
 };
 

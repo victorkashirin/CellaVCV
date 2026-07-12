@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "LoudnessOutMessage.hpp"
+#include "LoudnessCVMessage.hpp"
 #include "plugin.hpp"
 
 // Include the dependency header
@@ -372,12 +372,12 @@ struct LoudnessMeter : engine::Module {
         resetMeter();
     }
 
-    void sendLoudnessOutMessage() {
-        if (!rightExpander.module || rightExpander.module->model != modelLoudnessOut) {
+    void sendLoudnessCVMessage() {
+        if (!rightExpander.module || rightExpander.module->model != modelLoudnessCV) {
             return;
         }
 
-        LoudnessOutMessage* message = static_cast<LoudnessOutMessage*>(rightExpander.module->leftExpander.producerMessage);
+        LoudnessCVMessage* message = static_cast<LoudnessCVMessage*>(rightExpander.module->leftExpander.producerMessage);
         if (!message) {
             return;
         }
@@ -424,7 +424,7 @@ struct LoudnessMeter : engine::Module {
                 truePeakSlidingMax = get_max_from_deque(chunkPeakHistoryDB);
             }
 
-            sendLoudnessOutMessage();
+            sendLoudnessCVMessage();
             return;
         }
 
@@ -479,7 +479,7 @@ struct LoudnessMeter : engine::Module {
             processBlockBuffer();
         }
 
-        sendLoudnessOutMessage();
+        sendLoudnessCVMessage();
     }
 
     json_t* dataToJson() override {

@@ -480,9 +480,9 @@ Right-clicking the panel opens the context menu, which includes:
     *   **Disabled**: Disables Short-Term Loudness and PSR calculations and display. This can slightly reduce CPU usage if these metrics are not needed.
 
 
-# Loudness Out
+# Loudness CV
 
-**Loudness Out** is a 2 HP expander for **Loud** and **Loudness Meter**. Place it immediately to the right of either meter. By default, its output represents only loudness above the meter's target. A bipolar mode is available for feedback controllers that need the signed error on both sides of the target.
+**Loudness CV** is a 2 HP expander for **Loud** and **Loudness Meter**. Right-click either meter and select **Expander > Add Loudness CV** to create it immediately on the right. You can also add it from the module browser and place it immediately to the right of either meter. By default, its output represents only loudness above the meter's target. A bipolar mode is available for feedback controllers that need the signed error on both sides of the target.
 
 ### Controls and output
 

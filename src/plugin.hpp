@@ -14,7 +14,9 @@ extern Model *modelBytebeat;
 extern Model *modelCognitiveShift;
 extern Model *modelLoudnessMeter;
 extern Model *modelLoud;
-extern Model *modelLoudnessOut;
+extern Model *modelLoudnessCV;
 extern Model *modelIntegral;
 extern Model *model2State;
 extern Model *modelFrequencyAnalyzer;
+
+void addLoudnessCVExpander(ModuleWidget *parentWidget);
