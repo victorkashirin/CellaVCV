@@ -7,6 +7,12 @@
 
 <img src="docs/Dark.jpg" alt="Cella - Dark Theme" style="width: 900px;">
 
+### Frequency Analyzer
+
+<img src="docs/images/FrequencyAnalyzer.png" alt="Cella - Frequency Analyzer" style="height: 380px;">
+
+**Frequency Analyzer** is a 12-band real-time spectrum analyzer with a customizable vintage display. It supports combined mono-energy and split left/right views, dot and bar meter styles, adjustable level and peak fall times, seven color themes, and optional bloom, glass, shimmer, and CRT effects.
+
 ### Resonators
 **Resonators** is a module that features four pitched resonators based on the Karplus-Strong algorithm. It is designed to create rich, resonant sounds by simulating the behavior of plucked strings or other resonant bodies. Functionality is inspired by audio effect of the same name found in popular DAW.
 

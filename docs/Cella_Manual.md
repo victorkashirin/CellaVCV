@@ -1,6 +1,6 @@
 # Cella – User Manual
 
-# Version 2.9.0
+# Version 2.10.0
 
 # **LICENSE**
 
@@ -9,6 +9,34 @@ Source code for this plugin can be found on GitHub: [https://github.com/victorka
 Code is licensed under GPL v3.0.
 
 All graphics are copyright 2024-2025 Victor Kashirin and licensed under CC BY-SA 4.0.
+
+
+# **Frequency Analyzer**
+
+<img src="images/FrequencyAnalyzer.png" alt="Cella - Frequency Analyzer" style="height: 380px;">
+
+**Frequency Analyzer** is a 12-band real-time spectrum analyzer with a vintage display. It shows the energy in bands centered at 25 Hz, 40 Hz, 63 Hz, 100 Hz, 160 Hz, 250 Hz, 500 Hz, 1 kHz, 2 kHz, 4 kHz, 8 kHz, and 16 kHz. The display can show a combined mono-energy view or separate left and right levels, with several meter styles, response modes, color themes, and optional visual effects.
+
+### **Inputs**
+
+* **L** and **R** accept mono or stereo audio. Connect either input for a mono source, or connect both for stereo analysis.
+* In **Mono Energy** view, the energy of all connected inputs is combined into one meter per frequency band.
+* In **L/R Split** view, each frequency band contains separate meters for the left and right inputs.
+
+### **Context Menu Options**
+
+* **Stereo View** selects **Mono Energy** or **L/R Split** display.
+* **Display** selects **Dots**, **Segmented Bars**, or **Solid Bars**.
+* **Light Response** controls how meter brightness reacts: **Solid** keeps a consistent brightness, **Dynamic** responds to signal intensity, and **Persistence** adds a longer afterglow.
+* **Effects** independently enables **Bloom**, **Glass**, **Shimmer**, and **CRT** display treatments.
+* **Effects Strength** sets the overall effect level to **Off**, **Subtle**, or **Full**.
+* **Theme** selects **Red**, **Orange**, **Amber**, **Green**, **Light Blue**, **Vintage Blue**, or **Ivory**.
+* **Show Labels** toggles the frequency labels below the bands.
+* **Show Unlit Segments** toggles the inactive meter segments.
+* **Top** sets the top of the visible level range from -40 dB to 0 dB (default: -12 dB).
+* **Bottom** sets the bottom of the visible level range from -120 dB to -60 dB (default: -100 dB).
+* **Fall Delay** sets how quickly the band levels fall, from 0.01 to 2 seconds.
+* **Peak Fall Delay** sets how quickly peak indicators fall, from 0.01 to 3 seconds (default: 1 second).
 
 
 # **Rich**
