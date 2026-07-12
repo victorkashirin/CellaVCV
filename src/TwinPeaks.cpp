@@ -2,6 +2,9 @@
 #include "filter/ripples.hpp"
 #include "plugin.hpp"
 
+#include <cstdint>
+#include <cstring>
+
 struct TwinPeaks : Module {
     enum ParamIds {
         FREQ_A_PARAM,
@@ -41,6 +44,18 @@ struct TwinPeaks : Module {
 
     ripples::RipplesEngine enginesA[16];
     ripples::RipplesEngine enginesB[16];
+
+    // Rack builds plugins with unsafe floating-point optimizations, so use the
+    // IEEE-754 representation instead of std::isfinite().
+    static bool isFinite(float value) {
+        std::uint32_t bits;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return (bits & 0x7f800000u) != 0x7f800000u;
+    }
+
+    static float finiteOrZero(float value) {
+        return isFinite(value) ? value : 0.f;
+    }
 
     TwinPeaks() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -91,47 +106,62 @@ struct TwinPeaks : Module {
         int channels = std::max(inputs[IN_INPUT].getChannels(), 1);
 
         // Filter A Frame
-        ripples::RipplesEngine::Frame frameA;
-        frameA.res_knob = params[RES_PARAM].getValue();
-        frameA.freq_knob = rescale(params[FREQ_A_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
-        frameA.fm_knob = params[FM_CV_A_PARAM].getValue();
-        frameA.fm_global_knob = params[FM_GLOBAL_A_PARAM].getValue();
-        frameA.track_knob = params[TRACK_A_PARAM].getValue();
-        frameA.xfm_knob = params[XFM_B_PARAM].getValue();
-        frameA.mode = (int)params[TYPE_SWITCH].getValue() + 2.f;
+        ripples::RipplesEngine::Frame frameA{};
+        frameA.res_knob = finiteOrZero(params[RES_PARAM].getValue());
+        frameA.freq_knob = finiteOrZero(rescale(params[FREQ_A_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f));
+        frameA.fm_knob = finiteOrZero(params[FM_CV_A_PARAM].getValue());
+        frameA.fm_global_knob = finiteOrZero(params[FM_GLOBAL_A_PARAM].getValue());
+        frameA.track_knob = finiteOrZero(params[TRACK_A_PARAM].getValue());
+        frameA.xfm_knob = finiteOrZero(params[XFM_B_PARAM].getValue());
+        frameA.mode = (int)clamp(finiteOrZero(params[TYPE_SWITCH].getValue()), -1.f, 1.f) + 2;
 
         // Filter B Frame
-        ripples::RipplesEngine::Frame frameB;
-        frameB.res_knob = params[RES_PARAM].getValue();
-        frameB.freq_knob = rescale(params[FREQ_B_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f);
-        frameB.fm_knob = params[FM_CV_B_PARAM].getValue();
-        frameB.fm_global_knob = params[FM_GLOBAL_B_PARAM].getValue();
-        frameB.track_knob = params[TRACK_B_PARAM].getValue();
-        frameB.mode = (int)params[TYPE_SWITCH].getValue() + 2.f;
+        ripples::RipplesEngine::Frame frameB{};
+        frameB.res_knob = frameA.res_knob;
+        frameB.freq_knob = finiteOrZero(rescale(params[FREQ_B_PARAM].getValue(), std::log2(ripples::kFreqKnobMin), std::log2(ripples::kFreqKnobMax), 0.f, 1.f));
+        frameB.fm_knob = finiteOrZero(params[FM_CV_B_PARAM].getValue());
+        frameB.fm_global_knob = finiteOrZero(params[FM_GLOBAL_B_PARAM].getValue());
+        frameB.track_knob = finiteOrZero(params[TRACK_B_PARAM].getValue());
+        frameB.xfm_knob = 0.f;
+        frameB.mode = frameA.mode;
         frameB.b_output = 0.f;
 
-        float curve = clamp(
-            params[CURVE_B_PARAM].getValue() + params[CURVE_B_CV_PARAM].getValue() * inputs[CURVE_B_INPUT].getVoltage() * 0.1f,
-            0.f, 1.f);
+        float curve = finiteOrZero(
+            finiteOrZero(params[CURVE_B_PARAM].getValue()) +
+                finiteOrZero(params[CURVE_B_CV_PARAM].getValue()) *
+                    finiteOrZero(inputs[CURVE_B_INPUT].getVoltage()) * 0.1f);
+        curve = clamp(curve, 0.f, 1.f);
 
         for (int c = 0; c < channels; c++) {
-            float res_cv = inputs[RES_INPUT].getPolyVoltage(c) * params[RES_CV_PARAM].getValue();
-            float input = inputs[IN_INPUT].getVoltage(c);
+            float res_cv = finiteOrZero(
+                finiteOrZero(inputs[RES_INPUT].getPolyVoltage(c)) *
+                finiteOrZero(params[RES_CV_PARAM].getValue()));
+            float input = finiteOrZero(inputs[IN_INPUT].getVoltage(c));
             frameB.res_cv = res_cv;
-            frameB.freq_cv = inputs[FREQ_B_INPUT].getPolyVoltage(c);
-            frameB.fm_cv = (inputs[FM_CV_B_INPUT].isConnected()) ? inputs[FM_CV_B_INPUT].getPolyVoltage(c) : inputs[FM_CV_A_INPUT].getPolyVoltage(c);
+            frameB.freq_cv = finiteOrZero(inputs[FREQ_B_INPUT].getPolyVoltage(c));
+            frameB.fm_cv = finiteOrZero((inputs[FM_CV_B_INPUT].isConnected()) ? inputs[FM_CV_B_INPUT].getPolyVoltage(c) : inputs[FM_CV_A_INPUT].getPolyVoltage(c));
             frameB.input = input;
 
             enginesB[c].process(frameB);
+            if (!isFinite(frameB.output)) {
+                enginesB[c].setSampleRate(args.sampleRate);
+                frameB.output = 0.f;
+            }
 
             frameA.res_cv = res_cv;
-            frameA.freq_cv = inputs[FREQ_A_INPUT].getPolyVoltage(c);
-            frameA.fm_cv = inputs[FM_CV_A_INPUT].getPolyVoltage(c);
+            frameA.freq_cv = finiteOrZero(inputs[FREQ_A_INPUT].getPolyVoltage(c));
+            frameA.fm_cv = finiteOrZero(inputs[FM_CV_A_INPUT].getPolyVoltage(c));
             frameA.input = input;
             frameA.b_output = frameB.output;
             enginesA[c].process(frameA);
 
-            outputs[OUT_OUTPUT].setVoltage(clamp(frameA.output - curve * frameB.output, -12.f, 12.f), c);
+            if (!isFinite(frameA.output)) {
+                enginesA[c].setSampleRate(args.sampleRate);
+                frameA.output = 0.f;
+            }
+
+            float output = frameA.output - curve * frameB.output;
+            outputs[OUT_OUTPUT].setVoltage(clamp(finiteOrZero(output), -12.f, 12.f), c);
         }
 
         outputs[OUT_OUTPUT].setChannels(channels);

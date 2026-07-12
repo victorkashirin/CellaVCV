@@ -108,25 +108,25 @@ class RipplesEngine {
    public:
     struct Frame {
         // Parameters
-        float res_knob;   //  0 to 1 linear
-        float freq_knob;  //  0 to 1 linear
-        float fm_knob;    // -1 to 1 linear
+        float res_knob = 0.f;   //  0 to 1 linear
+        float freq_knob = 0.f;  //  0 to 1 linear
+        float fm_knob = 0.f;    // -1 to 1 linear
 
         // new
-        float fm_global_knob;  // -1 to 1 linear
-        float track_knob;      //  -1 to 1 linear
-        float xfm_knob;        //  -1 to 1 linear
-        int mode;              //  0.f or 1.f or 2.f
+        float fm_global_knob = 0.f;  // -1 to 1 linear
+        float track_knob = 0.f;      //  -1 to 1 linear
+        float xfm_knob = 0.f;        //  -1 to 1 linear
+        int mode = 0;                 //  0, 1, 2, or 3
 
         // Inputs
-        float res_cv;
-        float freq_cv;
-        float fm_cv;
-        float input;
-        float b_output;
+        float res_cv = 0.f;
+        float freq_cv = 0.f;
+        float fm_cv = 0.f;
+        float input = 0.f;
+        float b_output = 0.f;
 
         // Outputs
-        float output;
+        float output = 0.f;
     };
 
     RipplesEngine() {
