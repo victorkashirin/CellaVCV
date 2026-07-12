@@ -102,8 +102,7 @@ struct FrequencyAnalyzer : Module {
     StereoMode stereoMode = StereoMode::MONO;
     IntensityMode intensityMode = IntensityMode::SOLID;
     EffectsMode effectsMode = EffectsMode::FULL;
-    uint32_t signatureEffects = static_cast<uint32_t>(SignatureEffect::PHOSPHOR_BLOOM) |
-                                static_cast<uint32_t>(SignatureEffect::GLASS_FACE);
+    uint32_t signatureEffects = static_cast<uint32_t>(SignatureEffect::GLASS_FACE);
     bool showLabels = true;
     bool showUnlitSegments = true;
     Theme currentTheme = Theme::VINTAGE_BLUE;
@@ -707,6 +706,55 @@ struct GLSlider : ui::Slider {
     }
 };
 
+template <typename Enum>
+struct NonClosingEnumMenuItem : MenuItem {
+    Enum* value;
+    Enum option;
+
+    void step() override {
+        rightText = CHECKMARK(*value == option);
+        MenuItem::step();
+    }
+
+    void onAction(const event::Action& e) override {
+        *value = option;
+        e.unconsume();
+    }
+};
+
+template <typename Enum>
+struct NonClosingEnumSubmenuItem : MenuItem {
+    Enum* value;
+    std::vector<std::string> labels;
+
+    void step() override {
+        const size_t index = static_cast<size_t>(*value);
+        const std::string label = index < labels.size() ? labels[index] : "";
+        rightText = label + "  " + RIGHT_ARROW;
+        MenuItem::step();
+    }
+
+    Menu* createChildMenu() override {
+        Menu* childMenu = new Menu;
+        for (size_t i = 0; i < labels.size(); ++i) {
+            NonClosingEnumMenuItem<Enum>* item = createMenuItem<NonClosingEnumMenuItem<Enum>>(labels[i]);
+            item->value = value;
+            item->option = static_cast<Enum>(i);
+            childMenu->addChild(item);
+        }
+        return childMenu;
+    }
+};
+
+template <typename Enum>
+MenuItem* createNonClosingEnumSubmenuItem(const std::string& text, Enum* value,
+                                          std::initializer_list<std::string> labels) {
+    NonClosingEnumSubmenuItem<Enum>* item = createMenuItem<NonClosingEnumSubmenuItem<Enum>>(text);
+    item->value = value;
+    item->labels = labels;
+    return item;
+}
+
 }  // namespace
 
 struct FrequencyAnalyzerWidget : ModuleWidget {
@@ -747,17 +795,12 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
         if (!spectrum) return;
 
         menu->addChild(new MenuSeparator);
-        menu->addChild(createIndexSubmenuItem(
-            "Stereo View", {"Mono Energy", "L/R Split"}, [=]() { return static_cast<size_t>(spectrum->stereoMode); },
-            [=](size_t index) { spectrum->stereoMode = static_cast<StereoMode>(index); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Display", {"Dots", "Segmented Bars", "Solid Bars"},
-            [=]() { return static_cast<size_t>(spectrum->displayMode); },
-            [=](size_t index) { spectrum->displayMode = static_cast<DisplayMode>(index); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Light Response", {"Solid", "Dynamic", "Persistence"},
-            [=]() { return static_cast<size_t>(spectrum->intensityMode); },
-            [=](size_t index) { spectrum->intensityMode = static_cast<IntensityMode>(index); }));
+        menu->addChild(createNonClosingEnumSubmenuItem(
+            "Stereo View", &spectrum->stereoMode, {"Mono Energy", "L/R Split"}));
+        menu->addChild(createNonClosingEnumSubmenuItem(
+            "Display", &spectrum->displayMode, {"Dots", "Segmented Bars", "Solid Bars"}));
+        menu->addChild(createNonClosingEnumSubmenuItem(
+            "Light Response", &spectrum->intensityMode, {"Solid", "Dynamic", "Persistence"}));
         menu->addChild(createSubmenuItem("Effects", "", [=](Menu* effectsMenu) {
             struct SignatureEffectMenuItem : MenuItem {
                 FrequencyAnalyzer* spectrum;
@@ -787,52 +830,11 @@ struct FrequencyAnalyzerWidget : ModuleWidget {
                 effectsMenu->addChild(item);
             }
         }));
-        menu->addChild(createIndexSubmenuItem(
-            "Effects Strength", {"Off", "Subtle", "Full"},
-            [=]() { return static_cast<size_t>(spectrum->effectsMode); },
-            [=](size_t index) { spectrum->effectsMode = static_cast<EffectsMode>(index); }));
-        struct ThemeMenuItem : MenuItem {
-            FrequencyAnalyzer* spectrum;
-            Theme theme;
-
-            void step() override {
-                rightText = CHECKMARK(spectrum->currentTheme == theme);
-                MenuItem::step();
-            }
-
-            void onAction(const event::Action& e) override {
-                spectrum->currentTheme = theme;
-                e.unconsume();
-            }
-        };
-
-        struct ThemeSubmenuItem : MenuItem {
-            FrequencyAnalyzer* spectrum;
-            std::vector<std::string> labels;
-
-            void step() override {
-                const size_t index = static_cast<size_t>(spectrum->currentTheme);
-                const std::string label = index < labels.size() ? labels[index] : "";
-                rightText = label + "  " + RIGHT_ARROW;
-                MenuItem::step();
-            }
-
-            Menu* createChildMenu() override {
-                Menu* themeMenu = new Menu;
-                for (size_t i = 0; i < labels.size(); ++i) {
-                    ThemeMenuItem* item = createMenuItem<ThemeMenuItem>(labels[i]);
-                    item->spectrum = spectrum;
-                    item->theme = static_cast<Theme>(i);
-                    themeMenu->addChild(item);
-                }
-                return themeMenu;
-            }
-        };
-
-        ThemeSubmenuItem* themeItem = createMenuItem<ThemeSubmenuItem>("Theme");
-        themeItem->spectrum = spectrum;
-        themeItem->labels = {"Red", "Orange", "Amber", "Green", "Light Blue", "Vintage Blue", "Ivory"};
-        menu->addChild(themeItem);
+        menu->addChild(createNonClosingEnumSubmenuItem(
+            "Effects Strength", &spectrum->effectsMode, {"Off", "Subtle", "Full"}));
+        menu->addChild(createNonClosingEnumSubmenuItem(
+            "Theme", &spectrum->currentTheme,
+            {"Red", "Orange", "Amber", "Green", "Light Blue", "Vintage Blue", "Ivory"}));
         menu->addChild(createCheckMenuItem(
             "Show Labels", "", [=]() { return spectrum->showLabels; },
             [=]() { spectrum->showLabels = !spectrum->showLabels; }));
