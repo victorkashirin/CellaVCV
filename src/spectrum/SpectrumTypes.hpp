@@ -75,6 +75,7 @@ enum class Palette : int {
 };
 enum class PeakHold : int { OFF, DECAY, INFINITE, COUNT };
 enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
+enum class AnalysisMode : int { CLASSIC, ADVANCED, COUNT };
 enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };
 enum class LiveTraceMode : int { OFF, LINE, LINE_FILL, COUNT };
 enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COUNT };
@@ -306,6 +307,7 @@ struct SpectrumConfig {
     FftOverlap fftOverlap = FftOverlap::PERCENT_75;
     Quality quality = Quality::HIGH;
     ChannelMode channelMode = ChannelMode::MONO;
+    AnalysisMode analysisMode = AnalysisMode::CLASSIC;
     FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC;
     int polyChannel = 0;
     float sampleRate = 48000.f;

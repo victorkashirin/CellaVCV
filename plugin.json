@@ -164,9 +164,9 @@
     {
       "slug": "Spectrum",
       "name": "Spectrum",
-      "description": "Configurable spectrogram visualizer.",
+      "description": "Classic and time-frequency reassigned spectrogram visualizer.",
       "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
-      "keywords": "spectrum spectrogram fft analyzer analyser history",
+      "keywords": "spectrum spectrogram fft analyzer analyser history reassignment",
       "tags": [
         "Visual",
         "Utility"

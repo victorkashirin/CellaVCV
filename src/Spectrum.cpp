@@ -86,6 +86,7 @@ struct Spectrum : Module {
     std::atomic<int> windowSetting{static_cast<int>(WindowFunction::HANN)};
     std::atomic<int> fftOverlapSetting{static_cast<int>(FftOverlap::PERCENT_75)};
     std::atomic<int> qualitySetting{static_cast<int>(Quality::HIGH)};
+    std::atomic<int> analysisModeSetting{static_cast<int>(AnalysisMode::CLASSIC)};
     std::atomic<int> polyChannelSetting{0};
     std::atomic<int> paletteSetting{static_cast<int>(Palette::INFERNO)};
     std::atomic<int> peakHoldSetting{static_cast<int>(PeakHold::OFF)};
@@ -105,6 +106,7 @@ struct Spectrum : Module {
     std::atomic<float> viewMaximum{1.f};
     std::atomic<bool> frozen{false};
     std::atomic<uint64_t> clearGeneration{0};
+    std::atomic<uint64_t> rowAcceptanceBoundarySample{0};
     std::atomic<uint64_t> activeConfigGeneration{1};
 #ifndef NDEBUG
     std::atomic<uint64_t> droppedRows{0};
@@ -115,6 +117,7 @@ struct Spectrum : Module {
     int appliedWindow = -1;
     int appliedFftOverlap = -1;
     int appliedQuality = -1;
+    int appliedAnalysisMode = -1;
     int appliedChannelMode = -1;
     int appliedFrequencyBins = -1;
     int appliedPolyChannel = -1;
@@ -147,6 +150,9 @@ struct Spectrum : Module {
                                           static_cast<int>(FftOverlap::COUNT) - 1);
         const int quality =
             clampValue(qualitySetting.load(std::memory_order_relaxed), 0, static_cast<int>(Quality::COUNT) - 1);
+        const int analysisMode =
+            clampValue(analysisModeSetting.load(std::memory_order_relaxed), 0,
+                       static_cast<int>(AnalysisMode::COUNT) - 1);
         const int channelMode = clampValue(static_cast<int>(std::lround(params[MODE_PARAM].getValue())), 0,
                                            static_cast<int>(ChannelMode::COUNT) - 1);
         const int frequencyBins =
@@ -156,13 +162,18 @@ struct Spectrum : Module {
         const bool sampleRateChanged = appliedSampleRate != 0.f && args.sampleRate != appliedSampleRate;
         const bool analysisChanged =
             fftSize != appliedFftSize || window != appliedWindow || fftOverlap != appliedFftOverlap ||
+            analysisMode != appliedAnalysisMode ||
             channelMode != appliedChannelMode || frequencyBins != appliedFrequencyBins ||
             polyChannel != appliedPolyChannel || sampleRateChanged;
         const bool qualityChanged = quality != appliedQuality;
         if (analysisChanged || qualityChanged || appliedSampleRate == 0.f) {
             if (analysisChanged) {
                 ++configGeneration;
-                if (sampleRateChanged) timelineSample = 0;
+                if (sampleRateChanged) {
+                    timelineSample = 0;
+                    rowAcceptanceBoundarySample.store(0,
+                                                      std::memory_order_release);
+                }
             }
             SpectrumConfig next;
             next.fftSize = static_cast<FftSize>(fftSize);
@@ -170,6 +181,7 @@ struct Spectrum : Module {
             next.fftOverlap = static_cast<FftOverlap>(fftOverlap);
             next.quality = static_cast<Quality>(quality);
             next.channelMode = static_cast<ChannelMode>(channelMode);
+            next.analysisMode = static_cast<AnalysisMode>(analysisMode);
             next.frequencyBins = static_cast<FrequencyBinScale>(frequencyBins);
             next.polyChannel = polyChannel;
             next.sampleRate = args.sampleRate;
@@ -180,6 +192,7 @@ struct Spectrum : Module {
             appliedWindow = window;
             appliedFftOverlap = fftOverlap;
             appliedQuality = quality;
+            appliedAnalysisMode = analysisMode;
             appliedChannelMode = channelMode;
             appliedFrequencyBins = frequencyBins;
             appliedPolyChannel = polyChannel;
@@ -189,9 +202,21 @@ struct Spectrum : Module {
         ++timelineSample;
         const bool freezeEvent = freezeButtonTrigger.process(params[FREEZE_PARAM].getValue()) ||
                                  freezeInputTrigger.process(inputs[FREEZE_INPUT].getVoltage());
-        if (freezeEvent) frozen.store(!frozen.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        if (freezeEvent) {
+            const bool nowFrozen = !frozen.load(std::memory_order_relaxed);
+            frozen.store(nowFrozen, std::memory_order_relaxed);
+            if (!nowFrozen)
+                rowAcceptanceBoundarySample.store(timelineSample,
+                                                  std::memory_order_release);
+            analyzer.discardPending(timelineSample);
+        }
         const bool clearEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue());
-        if (clearEvent) clearGeneration.fetch_add(1, std::memory_order_release);
+        if (clearEvent) {
+            clearGeneration.fetch_add(1, std::memory_order_release);
+            rowAcceptanceBoundarySample.store(timelineSample,
+                                              std::memory_order_release);
+            analyzer.discardPending(timelineSample);
+        }
         if (markInputTrigger.process(inputs[MARK_INPUT].getVoltage())) {
             MarkerEvent marker;
             marker.timelineSample = timelineSample;
@@ -215,10 +240,10 @@ struct Spectrum : Module {
             mixInputVoltages(left, right, leftConnected, rightConnected, static_cast<ChannelMode>(channelMode));
         SpectrumRow row;
         if (analyzer.processSample(mixed * VOLTAGE_TO_FULL_SCALE, timelineSample, row)) {
-            if (!displayRows.full())
+            if (!frozen.load(std::memory_order_relaxed) && !displayRows.full())
                 displayRows.push(row);
 #ifndef NDEBUG
-            else
+            else if (!frozen.load(std::memory_order_relaxed))
                 droppedRows.fetch_add(1, std::memory_order_relaxed);
 #endif
         }
@@ -230,6 +255,7 @@ struct Spectrum : Module {
         json_object_set_new(root, "window", json_integer(windowSetting.load()));
         json_object_set_new(root, "fftOverlap", json_integer(fftOverlapSetting.load()));
         json_object_set_new(root, "quality", json_integer(qualitySetting.load()));
+        json_object_set_new(root, "analysisMode", json_integer(analysisModeSetting.load()));
         json_object_set_new(root, "polyChannel", json_integer(polyChannelSetting.load()));
         json_object_set_new(root, "palette", json_integer(paletteSetting.load()));
         json_object_set_new(root, "peakHold", json_integer(peakHoldSetting.load()));
@@ -259,6 +285,9 @@ struct Spectrum : Module {
                                            static_cast<int>(FftOverlap::PERCENT_75)));
         qualitySetting.store(getJsonInt(root, "quality", 0, static_cast<int>(Quality::COUNT) - 1,
                                         static_cast<int>(Quality::HIGH)));
+        analysisModeSetting.store(
+            getJsonInt(root, "analysisMode", 0, static_cast<int>(AnalysisMode::COUNT) - 1,
+                       static_cast<int>(AnalysisMode::CLASSIC)));
         polyChannelSetting.store(getJsonInt(root, "polyChannel", 0, 15, 0));
         paletteSetting.store(
             getJsonInt(root, "palette", 0, static_cast<int>(Palette::COUNT) - 1,
@@ -750,9 +779,13 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         if (seenModuleConfigGeneration != 0 && generation != seenModuleConfigGeneration) clearHistory();
         seenModuleConfigGeneration = generation;
         const bool frozen = module->frozen.load(std::memory_order_relaxed);
+        const uint64_t acceptanceBoundary =
+            module->rowAcceptanceBoundarySample.load(std::memory_order_acquire);
         while (!module->displayRows.empty()) {
             const SpectrumRow row = module->displayRows.shift();
-            if (!frozen && row.configGeneration == generation) addRow(row);
+            if (!frozen && row.configGeneration == generation &&
+                row.rowEndSample > acceptanceBoundary)
+                addRow(row);
         }
         while (!module->markerEvents.empty()) {
             const MarkerEvent marker = module->markerEvents.shift();
@@ -1430,6 +1463,17 @@ struct SpectrumWidget : ModuleWidget {
         if (!spectrum) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
+        menu->addChild(createNonClosingIndexSubmenuItem(
+            "Analysis mode",
+            {"Classic", "T-F Reassigned"},
+            [=]() {
+                return static_cast<size_t>(
+                    clampValue(spectrum->analysisModeSetting.load(), 0,
+                               static_cast<int>(AnalysisMode::COUNT) - 1));
+            },
+            [=](size_t value) {
+                spectrum->analysisModeSetting.store(static_cast<int>(value));
+            }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Channel mode", {"Left", "Right", "Mono", "Mid", "Side"},
             [=]() {

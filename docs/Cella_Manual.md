@@ -33,6 +33,10 @@ pan it and double-click to reset it.
 
 The **Analysis** section contains:
 
+* **Analysis mode:** selects **Classic** or **T-F Reassigned** analysis. Classic is the
+  default and uses the conventional STFT spectrogram. Time-frequency reassignment is based on
+  research by P. Flandrin, F. Auger, and collaborators; it concentrates isolated tones near their
+  estimated instantaneous frequencies and transients near their estimated event times.
 * **Channel mode:** Left, Right, Mono, Mid, or Side. Mono folds stereo to mono by averaging L and R;
   if only one input is connected, it is used unchanged.
 * **FFT size**, **FFT overlap**, and **Window:** configure the spectral analysis.
@@ -47,6 +51,34 @@ The **Presentation** section contains:
 * **Ticks:** shows or hides frequency and time guides and sets their opacity.
 * **Frequency:** configures labels, smoothing, Log/Linear/Mel bins, and zoom reset.
 * **Markers:** controls marker visibility and opacity.
+
+### **Classic and time-frequency reassigned analysis**
+
+Time-frequency reassignment is an alternative analysis method, not a higher FFT resolution. It
+reassigns energy using the phase of three related FFTs while retaining the selected FFT size, overlap,
+window, frequency-bin scale, and time-detail grid. **Rendering: Precise/Smooth** is independent and
+can be used with either analysis mode.
+
+The reassigned mode is most useful for isolated off-bin tones, triggers, short clicks, and sweeps. It
+cannot recover information absent from the selected FFT window or reliably separate components that
+overlap within the same time-frequency neighborhood. Crossings, dense chords, noise, and very quiet
+signals can therefore remain broad or irregular.
+
+The reassigned mode uses substantially more CPU and delays new rows by approximately one FFT window
+so that later analysis frames can contribute to the correct timestamp. At 48 kHz this is about 21 ms
+for a 1024-point FFT, 43 ms for 2048, 85 ms for 4096, 171 ms for 8192, and 341 ms for 16384. The
+retained timestamps, markers, cursor ages, and time ruler still refer to the measured event time
+rather than the later publication time.
+
+For the clearest reassigned display, start with **Hann**, **75% FFT overlap**, and
+**High · 60 rows/s**. Flat-top remains available, but its wide main lobe is less suitable for
+reassignment. Changing analysis mode clears the existing history because Classic and reassigned rows
+contain different measurements.
+
+The algorithm follows the reassignment method described by F. Auger and P. Flandrin in
+[“Improving the Readability of Time-Frequency and Time-Scale Representations by the Reassignment
+Method”](https://www.acousticslab.org/learnmoresra/files/augerflandrin1995ieee43.pdf) and subsequent
+work by P. Flandrin, F. Auger, and E. Chassande-Mottin.
 
 
 # **Frequency Analyzer**

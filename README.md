@@ -9,8 +9,10 @@
 
 ### Spectrum
 
-**Spectrum** is a scrolling spectrogram with adjustable analysis, history speed and direction,
-color palettes, traces, and event markers.
+**Spectrum** is a scrolling spectrogram with Classic STFT and time-frequency reassigned analysis,
+adjustable history speed and direction, color palettes, traces, and event markers. Select
+**Analysis → Analysis mode → T-F Reassigned** from the context menu to enable it.
+The reassignment mode is based on research by P. Flandrin, F. Auger, and collaborators.
 
 ### Frequency Analyzer
 
