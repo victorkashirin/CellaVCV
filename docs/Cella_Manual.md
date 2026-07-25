@@ -19,8 +19,6 @@ module never applies automatic gain or normalizes each spectrum to its loudest f
 ### **Controls and inputs**
 
 * **L** and **R** accept audio. When R is disconnected it is normalled from L.
-* **MODE** selects Left, Right, Mono, Mid, or Side. Mono keeps a single connected input at unity gain;
-  Mid and Side use `(L + R) / 2` and `(L - R) / 2`.
 * **RANGE** sets the visible floor from -140 to -40 dBFS. The ceiling remains 0 dBFS.
 * **FREEZE** and its trigger input latch the displayed history. Analysis continues, but frozen pixels,
   traces, cursor values, and timestamps are preserved until unfreezing.
@@ -28,7 +26,7 @@ module never applies automatic gain or normalizes each spectrum to its loudest f
   changing flow, zooming, or panning time, and are removed by Clear or when they leave retained history.
 * **CLEAR** and its trigger input erase the history without interrupting analysis.
 
-Hover the display for frequency, musical note, level, and age. Use the mouse wheel to zoom around the
+Hover the display for frequency, musical note, and displayed level. Use the mouse wheel to zoom around the
 cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-Nyquist
 range. Shift-wheel zooms time around the cursor and Shift-drag pans time. The time-ruler gutter accepts
 the same gestures without Shift; double-click it to return to live and restore the configured duration.
@@ -36,6 +34,8 @@ These interactions remain available while frozen.
 
 ### **Context menu**
 
+* **Channel mode** selects Left, Right, Mono, Mid, or Side. Mono keeps a single connected input at
+  unity gain; Mid and Side use `(L + R) / 2` and `(L - R) / 2`.
 * **FFT size** selects 1024, 2048, 4096, 8192, or 16384 samples.
 * **Window** selects Hann, Blackman-Harris, or flat-top analysis.
 * **FFT overlap** selects None, 25%, 50%, 75%, 87.5%, or 93.75%. Higher overlap improves temporal
@@ -51,8 +51,7 @@ These interactions remain available while frozen.
 * **Frequency scale** selects Hz, octave, musical, or combined guides.
 * **Frequency smoothing** selects None through 1/3-octave power-domain smoothing.
 * **Temporal smoothing** selects Off, Fast, Medium, or Slow timestamp-driven attack/release smoothing.
-  Smoothing is reversible and is rebuilt from retained raw rows; when active, the cursor shows the raw
-  value in parentheses after the displayed value.
+  Smoothing is reversible and is rebuilt from retained raw rows.
 * **Show markers** hides marker overlays without deleting their timestamps.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.

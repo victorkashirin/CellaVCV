@@ -54,7 +54,7 @@ std::string noteLabel(float frequency) {
     static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
     int note = nearest % 12;
     if (note < 0) note += 12;
-    return rack::string::f("%s%d %+dc", names[note], nearest / 12 - 1, cents);
+    return rack::string::f("%s%d %+03dc", names[note], nearest / 12 - 1, cents);
 }
 
 std::string timeLabel(float age, float span) {
@@ -1040,28 +1040,8 @@ struct WaterfallOverlay : TransparentWidget {
         nvgStroke(args.vg);
         std::string text;
         if (valid) {
-            const float ageSeconds = display->timeline.nearAge() + logical.age * display->timeline.visibleSpan();
-            const bool smoothing = module && (module->frequencySmoothingSetting.load() != 0 ||
-                                              module->temporalSmoothingSetting.load() != 0);
-            text = smoothing
-                       ? rack::string::f("%s Hz  %s  %.1f (%.1f) dBFS  -%.3fs",
-                                         frequencyLabel(frequency).c_str(), noteLabel(frequency).c_str(), displayed,
-                                         raw, ageSeconds)
-                       : rack::string::f("%s Hz  %s  %.1f dBFS  -%.3fs", frequencyLabel(frequency).c_str(),
-                                         noteLabel(frequency).c_str(), displayed, ageSeconds);
-            const std::vector<MarkerEvent>& markers = display->timeline.markers();
-            const float timeAxisPixels = isVerticalFlow(flow()) ? box.size.y : box.size.x;
-            for (size_t i = 0; i < markers.size(); ++i) {
-                const float markerAge =
-                    display->timeline.normalizedAgeForSample(markers[i].timelineSample, markers[i].sampleRate);
-                if (markerAge >= 0.f && markerAge <= 1.f &&
-                    std::fabs(markerAge - logical.age) * timeAxisPixels <= 5.f) {
-                    const double exactAge =
-                        display->timeline.ageForSample(markers[i].timelineSample, markers[i].sampleRate);
-                    text += rack::string::f("  M%02u -%.3fs", markers[i].sequence, exactAge);
-                    break;
-                }
-            }
+            text = rack::string::f("%s Hz  %s  %.1f dBFS", frequencyLabel(frequency).c_str(),
+                                   noteLabel(frequency).c_str(), displayed);
         } else {
             text = rack::string::f("%s Hz  %s  gap", frequencyLabel(frequency).c_str(),
                                    noteLabel(frequency).c_str());
@@ -1069,11 +1049,15 @@ struct WaterfallOverlay : TransparentWidget {
         nvgFontSize(args.vg, 9.f);
         float bounds[4];
         nvgTextBounds(args.vg, 0.f, 0.f, text.c_str(), NULL, bounds);
+        float maximumBounds[4];
+        nvgTextBounds(args.vg, 0.f, 0.f, "20.0k Hz  A#10 +00c  -160.0 dBFS", NULL, maximumBounds);
+        const float tooltipWidth = std::max(bounds[2] - bounds[0], maximumBounds[2] - maximumBounds[0]);
         float textX = cursor.x + 8.f, textY = cursor.y + 8.f;
-        if (textX + bounds[2] - bounds[0] > box.size.x - 4.f) textX = cursor.x - (bounds[2] - bounds[0]) - 8.f;
+        if (textX + tooltipWidth > box.size.x - 4.f) textX = cursor.x - tooltipWidth - 8.f;
+        textX = clampValue(textX, 4.f, std::max(4.f, box.size.x - tooltipWidth - 4.f));
         if (textY > box.size.y - 18.f) textY = cursor.y - 17.f;
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, textX - 3.f, textY - 2.f, bounds[2] - bounds[0] + 6.f, 14.f, 2.f);
+        nvgRoundedRect(args.vg, textX - 3.f, textY - 2.f, tooltipWidth + 6.f, 14.f, 2.f);
         nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 190));
         nvgFill(args.vg);
         nvgFillColor(args.vg, nvgRGB(236, 239, 240));
@@ -1215,9 +1199,9 @@ struct WaterfallPanelLabels : TransparentWidget {
         nvgText(args.vg, box.size.x * 0.5f, 13.f, "WATERFALL", NULL);
         nvgTextLetterSpacing(args.vg, 0.f);
         nvgFontSize(args.vg, 6.7f);
-        const char* labels[] = {"L", "R", "FREEZE", "MARK", "CLEAR", "MODE", "RANGE", "FREEZE", "CLEAR"};
-        const float positions[] = {20.f, 58.f, 96.f, 134.f, 172.f, 218.f, 258.f, 300.f, 338.f};
-        for (int index = 0; index < 9; ++index) nvgText(args.vg, positions[index], 316.f, labels[index], NULL);
+        const char* labels[] = {"L", "R", "FREEZE", "MARK", "CLEAR", "RANGE", "FREEZE", "CLEAR"};
+        const float positions[] = {20.f, 58.f, 96.f, 134.f, 172.f, 228.f, 283.f, 338.f};
+        for (int index = 0; index < 8; ++index) nvgText(args.vg, positions[index], 316.f, labels[index], NULL);
         nvgFontSize(args.vg, 7.f);
         nvgTextLetterSpacing(args.vg, 2.f);
         nvgText(args.vg, box.size.x * 0.5f, 376.f, "CELLA", NULL);
@@ -1256,10 +1240,9 @@ struct WaterfallWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(96.f, y), module, Waterfall::FREEZE_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(134.f, y), module, Waterfall::MARK_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(172.f, y), module, Waterfall::CLEAR_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(218.f, y), module, Waterfall::MODE_PARAM));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(258.f, y), module, Waterfall::RANGE_PARAM));
-        addParam(createParamCentered<LEDButton>(Vec(300.f, y), module, Waterfall::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(300.f, y), module, Waterfall::FREEZE_LIGHT));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(228.f, y), module, Waterfall::RANGE_PARAM));
+        addParam(createParamCentered<LEDButton>(Vec(283.f, y), module, Waterfall::FREEZE_PARAM));
+        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(283.f, y), module, Waterfall::FREEZE_LIGHT));
         addParam(createParamCentered<VCVButton>(Vec(338.f, y), module, Waterfall::CLEAR_PARAM));
     }
 
@@ -1268,6 +1251,18 @@ struct WaterfallWidget : ModuleWidget {
         if (!waterfall) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
+        menu->addChild(createIndexSubmenuItem(
+            "Channel mode", {"Left", "Right", "Mono", "Mid", "Side"},
+            [=]() {
+                return static_cast<size_t>(
+                    clampValue(static_cast<int>(std::lround(waterfall->params[Waterfall::MODE_PARAM].getValue())),
+                               0, static_cast<int>(ChannelMode::COUNT) - 1));
+            },
+            [=](size_t value) {
+                waterfall->params[Waterfall::MODE_PARAM].setValue(
+                    static_cast<float>(clampValue(static_cast<int>(value), 0,
+                                                  static_cast<int>(ChannelMode::COUNT) - 1)));
+            }));
         menu->addChild(createIndexSubmenuItem(
             "FFT size", {"1024", "2048", "4096", "8192", "16384"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->fftSizeSetting.load(), 0, 4)); },
