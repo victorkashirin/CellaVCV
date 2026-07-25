@@ -8,60 +8,45 @@ Source code for this plugin can be found on GitHub: [https://github.com/victorka
 
 Code is licensed under GPL v3.0.
 
-All graphics are copyright 2024-2025 Victor Kashirin and licensed under CC BY-SA 4.0.
+All graphics are copyright 2024-2026 Victor Kashirin and licensed under CC BY-SA 4.0.
 
 # **Spectrum**
 
-**Spectrum** is a calibrated spectrum history display. Its fixed reference is 10 V peak = 0 dBFS, so a
-5 V peak sine reads approximately -6.02 dBFS. The display range and palette affect visibility only; the
-module never applies automatic gain or normalizes each spectrum to its loudest frequency.
+<img src="images/Spectrum.png" alt="Cella - Spectrum" style="height: 380px;">
+
+**Spectrum** is a scrolling spectrogram for viewing frequency content over time.
 
 ### **Controls and inputs**
 
 * **L** and **R** accept audio. When R is disconnected it is normalled from L.
-* **RANGE** sets the visible floor from -140 to -40 dBFS. The ceiling remains 0 dBFS.
-* **FREEZE** and its trigger input latch the displayed history. Analysis continues, but frozen pixels,
-  traces, cursor values, and timestamps are preserved until unfreezing.
-* **MARK** creates a sample-timestamped marker. Markers remain aligned with the triggering event while
-  changing flow, zooming, or panning time, and are removed by Clear or when they leave retained history.
-* **CLEAR** and its trigger input erase the history without interrupting analysis.
+* **MARK** adds a marker at the current position in the history.
+* **FLOOR** sets the visible floor from -140 to -40 dBFS. The ceiling remains 0 dBFS.
+* **SPEED** controls how quickly history moves across the display. Slower settings show more time;
+  faster settings show less.
+* **FREEZE** and its trigger input pause the display.
+* **CLEAR** erases the displayed history and markers.
 
-Hover the display for frequency, musical note, and displayed level. Use Shift-wheel to zoom the frequency
-range around the cursor, drag along the frequency axis to pan, and double-click to restore the full
-20 Hz-to-22 kHz range. At lower sample rates, the upper limit follows Nyquist. Ordinary wheel scrolling
-is left to Rack. Shift-drag pans time; double-click the time-ruler gutter to return to live and restore
-the configured duration.
-These interactions remain available while frozen.
+Hover the display to inspect frequency, note, and level. Shift-wheel zooms the frequency range; drag to
+pan it and double-click to reset it.
 
 ### **Context menu**
 
-* **Channel mode** selects Left, Right, Mono, Mid, or Side. Mono keeps a single connected input at
-  unity gain; Mid and Side use `(L + R) / 2` and `(L - R) / 2`.
-* **FFT size** selects 1024, 2048, 4096, 8192, or 16384 samples.
-* **Window** selects Hann, Blackman-Harris, or flat-top analysis.
-* **FFT overlap** selects None, 25%, 50%, 75%, 87.5%, or 93.75%. Higher overlap improves temporal
-  coverage and transient continuity at increased CPU cost; 75% is the default. At combinations of
-  small FFT sizes and high sample rates, the analyzer may reduce the effective overlap to control CPU.
-* **Time detail** selects 15, 30, or 60 history rows per second. It controls the temporal detail
-  retained in the display; timing is based on processed samples, not the GUI frame rate.
-* **Polyphonic voice** selects one input channel from 1 to 16.
-* **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
-  horizontal flows it runs bottom-to-top. Frequency tick labels follow the destination edge, opposite
-  the edge where new data enters.
-* **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
-* **Palette** selects from 46 spectrogram color maps, including perceptually uniform options from
-  CMasher and Matplotlib, plus Seaborn's Mako and Rocket. Every map fades from
-  black at the display floor so silence remains visually quiet. The menu groups maps by source, with
-  the larger CMasher collection split into short alphabetical ranges.
-* **Rendering** selects exact Precise cells or gap-aware Smooth interpolation. This does not change
-  measured or stored values.
-* **Trace** contains the independent Live (Off, Line, or Line + Fill) and Peak (Off, Decay, or
-  Infinite hold) settings.
-* **Frequency** contains guide Scale, fractional-octave Smoothing, Bins, and frequency-zoom reset.
-  Bins selects logarithmic (default), linear-Hz, or Mel perceptual spacing. Changing Bins starts a
-  fresh history because it changes how FFT energy is assigned across the 512 display cells.
-* **Markers** contains visibility and opacity controls. Hiding markers does not delete their
-  timestamps.
+The **Analysis** section contains:
+
+* **Channel mode:** Left, Right, Mono, Mid, or Side. Mono folds stereo to mono by averaging L and R;
+  if only one input is connected, it is used unchanged.
+* **FFT size**, **FFT overlap**, and **Window:** configure the spectral analysis.
+* **Time detail:** selects 15, 30, or 60 display rows per second.
+* **Polyphonic voice:** selects which polyphonic channel to analyse.
+
+The **Presentation** section contains:
+
+* **Flow:** selects the direction in which history moves.
+* **Palette** and **Rendering:** select the colors and Precise or Smooth drawing.
+* **Trace:** configures the optional Live and Peak traces.
+* **Ticks:** shows or hides frequency and time guides and sets their opacity.
+* **Frequency:** configures labels, smoothing, Log/Linear/Mel bins, and zoom reset.
+* **Markers:** controls marker visibility and opacity.
 
 
 # **Frequency Analyzer**

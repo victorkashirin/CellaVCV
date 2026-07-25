@@ -9,11 +9,8 @@
 
 ### Spectrum
 
-**Spectrum** is a calibrated OpenGL spectrum history display with a fixed 10 V peak = 0 dBFS
-reference, sample-accurate event markers, selectable precise/smooth rendering, calibrated frequency
-smoothing, selectable FFT overlap, configurable history duration, live and peak traces,
-logarithmic/linear/Mel frequency bins, cursor inspection, frequency/time navigation, and
-Up/Down/Left/Right history flow.
+**Spectrum** is a scrolling spectrogram with adjustable analysis, history speed and direction,
+color palettes, traces, and event markers.
 
 ### Frequency Analyzer
 

@@ -164,7 +164,7 @@
     {
       "slug": "Spectrum",
       "name": "Spectrum",
-      "description": "Calibrated OpenGL spectrum history analyser",
+      "description": "Configurable spectrogram visualizer.",
       "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
       "keywords": "spectrum spectrogram fft analyzer analyser history",
       "tags": [
