@@ -176,6 +176,8 @@ WaterfallAnalyzer::WaterfallAnalyzer() {
 WaterfallAnalyzer::~WaterfallAnalyzer() = default;
 
 void WaterfallAnalyzer::configure(const WaterfallConfig& newConfig) {
+    const WaterfallConfig oldConfig = config;
+    const bool wasConfigured = activeKernel != NULL;
     config = newConfig;
     const int fftIndex = clampValue(static_cast<int>(config.fftSize), 0, static_cast<int>(FftSize::COUNT) - 1);
     config.fftSize = static_cast<FftSize>(fftIndex);
@@ -188,26 +190,37 @@ void WaterfallAnalyzer::configure(const WaterfallConfig& newConfig) {
     config.polyChannel = clampValue(config.polyChannel, 0, 15);
     config.sampleRate = std::max(config.sampleRate, 1000.f);
 
+    const bool analysisChanged =
+        !wasConfigured || oldConfig.fftSize != config.fftSize || oldConfig.window != config.window ||
+        oldConfig.channelMode != config.channelMode || oldConfig.polyChannel != config.polyChannel ||
+        oldConfig.sampleRate != config.sampleRate || oldConfig.generation != config.generation;
     activeKernel = kernels[static_cast<size_t>(fftIndex)].get();
-    activeKernel->reset(config.sampleRate);
-    processedSamples = 0;
-    latestSpectrumSample = 0;
-    haveSpectrum = false;
-    rowHasSpectrum = false;
-    latestSpectrum.fill(INTERNAL_FLOOR_DB);
-    rowMaximum.fill(INTERNAL_FLOOR_DB);
+    if (analysisChanged) {
+        activeKernel->reset(config.sampleRate);
+        processedSamples = 0;
+        latestSpectrumSample = 0;
+        haveSpectrum = false;
+        rowHasSpectrum = false;
+        latestSpectrum.fill(INTERNAL_FLOOR_DB);
+        rowMaximum.fill(INTERNAL_FLOOR_DB);
+    }
     resetRowClock();
 }
 
 void WaterfallAnalyzer::resetRowClock() {
     rowPeriodSamples = std::max<uint64_t>(
         1, static_cast<uint64_t>(std::llround(config.sampleRate / rowsPerSecond(config.quality))));
-    nextRowSample = rowPeriodSamples;
+    nextRowSample = processedSamples + rowPeriodSamples;
 }
 
 bool WaterfallAnalyzer::processSample(float normalizedSample, SpectrumRow& outputRow) {
+    return processSample(normalizedSample, processedSamples + 1, outputRow);
+}
+
+bool WaterfallAnalyzer::processSample(float normalizedSample, uint64_t timelineSample, SpectrumRow& outputRow) {
     ++processedSamples;
-    if (activeKernel->process(normalizedSample, config.window)) finishSpectrum();
+    currentTimelineSample = timelineSample;
+    if (activeKernel->process(normalizedSample, config.window)) finishSpectrum(timelineSample);
 
     if (processedSamples < nextRowSample) return false;
     publishRow(outputRow);
@@ -219,9 +232,9 @@ bool WaterfallAnalyzer::processSample(float normalizedSample, SpectrumRow& outpu
     return true;
 }
 
-void WaterfallAnalyzer::finishSpectrum() {
+void WaterfallAnalyzer::finishSpectrum(uint64_t timelineSample) {
     latestSpectrum = activeKernel->spectrum;
-    latestSpectrumSample = processedSamples;
+    latestSpectrumSample = timelineSample;
     haveSpectrum = true;
     if (!rowHasSpectrum) {
         rowMaximum = latestSpectrum;
@@ -240,11 +253,12 @@ void WaterfallAnalyzer::publishRow(SpectrumRow& outputRow) {
     for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
         outputRow.dbTenths[static_cast<size_t>(cell)] = quantizeDb(values[static_cast<size_t>(cell)]);
     }
-    outputRow.rowEndSample = processedSamples;
+    outputRow.rowEndSample = currentTimelineSample;
     outputRow.sourceAnalysisSample = latestSpectrumSample;
     outputRow.sampleRate = config.sampleRate;
     outputRow.fftSize = static_cast<uint32_t>(activeKernel->size);
     outputRow.effectiveHopSize = static_cast<uint32_t>(activeKernel->hopSize);
+    outputRow.displayRowsPerSecond = static_cast<uint32_t>(rowsPerSecond(config.quality));
     outputRow.configGeneration = config.generation;
 }
 

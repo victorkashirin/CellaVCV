@@ -5,6 +5,10 @@
 New modules:
 * Waterfall - calibrated OpenGL waterfall spectrum analyser with four-way flow.
 
+Updates:
+* Waterfall - add sample-accurate markers, precise/smooth rendering, live-trace modes, frequency scales,
+  calibrated smoothing, timestamped time navigation, and independent 2-30 second history duration.
+
 ### 2.10.0 (2026-07-12)
 
 New modules:

@@ -59,9 +59,12 @@ else
 endif
 
 $(WATERFALL_TEST): $(WATERFALL_TEST_RACK) test/waterfall_dsp.cpp src/waterfall/WaterfallAnalyzer.cpp \
-		src/waterfall/WaterfallAnalyzer.hpp src/waterfall/WaterfallTypes.hpp
+		src/waterfall/HistoryTimeline.cpp src/waterfall/WaterfallPresentation.cpp \
+		src/waterfall/WaterfallAnalyzer.hpp src/waterfall/HistoryTimeline.hpp \
+		src/waterfall/WaterfallPresentation.hpp src/waterfall/WaterfallTypes.hpp
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ test/waterfall_dsp.cpp src/waterfall/WaterfallAnalyzer.cpp \
+		src/waterfall/HistoryTimeline.cpp src/waterfall/WaterfallPresentation.cpp \
 		-Lbuild -lRack $(WATERFALL_TEST_RPATH)
 ifdef ARCH_MAC
 	xattr -c $@

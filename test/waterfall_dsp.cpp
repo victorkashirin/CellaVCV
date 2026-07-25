@@ -1,4 +1,6 @@
 #include "../src/waterfall/WaterfallAnalyzer.hpp"
+#include "../src/waterfall/HistoryTimeline.hpp"
+#include "../src/waterfall/WaterfallPresentation.hpp"
 #include "../src/waterfall/WaterfallTypes.hpp"
 
 #include <algorithm>
@@ -253,6 +255,143 @@ void testHighRateFftCadenceCap() {
     require(received, "high-rate analyzer produced a row");
 }
 
+SpectrumRow makeTimelineRow(uint64_t sample, uint64_t generation = 1, int rate = 30) {
+    SpectrumRow row;
+    row.rowEndSample = sample;
+    row.sourceAnalysisSample = sample;
+    row.sampleRate = 48000.f;
+    row.fftSize = 4096;
+    row.effectiveHopSize = 1024;
+    row.displayRowsPerSecond = static_cast<uint32_t>(rate);
+    row.configGeneration = generation;
+    row.dbTenths.fill(quantizeDb(-60.f));
+    return row;
+}
+
+void testSharedTimelineAndRowRateReconfiguration() {
+    WaterfallAnalyzer analyzer;
+    WaterfallConfig config;
+    config.quality = Quality::NORMAL;
+    config.generation = 500;
+    analyzer.configure(config);
+    SpectrumRow row;
+    uint64_t timeline = 100000;
+    while (!analyzer.processSample(0.f, ++timeline, row)) {
+    }
+    const uint64_t first = row.rowEndSample;
+    config.quality = Quality::HIGH;
+    analyzer.configure(config);
+    while (!analyzer.processSample(0.f, ++timeline, row)) {
+    }
+    require(row.rowEndSample > first, "row-rate changes preserve the shared module timeline");
+    require(row.configGeneration == 500, "row-rate changes preserve compatible analysis generation");
+}
+
+void testHistoryCapacityResizeAndLookup() {
+    const int durations[] = {2, 4, 8, 16, 30};
+    const int rates[] = {15, 30, 60};
+    for (size_t d = 0; d < sizeof(durations) / sizeof(durations[0]); ++d)
+        for (size_t r = 0; r < sizeof(rates) / sizeof(rates[0]); ++r)
+            require(historyRowCapacity(static_cast<float>(durations[d]), rates[r]) ==
+                        durations[d] * rates[r] + 2,
+                    "history capacity follows duration * row rate + guard rows");
+
+    HistoryTimeline timeline(8);
+    timeline.setExpectedRowsPerSecond(30);
+    timeline.setRetainedDuration(2.f);
+    timeline.setVisibleSpan(0.25f);
+    for (int i = 0; i < 8; ++i) timeline.addRow(makeTimelineRow(1600u * static_cast<uint64_t>(i + 1)));
+    timeline.setCapacity(12);
+    require(timeline.size() == 8, "expanding history preserves every retained row");
+    require(timeline.oldestRow()->rowEndSample == 1600, "expansion preserves chronological order");
+    timeline.setCapacity(5);
+    require(timeline.size() == 5, "shrinking history preserves only capacity rows");
+    require(timeline.oldestRow()->rowEndSample == 6400, "shrinking preserves the newest rows");
+
+    const TimelineSelection exact = timeline.lookup(0.f);
+    require(exact.valid, "time lookup maps the newest exact row");
+    timeline.clear();
+    timeline.addRow(makeTimelineRow(1600));
+    timeline.addRow(makeTimelineRow(3200));
+    timeline.addRow(makeTimelineRow(16000));
+    timeline.setVisibleSpan(0.25f);
+    const TimelineSelection gap = timeline.lookup(0.45f);
+    require(!gap.valid, "time lookup flags a deliberate timestamp gap");
+}
+
+void testMarkersViewportAndTicks() {
+    HistoryTimeline timeline(64);
+    timeline.setExpectedRowsPerSecond(30);
+    timeline.setRetainedDuration(2.f);
+    timeline.setVisibleSpan(1.f);
+    for (int i = 0; i < 40; ++i) timeline.addRow(makeTimelineRow(1600u * static_cast<uint64_t>(i + 1)));
+    MarkerEvent marker;
+    marker.timelineSample = 1600u * 25u + 777u;
+    marker.sampleRate = 48000.f;
+    marker.configGeneration = 1;
+    marker.sequence = 1;
+    timeline.addMarker(marker);
+    require(timeline.markers().size() == 1, "marker retains its exact between-row timestamp");
+    requireNear(timeline.normalizedAgeForSample(marker.timelineSample, marker.sampleRate),
+                static_cast<float>((timeline.newestRow()->rowEndSample - marker.timelineSample) /
+                                   marker.sampleRate / timeline.visibleSpan()),
+                1e-5f, "marker timestamp maps through the shared viewport");
+
+    timeline.pan(0.2f);
+    require(!timeline.followsLive(), "time pan detaches follow-live");
+    const float before = timeline.nearAge();
+    timeline.addRow(makeTimelineRow(1600u * 41u));
+    requireNear(timeline.nearAge(), before + 1.f / 30.f, 1e-4f,
+                "detached viewport advances its relative age as rows arrive");
+    timeline.returnToLive();
+    require(timeline.followsLive() && timeline.nearAge() == 0.f, "return to live resets the historical offset");
+
+    const std::vector<TimeTick> ticks = timeline.makeTicks(40.f, 300.f);
+    require(ticks.size() >= 2, "time ruler emits readable ticks");
+    if (ticks.size() >= 2) {
+        const float spacing = ticks[1].ageSeconds - ticks[0].ageSeconds;
+        const float normalized = spacing / std::pow(10.f, std::floor(std::log10(spacing)));
+        require(std::fabs(normalized - 1.f) < 0.01f || std::fabs(normalized - 2.f) < 0.01f ||
+                    std::fabs(normalized - 5.f) < 0.01f,
+                "time ruler spacing follows the 1/2/5 sequence");
+    }
+}
+
+void testPresentationSmoothing() {
+    SpectrumRow constant = makeTimelineRow(1600);
+    constant.dbTenths.fill(quantizeDb(-48.f));
+    for (int mode = 0; mode < static_cast<int>(FrequencySmoothing::COUNT); ++mode) {
+        FrequencySmoothingKernel kernel;
+        kernel.configure(static_cast<FrequencySmoothing>(mode), 48000.f);
+        SpectrumRow output;
+        kernel.apply(constant, output);
+        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
+            requireNear(dequantizeDb(output.dbTenths[static_cast<size_t>(cell)]), -48.f, 0.11f,
+                        "frequency smoothing preserves constant power");
+    }
+
+    requireNear(interpolateNoOvershoot(-80.f, -20.f, 0.35f), -59.f, 1e-5f,
+                "trace interpolation is linear");
+    require(interpolateNoOvershoot(-80.f, -20.f, -1.f) == -80.f &&
+                interpolateNoOvershoot(-80.f, -20.f, 2.f) == -20.f,
+            "trace interpolation cannot overshoot adjacent values");
+
+    TemporalPowerSmoother smoother;
+    smoother.configure(TemporalSmoothing::FAST);
+    SpectrumRow low = makeTimelineRow(1600);
+    SpectrumRow high = makeTimelineRow(3200);
+    low.dbTenths.fill(quantizeDb(-80.f));
+    high.dbTenths.fill(quantizeDb(-20.f));
+    SpectrumRow output;
+    smoother.process(low, output);
+    smoother.process(high, output);
+    const float expectedPower = std::pow(10.f, -8.f) +
+                                (1.f - std::exp(-(1.f / 30.f) / 0.025f)) *
+                                    (std::pow(10.f, -2.f) - std::pow(10.f, -8.f));
+    requireNear(dequantizeDb(output.dbTenths[0]), 10.f * std::log10(expectedPower), 0.15f,
+                "temporal attack uses timestamp-derived delta and selected time constant");
+}
+
 }  // namespace
 
 void* operator new(std::size_t size) {
@@ -285,6 +424,10 @@ int main() {
     testNoiseCoverageAndTransientAggregation();
     testNoProcessAllocations();
     testHighRateFftCadenceCap();
+    testSharedTimelineAndRowRateReconfiguration();
+    testHistoryCapacityResizeAndLookup();
+    testMarkersViewportAndTicks();
+    testPresentationSmoothing();
     std::cout << "Waterfall DSP tests passed" << std::endl;
     return 0;
 }

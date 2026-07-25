@@ -24,12 +24,16 @@ module never applies automatic gain or normalizes each spectrum to its loudest f
 * **RANGE** sets the visible floor from -140 to -40 dBFS. The ceiling remains 0 dBFS.
 * **FREEZE** and its trigger input latch the displayed history. Analysis continues, but frozen pixels,
   traces, cursor values, and timestamps are preserved until unfreezing.
+* **MARK** creates a sample-timestamped marker. Markers remain aligned with the triggering event while
+  changing flow, zooming, or panning time, and are removed by Clear or when they leave retained history.
 * **CLEAR** and its trigger input erase the history without interrupting analysis.
 
 Hover the display for frequency, musical note, level, and age. Use the mouse wheel to zoom around the
 cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-Nyquist
-range. Drag the color legend vertically to adjust the display floor. These interactions remain
-available while frozen.
+range. Shift-wheel zooms time around the cursor and Shift-drag pans time. The time-ruler gutter accepts
+the same gestures without Shift; double-click it to return to live and restore the configured duration.
+Drag the color legend vertically to adjust the display floor. These interactions remain available while
+frozen.
 
 ### **Context menu**
 
@@ -37,7 +41,17 @@ available while frozen.
 * **Window** selects Hann, Blackman-Harris, or flat-top analysis.
 * **History rate** selects 15, 30, or 60 rows per second. History time is based on processed samples,
   not the GUI frame rate.
+* **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
 * **Polyphonic voice** selects one input channel from 1 to 16.
+* **Rendering** selects exact Precise cells or gap-aware Smooth interpolation. This does not change
+  measured or stored values.
+* **Live trace** selects Off, Line, or Line + Fill independently of the peak trace.
+* **Frequency scale** selects Hz, octave, musical, or combined guides.
+* **Frequency smoothing** selects None through 1/3-octave power-domain smoothing.
+* **Temporal smoothing** selects Off, Fast, Medium, or Slow timestamp-driven attack/release smoothing.
+  Smoothing is reversible and is rebuilt from retained raw rows; when active, the cursor shows the raw
+  value in parentheses after the displayed value.
+* **Show markers** hides marker overlays without deleting their timestamps.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.
 * **Palette** selects Heat, Grayscale, or Viridis.

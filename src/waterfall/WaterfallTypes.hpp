@@ -8,8 +8,10 @@ namespace cella {
 namespace waterfall {
 
 constexpr int NUM_FREQUENCY_CELLS = 512;
-constexpr int HISTORY_ROWS = 240;
 constexpr int ROW_QUEUE_SIZE = 64;
+constexpr int MARKER_QUEUE_SIZE = 64;
+constexpr int MAX_RETAINED_MARKERS = 128;
+constexpr int TIME_LOOKUP_SIZE = 1024;
 constexpr float MIN_FREQUENCY_HZ = 20.f;
 constexpr float INTERNAL_FLOOR_DB = -160.f;
 constexpr float INTERNAL_CEILING_DB = 24.f;
@@ -23,9 +25,24 @@ enum class Quality : int { ECONOMY, NORMAL, HIGH, COUNT };
 enum class Palette : int { HEAT, GRAYSCALE, VIRIDIS, COUNT };
 enum class PeakHold : int { OFF, DECAY, INFINITE, COUNT };
 enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
+enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };
+enum class LiveTraceMode : int { OFF, LINE, LINE_FILL, COUNT };
+enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COMBINED, COUNT };
+enum class FrequencySmoothing : int {
+    NONE,
+    OCTAVE_1_48,
+    OCTAVE_1_24,
+    OCTAVE_1_12,
+    OCTAVE_1_6,
+    OCTAVE_1_3,
+    COUNT
+};
+enum class TemporalSmoothing : int { OFF, FAST, MEDIUM, SLOW, COUNT };
+enum class HistoryDuration : int { SECONDS_2, SECONDS_4, SECONDS_8, SECONDS_16, SECONDS_30, COUNT };
 
 constexpr std::array<int, static_cast<int>(FftSize::COUNT)> FFT_SIZES = {{1024, 2048, 4096, 8192, 16384}};
 constexpr std::array<int, static_cast<int>(Quality::COUNT)> ROW_RATES = {{15, 30, 60}};
+constexpr std::array<int, static_cast<int>(HistoryDuration::COUNT)> HISTORY_DURATIONS = {{2, 4, 8, 16, 30}};
 
 template <typename T>
 inline T clampValue(T value, T low, T high) {
@@ -70,6 +87,53 @@ inline int fftSizeSamples(FftSize size) {
 
 inline int rowsPerSecond(Quality quality) {
     return ROW_RATES[static_cast<int>(quality)];
+}
+
+inline int historyDurationSeconds(HistoryDuration duration) {
+    return HISTORY_DURATIONS[static_cast<int>(duration)];
+}
+
+inline int historyRowCapacity(float seconds, int effectiveRowsPerSecond) {
+    return std::max(4, static_cast<int>(std::ceil(std::max(seconds, 0.25f) *
+                                                  std::max(effectiveRowsPerSecond, 1))) +
+                           2);
+}
+
+inline float frequencySmoothingOctaves(FrequencySmoothing smoothing) {
+    switch (smoothing) {
+        case FrequencySmoothing::OCTAVE_1_48:
+            return 1.f / 48.f;
+        case FrequencySmoothing::OCTAVE_1_24:
+            return 1.f / 24.f;
+        case FrequencySmoothing::OCTAVE_1_12:
+            return 1.f / 12.f;
+        case FrequencySmoothing::OCTAVE_1_6:
+            return 1.f / 6.f;
+        case FrequencySmoothing::OCTAVE_1_3:
+            return 1.f / 3.f;
+        default:
+            return 0.f;
+    }
+}
+
+inline void temporalTimeConstants(TemporalSmoothing smoothing, float& attackSeconds, float& releaseSeconds) {
+    switch (smoothing) {
+        case TemporalSmoothing::FAST:
+            attackSeconds = 0.025f;
+            releaseSeconds = 0.250f;
+            break;
+        case TemporalSmoothing::MEDIUM:
+            attackSeconds = 0.100f;
+            releaseSeconds = 0.700f;
+            break;
+        case TemporalSmoothing::SLOW:
+            attackSeconds = 0.300f;
+            releaseSeconds = 1.500f;
+            break;
+        default:
+            attackSeconds = releaseSeconds = 0.f;
+            break;
+    }
 }
 
 inline bool isVerticalFlow(FlowDirection flow) {
@@ -147,7 +211,15 @@ struct SpectrumRow {
     float sampleRate = 0.f;
     uint32_t fftSize = 0;
     uint32_t effectiveHopSize = 0;
+    uint32_t displayRowsPerSecond = 0;
     uint64_t configGeneration = 0;
+};
+
+struct MarkerEvent {
+    uint64_t timelineSample = 0;
+    float sampleRate = 0.f;
+    uint64_t configGeneration = 0;
+    uint32_t sequence = 0;
 };
 
 inline int16_t quantizeDb(float db) {
@@ -165,6 +237,13 @@ inline unsigned char encodeDb(float db) {
         (clampValue(db, INTERNAL_FLOOR_DB, INTERNAL_CEILING_DB) - INTERNAL_FLOOR_DB) /
         (INTERNAL_CEILING_DB - INTERNAL_FLOOR_DB);
     return static_cast<unsigned char>(std::lround(normalized * 255.f));
+}
+
+inline uint16_t encodeDb16(float db) {
+    const float normalized =
+        (clampValue(db, INTERNAL_FLOOR_DB, INTERNAL_CEILING_DB) - INTERNAL_FLOOR_DB) /
+        (INTERNAL_CEILING_DB - INTERNAL_FLOOR_DB);
+    return static_cast<uint16_t>(std::lround(normalized * 65535.f));
 }
 
 }  // namespace waterfall

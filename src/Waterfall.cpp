@@ -1,5 +1,7 @@
 #include "plugin.hpp"
+#include "waterfall/HistoryTimeline.hpp"
 #include "waterfall/WaterfallAnalyzer.hpp"
+#include "waterfall/WaterfallPresentation.hpp"
 #include "waterfall/WaterfallTypes.hpp"
 
 #include <algorithm>
@@ -36,8 +38,7 @@ float getJsonFloat(json_t* root, const char* key, float minimum, float maximum, 
     json_t* value = json_object_get(root, key);
     if (!json_is_number(value)) return fallback;
     const float result = static_cast<float>(json_number_value(value));
-    if (!std::isfinite(result)) return fallback;
-    return clampValue(result, minimum, maximum);
+    return std::isfinite(result) ? clampValue(result, minimum, maximum) : fallback;
 }
 
 std::string frequencyLabel(float frequency) {
@@ -56,21 +57,28 @@ std::string noteLabel(float frequency) {
     static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
     int note = nearest % 12;
     if (note < 0) note += 12;
-    const int octave = nearest / 12 - 1;
-    return rack::string::f("%s%d %+dc", names[note], octave, cents);
+    return rack::string::f("%s%d %+dc", names[note], nearest / 12 - 1, cents);
+}
+
+std::string timeLabel(float age, float span) {
+    if (age < 0.0005f) return span < 2.f ? "0 ms" : "0 s";
+    if (span < 2.f) return rack::string::f("-%d ms", static_cast<int>(std::lround(age * 1000.f)));
+    return rack::string::f("-%.1f s", age);
 }
 
 }  // namespace
 
 struct Waterfall : Module {
     enum ParamIds { MODE_PARAM, RANGE_PARAM, FREEZE_PARAM, CLEAR_PARAM, NUM_PARAMS };
-    enum InputIds { LEFT_INPUT, RIGHT_INPUT, FREEZE_INPUT, CLEAR_INPUT, NUM_INPUTS };
+    enum InputIds { LEFT_INPUT, RIGHT_INPUT, FREEZE_INPUT, MARK_INPUT, CLEAR_INPUT, NUM_INPUTS };
     enum LightIds { FREEZE_LIGHT, NUM_LIGHTS };
 
     WaterfallAnalyzer analyzer;
     dsp::RingBuffer<SpectrumRow, ROW_QUEUE_SIZE> displayRows;
+    dsp::RingBuffer<MarkerEvent, MARKER_QUEUE_SIZE> markerEvents;
     dsp::SchmittTrigger freezeButtonTrigger;
     dsp::SchmittTrigger freezeInputTrigger;
+    dsp::SchmittTrigger markInputTrigger;
     dsp::SchmittTrigger clearButtonTrigger;
     dsp::SchmittTrigger clearInputTrigger;
 
@@ -81,6 +89,14 @@ struct Waterfall : Module {
     std::atomic<int> paletteSetting{static_cast<int>(Palette::HEAT)};
     std::atomic<int> peakHoldSetting{static_cast<int>(PeakHold::DECAY)};
     std::atomic<int> flowSetting{static_cast<int>(FlowDirection::UP)};
+    std::atomic<int> renderingStyleSetting{static_cast<int>(RenderingStyle::SMOOTH)};
+    std::atomic<int> liveTraceSetting{static_cast<int>(LiveTraceMode::LINE)};
+    std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::COMBINED)};
+    std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
+    std::atomic<int> temporalSmoothingSetting{static_cast<int>(TemporalSmoothing::OFF)};
+    std::atomic<int> historyDurationSetting{static_cast<int>(HistoryDuration::SECONDS_8)};
+    std::atomic<bool> showMarkersSetting{true};
+    std::atomic<float> timeSpanSetting{8.f};
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
     std::atomic<bool> frozen{false};
@@ -88,6 +104,7 @@ struct Waterfall : Module {
     std::atomic<uint64_t> activeConfigGeneration{1};
 #ifndef NDEBUG
     std::atomic<uint64_t> droppedRows{0};
+    std::atomic<uint64_t> droppedMarkers{0};
 #endif
 
     int appliedFftSize = -1;
@@ -97,6 +114,8 @@ struct Waterfall : Module {
     int appliedPolyChannel = -1;
     float appliedSampleRate = 0.f;
     uint64_t configGeneration = 1;
+    uint64_t timelineSample = 0;
+    uint32_t markerSequence = 0;
 
     Waterfall() {
         config(NUM_PARAMS, NUM_INPUTS, 0, NUM_LIGHTS);
@@ -108,21 +127,11 @@ struct Waterfall : Module {
         configInput(LEFT_INPUT, "Left");
         configInput(RIGHT_INPUT, "Right");
         configInput(FREEZE_INPUT, "Freeze trigger");
+        configInput(MARK_INPUT, "Marker trigger");
         configInput(CLEAR_INPUT, "Clear trigger");
     }
 
     void process(const ProcessArgs& args) override {
-        const bool freezeButtonEvent = freezeButtonTrigger.process(params[FREEZE_PARAM].getValue());
-        const bool freezePortEvent = freezeInputTrigger.process(inputs[FREEZE_INPUT].getVoltage());
-        const bool freezeEvent = freezeButtonEvent || freezePortEvent;
-        if (freezeEvent) frozen.store(!frozen.load(std::memory_order_relaxed), std::memory_order_relaxed);
-
-        const bool clearButtonEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue());
-        const bool clearPortEvent = clearInputTrigger.process(inputs[CLEAR_INPUT].getVoltage());
-        const bool clearEvent = clearButtonEvent || clearPortEvent;
-        if (clearEvent) clearGeneration.fetch_add(1, std::memory_order_release);
-        lights[FREEZE_LIGHT].setBrightness(frozen.load(std::memory_order_relaxed) ? 1.f : 0.f);
-
         const int fftSize =
             clampValue(fftSizeSetting.load(std::memory_order_relaxed), 0, static_cast<int>(FftSize::COUNT) - 1);
         const int window =
@@ -132,18 +141,25 @@ struct Waterfall : Module {
         const int channelMode = clampValue(static_cast<int>(std::lround(params[MODE_PARAM].getValue())), 0,
                                            static_cast<int>(ChannelMode::COUNT) - 1);
         const int polyChannel = clampValue(polyChannelSetting.load(std::memory_order_relaxed), 0, 15);
-
-        if (fftSize != appliedFftSize || window != appliedWindow || quality != appliedQuality ||
-            channelMode != appliedChannelMode || polyChannel != appliedPolyChannel || args.sampleRate != appliedSampleRate) {
-            WaterfallConfig newConfig;
-            newConfig.fftSize = static_cast<FftSize>(fftSize);
-            newConfig.window = static_cast<WindowFunction>(window);
-            newConfig.quality = static_cast<Quality>(quality);
-            newConfig.channelMode = static_cast<ChannelMode>(channelMode);
-            newConfig.polyChannel = polyChannel;
-            newConfig.sampleRate = args.sampleRate;
-            newConfig.generation = ++configGeneration;
-            analyzer.configure(newConfig);
+        const bool sampleRateChanged = appliedSampleRate != 0.f && args.sampleRate != appliedSampleRate;
+        const bool analysisChanged =
+            fftSize != appliedFftSize || window != appliedWindow || channelMode != appliedChannelMode ||
+            polyChannel != appliedPolyChannel || sampleRateChanged;
+        const bool qualityChanged = quality != appliedQuality;
+        if (analysisChanged || qualityChanged || appliedSampleRate == 0.f) {
+            if (analysisChanged) {
+                ++configGeneration;
+                if (sampleRateChanged) timelineSample = 0;
+            }
+            WaterfallConfig next;
+            next.fftSize = static_cast<FftSize>(fftSize);
+            next.window = static_cast<WindowFunction>(window);
+            next.quality = static_cast<Quality>(quality);
+            next.channelMode = static_cast<ChannelMode>(channelMode);
+            next.polyChannel = polyChannel;
+            next.sampleRate = args.sampleRate;
+            next.generation = configGeneration;
+            analyzer.configure(next);
             activeConfigGeneration.store(configGeneration, std::memory_order_release);
             appliedFftSize = fftSize;
             appliedWindow = window;
@@ -153,22 +169,41 @@ struct Waterfall : Module {
             appliedSampleRate = args.sampleRate;
         }
 
+        ++timelineSample;
+        const bool freezeEvent = freezeButtonTrigger.process(params[FREEZE_PARAM].getValue()) ||
+                                 freezeInputTrigger.process(inputs[FREEZE_INPUT].getVoltage());
+        if (freezeEvent) frozen.store(!frozen.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        const bool clearEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue()) ||
+                                clearInputTrigger.process(inputs[CLEAR_INPUT].getVoltage());
+        if (clearEvent) clearGeneration.fetch_add(1, std::memory_order_release);
+        if (markInputTrigger.process(inputs[MARK_INPUT].getVoltage())) {
+            MarkerEvent marker;
+            marker.timelineSample = timelineSample;
+            marker.sampleRate = args.sampleRate;
+            marker.configGeneration = configGeneration;
+            marker.sequence = ++markerSequence;
+            if (!markerEvents.full())
+                markerEvents.push(marker);
+#ifndef NDEBUG
+            else
+                droppedMarkers.fetch_add(1, std::memory_order_relaxed);
+#endif
+        }
+        lights[FREEZE_LIGHT].setBrightness(frozen.load(std::memory_order_relaxed) ? 1.f : 0.f);
+
         const bool leftConnected = inputs[LEFT_INPUT].isConnected();
         const bool rightConnected = inputs[RIGHT_INPUT].isConnected();
         const float left = leftConnected ? inputs[LEFT_INPUT].getVoltage(polyChannel) : 0.f;
         const float right = rightConnected ? inputs[RIGHT_INPUT].getVoltage(polyChannel) : 0.f;
         const float mixed =
             mixInputVoltages(left, right, leftConnected, rightConnected, static_cast<ChannelMode>(channelMode));
-
         SpectrumRow row;
-        if (analyzer.processSample(mixed * VOLTAGE_TO_FULL_SCALE, row)) {
-            if (!displayRows.full()) {
+        if (analyzer.processSample(mixed * VOLTAGE_TO_FULL_SCALE, timelineSample, row)) {
+            if (!displayRows.full())
                 displayRows.push(row);
-            }
 #ifndef NDEBUG
-            else {
+            else
                 droppedRows.fetch_add(1, std::memory_order_relaxed);
-            }
 #endif
         }
     }
@@ -182,6 +217,14 @@ struct Waterfall : Module {
         json_object_set_new(root, "palette", json_integer(paletteSetting.load()));
         json_object_set_new(root, "peakHold", json_integer(peakHoldSetting.load()));
         json_object_set_new(root, "flow", json_integer(flowSetting.load()));
+        json_object_set_new(root, "renderingStyle", json_integer(renderingStyleSetting.load()));
+        json_object_set_new(root, "liveTrace", json_integer(liveTraceSetting.load()));
+        json_object_set_new(root, "frequencyScale", json_integer(frequencyScaleSetting.load()));
+        json_object_set_new(root, "frequencySmoothing", json_integer(frequencySmoothingSetting.load()));
+        json_object_set_new(root, "temporalSmoothing", json_integer(temporalSmoothingSetting.load()));
+        json_object_set_new(root, "historyDuration", json_integer(historyDurationSetting.load()));
+        json_object_set_new(root, "showMarkers", json_boolean(showMarkersSetting.load()));
+        json_object_set_new(root, "timeSpan", json_real(timeSpanSetting.load()));
         json_object_set_new(root, "viewMinimum", json_real(viewMinimum.load()));
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
         return root;
@@ -201,6 +244,27 @@ struct Waterfall : Module {
                                          static_cast<int>(PeakHold::DECAY)));
         flowSetting.store(getJsonInt(root, "flow", 0, static_cast<int>(FlowDirection::COUNT) - 1,
                                      static_cast<int>(FlowDirection::UP)));
+        renderingStyleSetting.store(getJsonInt(root, "renderingStyle", 0, static_cast<int>(RenderingStyle::COUNT) - 1,
+                                               static_cast<int>(RenderingStyle::SMOOTH)));
+        liveTraceSetting.store(getJsonInt(root, "liveTrace", 0, static_cast<int>(LiveTraceMode::COUNT) - 1,
+                                         static_cast<int>(LiveTraceMode::LINE)));
+        frequencyScaleSetting.store(getJsonInt(root, "frequencyScale", 0,
+                                               static_cast<int>(FrequencyScaleMode::COUNT) - 1,
+                                               static_cast<int>(FrequencyScaleMode::COMBINED)));
+        frequencySmoothingSetting.store(getJsonInt(root, "frequencySmoothing", 0,
+                                                   static_cast<int>(FrequencySmoothing::COUNT) - 1,
+                                                   static_cast<int>(FrequencySmoothing::NONE)));
+        temporalSmoothingSetting.store(getJsonInt(root, "temporalSmoothing", 0,
+                                                  static_cast<int>(TemporalSmoothing::COUNT) - 1,
+                                                  static_cast<int>(TemporalSmoothing::OFF)));
+        historyDurationSetting.store(getJsonInt(root, "historyDuration", 0,
+                                                static_cast<int>(HistoryDuration::COUNT) - 1,
+                                                static_cast<int>(HistoryDuration::SECONDS_8)));
+        json_t* showMarkers = json_object_get(root, "showMarkers");
+        showMarkersSetting.store(json_is_boolean(showMarkers) ? json_is_true(showMarkers) : true);
+        const int duration = historyDurationSeconds(static_cast<HistoryDuration>(historyDurationSetting.load()));
+        timeSpanSetting.store(getJsonFloat(root, "timeSpan", 0.25f, static_cast<float>(duration),
+                                           static_cast<float>(duration)));
         float minimum = getJsonFloat(root, "viewMinimum", 0.f, 0.99f, 0.f);
         float maximum = getJsonFloat(root, "viewMaximum", 0.01f, 1.f, 1.f);
         if (maximum - minimum < 0.01f) {
@@ -209,6 +273,8 @@ struct Waterfall : Module {
         }
         viewMinimum.store(minimum);
         viewMaximum.store(maximum);
+        frozen.store(false);
+        clearGeneration.fetch_add(1, std::memory_order_release);
     }
 };
 
@@ -218,14 +284,20 @@ struct WaterfallRenderer {
     GLuint program = 0;
     GLuint historyTexture = 0;
     GLuint traceTexture = 0;
+    GLuint lookupTexture = 0;
+    int allocatedRows = 0;
     GLint historyLocation = -1;
     GLint traceLocation = -1;
-    GLint headLocation = -1;
+    GLint lookupLocation = -1;
+    GLint rowsLocation = -1;
     GLint flowLocation = -1;
     GLint viewLocation = -1;
     GLint rangeLocation = -1;
     GLint paletteLocation = -1;
     GLint peakHoldLocation = -1;
+    GLint liveTraceLocation = -1;
+    GLint styleLocation = -1;
+    GLint logicalPixelLocation = -1;
     bool initializationAttempted = false;
 
     static std::string loadResource(const std::string& path) {
@@ -250,77 +322,83 @@ struct WaterfallRenderer {
         return 0;
     }
 
-    bool initialize() {
-        if (program && historyTexture && traceTexture) return true;
-        if (initializationAttempted) return false;
-        initializationAttempted = true;
-        try {
-            GLuint vertex = compile(GL_VERTEX_SHADER, loadResource("res/shaders/waterfall_gl.vert"), "vertex");
-            GLuint fragment = compile(GL_FRAGMENT_SHADER, loadResource("res/shaders/waterfall_gl.frag"), "fragment");
-            if (!vertex || !fragment) {
-                if (vertex) glDeleteShader(vertex);
-                if (fragment) glDeleteShader(fragment);
+    bool initialize(int requestedRows) {
+        if (!program) {
+            if (initializationAttempted) return false;
+            initializationAttempted = true;
+            try {
+                GLuint vertex = compile(GL_VERTEX_SHADER, loadResource("res/shaders/waterfall_gl.vert"), "vertex");
+                GLuint fragment =
+                    compile(GL_FRAGMENT_SHADER, loadResource("res/shaders/waterfall_gl.frag"), "fragment");
+                if (!vertex || !fragment) return false;
+                program = glCreateProgram();
+                glAttachShader(program, vertex);
+                glAttachShader(program, fragment);
+                glLinkProgram(program);
+                glDeleteShader(vertex);
+                glDeleteShader(fragment);
+                GLint linked = GL_FALSE;
+                glGetProgramiv(program, GL_LINK_STATUS, &linked);
+                if (linked != GL_TRUE) {
+                    glDeleteProgram(program);
+                    program = 0;
+                    return false;
+                }
+                historyLocation = glGetUniformLocation(program, "uHistory");
+                traceLocation = glGetUniformLocation(program, "uTrace");
+                lookupLocation = glGetUniformLocation(program, "uTimeLookup");
+                rowsLocation = glGetUniformLocation(program, "uRows");
+                flowLocation = glGetUniformLocation(program, "uFlow");
+                viewLocation = glGetUniformLocation(program, "uView");
+                rangeLocation = glGetUniformLocation(program, "uRange");
+                paletteLocation = glGetUniformLocation(program, "uPalette");
+                peakHoldLocation = glGetUniformLocation(program, "uPeakHold");
+                liveTraceLocation = glGetUniformLocation(program, "uLiveTrace");
+                styleLocation = glGetUniformLocation(program, "uRenderingStyle");
+                logicalPixelLocation = glGetUniformLocation(program, "uLogicalPixel");
+                glGenTextures(1, &historyTexture);
+                glGenTextures(1, &traceTexture);
+                glGenTextures(1, &lookupTexture);
+
+                glBindTexture(GL_TEXTURE_2D, traceTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, NUM_FREQUENCY_CELLS, 1, 0, GL_RGBA,
+                             GL_UNSIGNED_SHORT, NULL);
+
+                glBindTexture(GL_TEXTURE_2D, lookupTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TIME_LOOKUP_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            } catch (const std::exception& exception) {
+                WARN("Waterfall shader resources could not be loaded: %s", exception.what());
                 return false;
             }
-
-            GLuint candidate = glCreateProgram();
-            glAttachShader(candidate, vertex);
-            glAttachShader(candidate, fragment);
-            glLinkProgram(candidate);
-            glDeleteShader(vertex);
-            glDeleteShader(fragment);
-            GLint linked = GL_FALSE;
-            glGetProgramiv(candidate, GL_LINK_STATUS, &linked);
-            if (linked != GL_TRUE) {
-                GLint length = 0;
-                glGetProgramiv(candidate, GL_INFO_LOG_LENGTH, &length);
-                std::vector<GLchar> log(static_cast<size_t>(std::max(length, 1)));
-                glGetProgramInfoLog(candidate, length, NULL, log.data());
-                WARN("Waterfall shader link failed: %s", log.data());
-                glDeleteProgram(candidate);
-                return false;
-            }
-
-            program = candidate;
-            historyLocation = glGetUniformLocation(program, "uHistory");
-            traceLocation = glGetUniformLocation(program, "uTrace");
-            headLocation = glGetUniformLocation(program, "uHead");
-            flowLocation = glGetUniformLocation(program, "uFlow");
-            viewLocation = glGetUniformLocation(program, "uView");
-            rangeLocation = glGetUniformLocation(program, "uRange");
-            paletteLocation = glGetUniformLocation(program, "uPalette");
-            peakHoldLocation = glGetUniformLocation(program, "uPeakHold");
-
-            glGenTextures(1, &historyTexture);
+        }
+        if (allocatedRows != requestedRows) {
             glBindTexture(GL_TEXTURE_2D, historyTexture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, NUM_FREQUENCY_CELLS, HISTORY_ROWS, 0, GL_RGBA,
-                         GL_UNSIGNED_BYTE, NULL);
-
-            glGenTextures(1, &traceTexture);
-            glBindTexture(GL_TEXTURE_2D, traceTexture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, NUM_FREQUENCY_CELLS, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-            return true;
-        } catch (const std::exception& exception) {
-            WARN("Waterfall shader resources could not be loaded: %s", exception.what());
-            return false;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE8, NUM_FREQUENCY_CELLS, requestedRows, 0, GL_LUMINANCE,
+                         GL_UNSIGNED_BYTE, NULL);
+            allocatedRows = requestedRows;
         }
+        return program && historyTexture && traceTexture && lookupTexture;
     }
 
     void destroy() {
+        if (lookupTexture) glDeleteTextures(1, &lookupTexture);
         if (traceTexture) glDeleteTextures(1, &traceTexture);
         if (historyTexture) glDeleteTextures(1, &historyTexture);
         if (program) glDeleteProgram(program);
-        traceTexture = 0;
-        historyTexture = 0;
-        program = 0;
+        program = historyTexture = traceTexture = lookupTexture = 0;
+        allocatedRows = 0;
         initializationAttempted = false;
     }
 };
@@ -328,35 +406,44 @@ struct WaterfallRenderer {
 struct WaterfallDisplay : widget::OpenGlWidget {
     Waterfall* module = NULL;
     WaterfallRenderer renderer;
-    std::array<SpectrumRow, HISTORY_ROWS> history;
+    HistoryTimeline timeline;
+    FrequencySmoothingKernel frequencyKernel;
+    TemporalPowerSmoother temporalSmoother;
+    std::vector<SpectrumRow> derivedRows;
+    std::vector<bool> dirtyRows;
     std::array<float, NUM_FREQUENCY_CELLS> currentTrace;
     std::array<float, NUM_FREQUENCY_CELLS> peakTrace;
-    std::array<bool, HISTORY_ROWS> dirtyRows;
-    int head = -1;
-    int historyCount = 0;
-    uint64_t currentGeneration = 0;
     uint64_t seenClearGeneration = 0;
     uint64_t seenModuleConfigGeneration = 0;
+    int appliedCapacity = 0;
+    int appliedFrequencySmoothing = -1;
+    int appliedTemporalSmoothing = -1;
+    int appliedPeakHold = -1;
+    float appliedSmoothingSampleRate = 48000.f;
     bool traceDirty = true;
+    bool lookupDirty = true;
     SpectrumRow latestMetadata;
 
     WaterfallDisplay() {
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
-        dirtyRows.fill(true);
-        for (int row = 0; row < HISTORY_ROWS; ++row) {
-            history[static_cast<size_t>(row)].dbTenths.fill(quantizeDb(INTERNAL_FLOOR_DB));
-        }
+        frequencyKernel.configure(FrequencySmoothing::NONE);
+        temporalSmoother.configure(TemporalSmoothing::OFF);
+        resizeCaches(timeline.capacity());
+    }
+
+    void resizeCaches(int capacity) {
+        derivedRows.resize(static_cast<size_t>(capacity));
+        dirtyRows.assign(static_cast<size_t>(capacity), true);
+        appliedCapacity = capacity;
+        lookupDirty = true;
     }
 
     void onContextCreate(const ContextCreateEvent& event) override {
         widget::OpenGlWidget::onContextCreate(event);
-        renderer.program = 0;
-        renderer.historyTexture = 0;
-        renderer.traceTexture = 0;
-        renderer.initializationAttempted = false;
-        dirtyRows.fill(true);
-        traceDirty = true;
+        renderer = WaterfallRenderer();
+        dirtyRows.assign(dirtyRows.size(), true);
+        traceDirty = lookupDirty = true;
     }
 
     void onContextDestroy(const ContextDestroyEvent& event) override {
@@ -365,92 +452,165 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     }
 
     void clearHistory() {
-        head = -1;
-        historyCount = 0;
-        currentGeneration = 0;
+        timeline.clear();
+        temporalSmoother.reset();
         latestMetadata = SpectrumRow();
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
-        for (int row = 0; row < HISTORY_ROWS; ++row) {
-            history[static_cast<size_t>(row)] = SpectrumRow();
-            history[static_cast<size_t>(row)].dbTenths.fill(quantizeDb(INTERNAL_FLOOR_DB));
+        for (size_t i = 0; i < derivedRows.size(); ++i) {
+            derivedRows[i] = SpectrumRow();
+            derivedRows[i].dbTenths.fill(quantizeDb(INTERNAL_FLOOR_DB));
         }
-        dirtyRows.fill(true);
-        traceDirty = true;
+        dirtyRows.assign(dirtyRows.size(), true);
+        traceDirty = lookupDirty = true;
     }
 
-    void addRow(const SpectrumRow& row) {
-        if (currentGeneration != 0 && row.configGeneration != currentGeneration) clearHistory();
-        currentGeneration = row.configGeneration;
-
-        float elapsedSeconds = 0.f;
-        if (historyCount > 0 && latestMetadata.sampleRate == row.sampleRate &&
-            row.rowEndSample >= latestMetadata.rowEndSample) {
-            elapsedSeconds =
-                static_cast<float>(row.rowEndSample - latestMetadata.rowEndSample) / std::max(row.sampleRate, 1.f);
+    void rebuildDerived() {
+        temporalSmoother.configure(static_cast<TemporalSmoothing>(appliedTemporalSmoothing));
+        currentTrace.fill(INTERNAL_FLOOR_DB);
+        peakTrace.fill(INTERNAL_FLOOR_DB);
+        const SpectrumRow* previousRaw = NULL;
+        for (int ordered = 0; ordered < timeline.size(); ++ordered) {
+            const int physical = timeline.physicalFromOldest(ordered);
+            const SpectrumRow* raw = timeline.physicalRow(physical);
+            SpectrumRow frequencySmoothed;
+            frequencyKernel.apply(*raw, frequencySmoothed);
+            temporalSmoother.process(frequencySmoothed, derivedRows[static_cast<size_t>(physical)]);
+            float elapsed = 0.f;
+            if (previousRaw && previousRaw->sampleRate == raw->sampleRate &&
+                raw->rowEndSample >= previousRaw->rowEndSample)
+                elapsed = static_cast<float>(raw->rowEndSample - previousRaw->rowEndSample) / raw->sampleRate;
+            updateTraces(derivedRows[static_cast<size_t>(physical)], elapsed);
+            previousRaw = raw;
         }
-        if (!(elapsedSeconds > 0.f)) {
-            elapsedSeconds = 1.f / rowsPerSecond(static_cast<Quality>(
-                                             clampValue(module ? module->qualitySetting.load() : 1, 0, 2)));
-        }
+        dirtyRows.assign(dirtyRows.size(), true);
+        traceDirty = lookupDirty = true;
+    }
 
+    void syncSettings() {
+        const int quality = clampValue(module ? module->qualitySetting.load() : 1, 0, 2);
+        const int durationIndex =
+            clampValue(module ? module->historyDurationSetting.load() : 2, 0,
+                       static_cast<int>(HistoryDuration::COUNT) - 1);
+        const float retained =
+            static_cast<float>(historyDurationSeconds(static_cast<HistoryDuration>(durationIndex)));
+        int desired = historyRowCapacity(retained, rowsPerSecond(static_cast<Quality>(quality)));
+        GLint maximumTexture = 2048;
+        if (renderer.program) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
+        desired = std::min(desired, std::max(static_cast<int>(maximumTexture), 4));
+        timeline.setExpectedRowsPerSecond(rowsPerSecond(static_cast<Quality>(quality)));
+        timeline.setRetainedDuration(std::min(retained, (desired - 2.f) / rowsPerSecond(static_cast<Quality>(quality))));
+        if (desired != timeline.capacity()) {
+            timeline.setCapacity(desired);
+            resizeCaches(desired);
+            renderer.allocatedRows = 0;
+            rebuildDerived();
+        }
+        if (module) {
+            timeline.setVisibleSpan(module->timeSpanSetting.load());
+            module->timeSpanSetting.store(timeline.visibleSpan());
+        }
+        const int frequencyMode =
+            clampValue(module ? module->frequencySmoothingSetting.load() : 0, 0,
+                       static_cast<int>(FrequencySmoothing::COUNT) - 1);
+        const int temporalMode =
+            clampValue(module ? module->temporalSmoothingSetting.load() : 0, 0,
+                       static_cast<int>(TemporalSmoothing::COUNT) - 1);
+        if (frequencyMode != appliedFrequencySmoothing || temporalMode != appliedTemporalSmoothing) {
+            appliedFrequencySmoothing = frequencyMode;
+            appliedTemporalSmoothing = temporalMode;
+            frequencyKernel.configure(static_cast<FrequencySmoothing>(frequencyMode), appliedSmoothingSampleRate);
+            rebuildDerived();
+        }
+        const int peak =
+            clampValue(module ? module->peakHoldSetting.load() : 1, 0, static_cast<int>(PeakHold::COUNT) - 1);
+        if (peak != appliedPeakHold) {
+            appliedPeakHold = peak;
+            rebuildDerived();
+        }
+    }
+
+    void updateTraces(const SpectrumRow& row, float elapsedSeconds) {
         const PeakHold peakMode = static_cast<PeakHold>(
             clampValue(module ? module->peakHoldSetting.load() : static_cast<int>(PeakHold::DECAY), 0,
                        static_cast<int>(PeakHold::COUNT) - 1));
         for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
             const float value = dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]);
             currentTrace[static_cast<size_t>(cell)] = value;
-            if (peakMode == PeakHold::OFF) {
+            if (peakMode == PeakHold::OFF)
                 peakTrace[static_cast<size_t>(cell)] = INTERNAL_FLOOR_DB;
-            } else if (peakMode == PeakHold::INFINITE) {
+            else if (peakMode == PeakHold::INFINITE)
                 peakTrace[static_cast<size_t>(cell)] = std::max(peakTrace[static_cast<size_t>(cell)], value);
-            } else {
+            else
                 peakTrace[static_cast<size_t>(cell)] =
                     std::max(value, peakTrace[static_cast<size_t>(cell)] - 12.f * elapsedSeconds);
-            }
         }
-
-        head = (head + 1) % HISTORY_ROWS;
-        history[static_cast<size_t>(head)] = row;
-        historyCount = std::min(historyCount + 1, HISTORY_ROWS);
-        latestMetadata = row;
-        dirtyRows[static_cast<size_t>(head)] = true;
         traceDirty = true;
     }
 
-    void drainRows() {
+    void addRow(const SpectrumRow& row) {
+        if (row.sampleRate != appliedSmoothingSampleRate) {
+            appliedSmoothingSampleRate = row.sampleRate;
+            frequencyKernel.configure(static_cast<FrequencySmoothing>(
+                                          std::max(appliedFrequencySmoothing, 0)),
+                                      appliedSmoothingSampleRate);
+            if (!timeline.empty()) rebuildDerived();
+        }
+        float elapsed = 0.f;
+        if (const SpectrumRow* newest = timeline.newestRow()) {
+            if (newest->sampleRate == row.sampleRate && row.rowEndSample >= newest->rowEndSample)
+                elapsed = static_cast<float>(row.rowEndSample - newest->rowEndSample) / row.sampleRate;
+        }
+        const int physical = timeline.addRow(row);
+        SpectrumRow frequencySmoothed;
+        frequencyKernel.apply(row, frequencySmoothed);
+        temporalSmoother.process(frequencySmoothed, derivedRows[static_cast<size_t>(physical)]);
+        updateTraces(derivedRows[static_cast<size_t>(physical)], elapsed);
+        latestMetadata = row;
+        dirtyRows[static_cast<size_t>(physical)] = true;
+        lookupDirty = true;
+    }
+
+    void drainQueues() {
         if (!module) return;
+        syncSettings();
         const uint64_t clear = module->clearGeneration.load(std::memory_order_acquire);
         if (clear != seenClearGeneration) {
             seenClearGeneration = clear;
             clearHistory();
+            while (!module->displayRows.empty()) module->displayRows.shift();
+            while (!module->markerEvents.empty()) module->markerEvents.shift();
+            return;
         }
-        const uint64_t moduleGeneration = module->activeConfigGeneration.load(std::memory_order_acquire);
-        if (seenModuleConfigGeneration != 0 && moduleGeneration != seenModuleConfigGeneration) clearHistory();
-        seenModuleConfigGeneration = moduleGeneration;
-
-        const bool isFrozen = module->frozen.load(std::memory_order_relaxed);
+        const uint64_t generation = module->activeConfigGeneration.load(std::memory_order_acquire);
+        if (seenModuleConfigGeneration != 0 && generation != seenModuleConfigGeneration) clearHistory();
+        seenModuleConfigGeneration = generation;
+        const bool frozen = module->frozen.load(std::memory_order_relaxed);
         while (!module->displayRows.empty()) {
             const SpectrumRow row = module->displayRows.shift();
-            if (!isFrozen) addRow(row);
+            if (!frozen && row.configGeneration == generation) addRow(row);
+        }
+        while (!module->markerEvents.empty()) {
+            const MarkerEvent marker = module->markerEvents.shift();
+            if (marker.configGeneration == generation) timeline.addMarker(marker);
         }
     }
 
     void seedPreview() {
-        if (historyCount > 0) return;
-        const float sampleRate = 48000.f;
-        for (int rowIndex = 0; rowIndex < HISTORY_ROWS; ++rowIndex) {
+        if (!timeline.empty()) return;
+        for (int index = 0; index < timeline.capacity(); ++index) {
             SpectrumRow row;
-            row.sampleRate = sampleRate;
+            row.sampleRate = 48000.f;
             row.fftSize = 4096;
             row.effectiveHopSize = 1024;
+            row.displayRowsPerSecond = 30;
             row.configGeneration = 1;
-            row.rowEndSample = static_cast<uint64_t>((rowIndex + 1) * 1600);
+            row.rowEndSample = static_cast<uint64_t>((index + 1) * 1600);
             row.sourceAnalysisSample = row.rowEndSample;
             for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
                 const float x = static_cast<float>(cell) / (NUM_FREQUENCY_CELLS - 1);
-                const float ridge = 0.20f + 0.22f * std::sin(rowIndex * 0.055f);
-                const float ridge2 = 0.64f + 0.08f * std::sin(rowIndex * 0.031f);
+                const float ridge = 0.20f + 0.22f * std::sin(index * 0.055f);
+                const float ridge2 = 0.64f + 0.08f * std::sin(index * 0.031f);
                 const float energy = std::max(std::exp(-900.f * (x - ridge) * (x - ridge)),
                                               0.7f * std::exp(-500.f * (x - ridge2) * (x - ridge2)));
                 row.dbTenths[static_cast<size_t>(cell)] = quantizeDb(-105.f + energy * 91.f);
@@ -459,51 +619,58 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         }
     }
 
-    bool sampleAt(float fullFrequency, float age, float& db, SpectrumRow& metadata) const {
-        if (historyCount <= 0 || head < 0) return false;
-        const int ageRows = clampValue(static_cast<int>(std::lround(age * (HISTORY_ROWS - 1))), 0,
-                                       HISTORY_ROWS - 1);
-        if (ageRows >= historyCount) return false;
-        const int rowIndex = (head - ageRows + HISTORY_ROWS) % HISTORY_ROWS;
+    bool sampleAt(float fullFrequency, float age, float& displayedDb, float& rawDb, SpectrumRow& metadata) const {
+        const TimelineSelection selected = timeline.lookup(age);
+        if (!selected.valid) return false;
         const int cell = clampValue(static_cast<int>(std::lround(fullFrequency * (NUM_FREQUENCY_CELLS - 1))), 0,
                                     NUM_FREQUENCY_CELLS - 1);
-        metadata = history[static_cast<size_t>(rowIndex)];
-        db = dequantizeDb(metadata.dbTenths[static_cast<size_t>(cell)]);
+        const SpectrumRow* rawOlder = timeline.physicalRow(selected.olderPhysical);
+        const SpectrumRow* rawNewer = timeline.physicalRow(selected.newerPhysical);
+        const SpectrumRow& shownOlder = derivedRows[static_cast<size_t>(selected.olderPhysical)];
+        const SpectrumRow& shownNewer = derivedRows[static_cast<size_t>(selected.newerPhysical)];
+        rawDb = interpolateNoOvershoot(dequantizeDb(rawOlder->dbTenths[static_cast<size_t>(cell)]),
+                                       dequantizeDb(rawNewer->dbTenths[static_cast<size_t>(cell)]),
+                                       selected.interpolationValid ? selected.fraction : 0.f);
+        displayedDb = interpolateNoOvershoot(dequantizeDb(shownOlder.dbTenths[static_cast<size_t>(cell)]),
+                                             dequantizeDb(shownNewer.dbTenths[static_cast<size_t>(cell)]),
+                                             selected.interpolationValid ? selected.fraction : 0.f);
+        metadata = selected.fraction < 0.5f ? *rawOlder : *rawNewer;
         return true;
     }
 
     void uploadDirtyData() {
-        std::array<unsigned char, NUM_FREQUENCY_CELLS * 4> pixels;
+        std::array<unsigned char, NUM_FREQUENCY_CELLS> rowBytes;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glBindTexture(GL_TEXTURE_2D, renderer.historyTexture);
-        for (int row = 0; row < HISTORY_ROWS; ++row) {
+        for (int row = 0; row < timeline.capacity(); ++row) {
             if (!dirtyRows[static_cast<size_t>(row)]) continue;
-            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
-                const unsigned char encoded =
-                    encodeDb(dequantizeDb(history[static_cast<size_t>(row)].dbTenths[static_cast<size_t>(cell)]));
-                const size_t offset = static_cast<size_t>(cell * 4);
-                pixels[offset] = encoded;
-                pixels[offset + 1] = encoded;
-                pixels[offset + 2] = encoded;
-                pixels[offset + 3] = 255;
-            }
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, NUM_FREQUENCY_CELLS, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                            pixels.data());
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
+                rowBytes[static_cast<size_t>(cell)] =
+                    encodeDb(dequantizeDb(derivedRows[static_cast<size_t>(row)].dbTenths[static_cast<size_t>(cell)]));
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, NUM_FREQUENCY_CELLS, 1, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+                            rowBytes.data());
             dirtyRows[static_cast<size_t>(row)] = false;
         }
-
         if (traceDirty) {
+            std::array<unsigned short, NUM_FREQUENCY_CELLS * 4> traceBytes;
             for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
                 const size_t offset = static_cast<size_t>(cell * 4);
-                pixels[offset] = encodeDb(currentTrace[static_cast<size_t>(cell)]);
-                pixels[offset + 1] = encodeDb(peakTrace[static_cast<size_t>(cell)]);
-                pixels[offset + 2] = 0;
-                pixels[offset + 3] = 255;
+                traceBytes[offset] = encodeDb16(currentTrace[static_cast<size_t>(cell)]);
+                traceBytes[offset + 1] = encodeDb16(peakTrace[static_cast<size_t>(cell)]);
+                traceBytes[offset + 2] = 0;
+                traceBytes[offset + 3] = 65535;
             }
             glBindTexture(GL_TEXTURE_2D, renderer.traceTexture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, NUM_FREQUENCY_CELLS, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                            pixels.data());
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, NUM_FREQUENCY_CELLS, 1, GL_RGBA, GL_UNSIGNED_SHORT,
+                            traceBytes.data());
             traceDirty = false;
+        }
+        if (lookupDirty) {
+            const std::array<unsigned char, TIME_LOOKUP_SIZE * 4> lookup = timeline.buildLookup();
+            glBindTexture(GL_TEXTURE_2D, renderer.lookupTexture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TIME_LOOKUP_SIZE, 1, GL_RGBA, GL_UNSIGNED_BYTE,
+                            lookup.data());
+            lookupDirty = false;
         }
     }
 
@@ -520,28 +687,13 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         glEnd();
     }
 
-    void drawFallback() {
-        glUseProgram(0);
-        glBegin(GL_QUADS);
-        glColor3f(0.005f, 0.008f, 0.012f);
-        glVertex2f(-1.f, -1.f);
-        glVertex2f(1.f, -1.f);
-        glColor3f(0.02f, 0.025f, 0.032f);
-        glVertex2f(1.f, 1.f);
-        glVertex2f(-1.f, 1.f);
-        glEnd();
-    }
-
     void drawFramebuffer() override {
         if (module)
-            drainRows();
+            drainQueues();
         else
             seedPreview();
 
-        GLint oldProgram = 0;
-        GLint oldActiveTexture = 0;
-        GLint oldTexture0 = 0;
-        GLint oldTexture1 = 0;
+        GLint oldProgram = 0, oldActiveTexture = 0, oldTexture0 = 0, oldTexture1 = 0, oldTexture2 = 0;
         GLint oldUnpackAlignment = 4;
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
@@ -550,8 +702,9 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture0);
         glActiveTexture(GL_TEXTURE1);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture1);
+        glActiveTexture(GL_TEXTURE2);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture2);
         glPushAttrib(GL_CURRENT_BIT | GL_ENABLE_BIT | GL_VIEWPORT_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT);
-
         const math::Vec framebuffer = getFramebufferSize();
         glViewport(0, 0, static_cast<GLsizei>(framebuffer.x), static_cast<GLsizei>(framebuffer.y));
         glDisable(GL_DEPTH_TEST);
@@ -560,15 +713,10 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
 
-        if (renderer.initialize()) {
+        if (renderer.initialize(timeline.capacity())) {
+            if (renderer.allocatedRows == timeline.capacity() && dirtyRows.size() != static_cast<size_t>(timeline.capacity()))
+                resizeCaches(timeline.capacity());
             uploadDirtyData();
-            const int flow = module ? clampValue(module->flowSetting.load(), 0, 3) : 0;
-            const int palette = module ? clampValue(module->paletteSetting.load(), 0, 2) : 0;
-            const int peakHold = module ? clampValue(module->peakHoldSetting.load(), 0, 2) : 1;
-            float viewLow = module ? module->viewMinimum.load() : 0.f;
-            float viewHigh = module ? module->viewMaximum.load() : 1.f;
-            const float floorDb = module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB;
-
             glUseProgram(renderer.program);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, renderer.historyTexture);
@@ -576,63 +724,52 @@ struct WaterfallDisplay : widget::OpenGlWidget {
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, renderer.traceTexture);
             glUniform1i(renderer.traceLocation, 1);
-            glUniform1f(renderer.headLocation, static_cast<float>(std::max(head, 0)));
-            glUniform1i(renderer.flowLocation, flow);
-            glUniform2f(renderer.viewLocation, viewLow, viewHigh);
-            glUniform2f(renderer.rangeLocation, floorDb, 0.f);
-            glUniform1i(renderer.paletteLocation, palette);
-            glUniform1i(renderer.peakHoldLocation, peakHold);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, renderer.lookupTexture);
+            glUniform1i(renderer.lookupLocation, 2);
+            glUniform1f(renderer.rowsLocation, static_cast<float>(timeline.capacity()));
+            glUniform1i(renderer.flowLocation, module ? clampValue(module->flowSetting.load(), 0, 3) : 0);
+            glUniform2f(renderer.viewLocation, module ? module->viewMinimum.load() : 0.f,
+                        module ? module->viewMaximum.load() : 1.f);
+            glUniform2f(renderer.rangeLocation,
+                        module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB, 0.f);
+            glUniform1i(renderer.paletteLocation, module ? clampValue(module->paletteSetting.load(), 0, 2) : 0);
+            glUniform1i(renderer.peakHoldLocation, module ? clampValue(module->peakHoldSetting.load(), 0, 2) : 1);
+            glUniform1i(renderer.liveTraceLocation, module ? clampValue(module->liveTraceSetting.load(), 0, 2) : 1);
+            glUniform1i(renderer.styleLocation,
+                        module ? clampValue(module->renderingStyleSetting.load(), 0, 1) : 1);
+            glUniform2f(renderer.logicalPixelLocation, 1.f / std::max(framebuffer.x, 1.f),
+                        1.f / std::max(framebuffer.y, 1.f));
             drawQuad();
         } else {
-            drawFallback();
+            glUseProgram(0);
+            glBegin(GL_QUADS);
+            glColor3f(0.005f, 0.008f, 0.012f);
+            glVertex2f(-1.f, -1.f);
+            glVertex2f(1.f, -1.f);
+            glColor3f(0.02f, 0.025f, 0.032f);
+            glVertex2f(1.f, 1.f);
+            glVertex2f(-1.f, 1.f);
+            glEnd();
         }
-
         glPopAttrib();
         glUseProgram(static_cast<GLuint>(oldProgram));
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture0));
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture1));
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture2));
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
         glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
     }
 
     void drawPreviewNanoVg(const DrawArgs& args) {
-        nvgSave(args.vg);
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0.f, 0.f, box.size.x, box.size.y);
         nvgFillPaint(args.vg, nvgLinearGradient(args.vg, 0.f, 0.f, box.size.x, box.size.y,
                                                 nvgRGB(40, 5, 52), nvgRGB(2, 4, 7)));
         nvgFill(args.vg);
-
-        nvgBeginPath(args.vg);
-        for (int y = 0; y < 90; ++y) {
-            const float age = static_cast<float>(y) / 89.f;
-            const float ridge = 0.2f + 0.18f * std::sin(age * 14.f);
-            const float x = ridge * box.size.x;
-            const float displayY = age * box.size.y;
-            if (y == 0)
-                nvgMoveTo(args.vg, x, displayY);
-            else
-                nvgLineTo(args.vg, x, displayY);
-        }
-        nvgStrokeColor(args.vg, nvgRGB(255, 126, 45));
-        nvgStrokeWidth(args.vg, 5.f);
-        nvgStroke(args.vg);
-        nvgBeginPath(args.vg);
-        for (int y = 0; y < 90; ++y) {
-            const float age = static_cast<float>(y) / 89.f;
-            const float x = (0.64f + 0.08f * std::sin(age * 8.f)) * box.size.x;
-            const float displayY = age * box.size.y;
-            if (y == 0)
-                nvgMoveTo(args.vg, x, displayY);
-            else
-                nvgLineTo(args.vg, x, displayY);
-        }
-        nvgStrokeColor(args.vg, nvgRGB(240, 54, 95));
-        nvgStrokeWidth(args.vg, 3.f);
-        nvgStroke(args.vg);
-        nvgRestore(args.vg);
     }
 
     void draw(const DrawArgs& args) override {
@@ -649,33 +786,31 @@ struct WaterfallOverlay : TransparentWidget {
     WaterfallDisplay* display = NULL;
     bool hovered = false;
     bool draggingLegend = false;
+    bool draggingTime = false;
     math::Vec cursor;
 
     FlowDirection flow() const {
         return static_cast<FlowDirection>(
             clampValue(module ? module->flowSetting.load() : 0, 0, static_cast<int>(FlowDirection::COUNT) - 1));
     }
-
     float viewLow() const { return module ? module->viewMinimum.load() : 0.f; }
     float viewHigh() const { return module ? module->viewMaximum.load() : 1.f; }
-
     LogicalPoint logicalAt(math::Vec position) const {
-        const float x = position.x / std::max(box.size.x, 1.f);
-        const float yBottom = 1.f - position.y / std::max(box.size.y, 1.f);
-        return logicalFromScreen(flow(), x, yBottom);
+        return logicalFromScreen(flow(), position.x / std::max(box.size.x, 1.f),
+                                 1.f - position.y / std::max(box.size.y, 1.f));
     }
-
     float fullFrequencyCoordinate(const LogicalPoint& logical) const {
         return viewLow() + logical.frequency * (viewHigh() - viewLow());
     }
-
     float nyquist() const {
-        if (display && display->latestMetadata.sampleRate > 0.f) return display->latestMetadata.sampleRate * 0.5f;
-        return 24000.f;
+        return display && display->latestMetadata.sampleRate > 0.f ? display->latestMetadata.sampleRate * 0.5f
+                                                                  : 24000.f;
     }
-
     float frequencyFromFullCoordinate(float coordinate) const {
         return MIN_FREQUENCY_HZ * std::pow(nyquist() / MIN_FREQUENCY_HZ, clampValue(coordinate, 0.f, 1.f));
+    }
+    bool inTimeGutter(math::Vec position) const {
+        return isVerticalFlow(flow()) ? position.x < 40.f : position.y > box.size.y - 18.f;
     }
 
     void drawStatus(const DrawArgs& args) {
@@ -687,74 +822,145 @@ struct WaterfallOverlay : TransparentWidget {
         const int quality = module ? clampValue(module->qualitySetting.load(), 0, 2) : 1;
         const float range = module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB;
         const bool frozen = module && module->frozen.load();
-        float overlap = 75.f;
-        if (display && display->latestMetadata.fftSize > 0) {
-            overlap =
-                clampValue(100.f * (1.f - static_cast<float>(display->latestMetadata.effectiveHopSize) /
-                                              display->latestMetadata.fftSize),
-                           0.f, 75.f);
-        }
+        const float retained = display ? display->timeline.retainedDuration() : 8.f;
         const std::string status = rack::string::f(
-            "%s  %d %s  %s  %.0f%% ov  %.0f..0 dBFS%s", CHANNEL_NAMES[mode], FFT_SIZES[fft],
-            WINDOW_NAMES[window], QUALITY_NAMES[quality], overlap, range, frozen ? "  FROZEN" : "");
-
+            "%s  %d %s  %s  %.1fs  %.0f..0 dBFS%s%s", CHANNEL_NAMES[mode], FFT_SIZES[fft],
+            WINDOW_NAMES[window], QUALITY_NAMES[quality], retained, range, frozen ? "  FROZEN" : "",
+            display && !display->timeline.followsLive() ? "  DETACHED" : "");
         nvgFontSize(args.vg, 9.f);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         nvgFillColor(args.vg, frozen ? nvgRGB(255, 196, 92) : nvgRGB(186, 198, 202));
         nvgText(args.vg, 7.f, 5.f, status.c_str(), NULL);
     }
 
-    void drawGrid(const DrawArgs& args) {
-        static const float guides[] = {20.f, 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f, 20000.f};
-        const float low = viewLow();
-        const float high = viewHigh();
-        const float logRange = std::log(nyquist() / MIN_FREQUENCY_HZ);
-        if (!(logRange > 0.f) || high <= low) return;
-
-        nvgStrokeWidth(args.vg, 0.6f);
-        nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, 42));
-        nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 150));
+    void drawFrequencyGuide(const DrawArgs& args, float frequency, const std::string& label, bool secondary,
+                            float& lastLabelPosition) {
+        if (frequency < MIN_FREQUENCY_HZ || frequency > nyquist()) return;
+        const float full = std::log(frequency / MIN_FREQUENCY_HZ) / std::log(nyquist() / MIN_FREQUENCY_HZ);
+        const float visible = (full - viewLow()) / (viewHigh() - viewLow());
+        if (visible < 0.f || visible > 1.f) return;
+        const float position = visible * (isVerticalFlow(flow()) ? box.size.x : box.size.y);
+        nvgStrokeColor(args.vg, secondary ? nvgRGBA(155, 184, 194, 24) : nvgRGBA(190, 205, 210, 44));
+        nvgStrokeWidth(args.vg, secondary ? 0.45f : 0.7f);
+        nvgBeginPath(args.vg);
+        if (isVerticalFlow(flow())) {
+            nvgMoveTo(args.vg, position, 18.f);
+            nvgLineTo(args.vg, position, box.size.y);
+        } else {
+            const float y = box.size.y - position;
+            nvgMoveTo(args.vg, 0.f, y);
+            nvgLineTo(args.vg, box.size.x - 10.f, y);
+        }
+        nvgStroke(args.vg);
+        if (label.empty() || std::fabs(position - lastLabelPosition) < 31.f) return;
+        lastLabelPosition = position;
+        nvgFillColor(args.vg, secondary ? nvgRGBA(180, 198, 204, 95) : nvgRGBA(190, 205, 210, 155));
         nvgFontSize(args.vg, 8.f);
-        for (size_t i = 0; i < sizeof(guides) / sizeof(guides[0]); ++i) {
-            if (guides[i] > nyquist()) continue;
-            const float full = std::log(guides[i] / MIN_FREQUENCY_HZ) / logRange;
-            const float visible = (full - low) / (high - low);
-            if (visible < 0.f || visible > 1.f) continue;
-            nvgBeginPath(args.vg);
-            if (isVerticalFlow(flow())) {
-                const float x = visible * box.size.x;
-                nvgMoveTo(args.vg, x, 18.f);
-                nvgLineTo(args.vg, x, box.size.y);
-                nvgStroke(args.vg);
-                nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
-                const std::string label = frequencyLabel(guides[i]);
-                nvgText(args.vg, x, box.size.y - 2.f, label.c_str(), NULL);
-            } else {
-                const float y = (1.f - visible) * box.size.y;
-                nvgMoveTo(args.vg, 0.f, y);
-                nvgLineTo(args.vg, box.size.x - 10.f, y);
-                nvgStroke(args.vg);
-                nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-                const std::string label = frequencyLabel(guides[i]);
-                nvgText(args.vg, box.size.x - 3.f, y, label.c_str(), NULL);
+        if (isVerticalFlow(flow())) {
+            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            nvgText(args.vg, position, box.size.y - 2.f, label.c_str(), NULL);
+        } else {
+            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+            nvgText(args.vg, box.size.x - 3.f, box.size.y - position, label.c_str(), NULL);
+        }
+    }
+
+    void drawGrid(const DrawArgs& args) {
+        if (!(nyquist() > MIN_FREQUENCY_HZ) || viewHigh() <= viewLow()) return;
+        const FrequencyScaleMode scale = static_cast<FrequencyScaleMode>(
+            clampValue(module ? module->frequencyScaleSetting.load() : 3, 0,
+                       static_cast<int>(FrequencyScaleMode::COUNT) - 1));
+        static const float hzGuides[] = {20.f, 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f, 20000.f};
+        static const float octaveGuides[] = {31.25f, 62.5f, 125.f, 250.f, 500.f,
+                                            1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
+        float last = -1000.f;
+        if (scale == FrequencyScaleMode::HZ || scale == FrequencyScaleMode::COMBINED) {
+            for (size_t i = 0; i < sizeof(hzGuides) / sizeof(hzGuides[0]); ++i)
+                drawFrequencyGuide(args, hzGuides[i], frequencyLabel(hzGuides[i]), false, last);
+        }
+        if (scale == FrequencyScaleMode::OCTAVES || scale == FrequencyScaleMode::COMBINED) {
+            if (scale == FrequencyScaleMode::OCTAVES) last = -1000.f;
+            for (size_t i = 0; i < sizeof(octaveGuides) / sizeof(octaveGuides[0]); ++i)
+                drawFrequencyGuide(args, octaveGuides[i],
+                                   scale == FrequencyScaleMode::OCTAVES ? frequencyLabel(octaveGuides[i]) : "",
+                                   scale == FrequencyScaleMode::COMBINED, last);
+        }
+        if (scale == FrequencyScaleMode::MUSICAL) {
+            const float frequencyAxisPixels = isVerticalFlow(flow()) ? box.size.x : box.size.y;
+            const float semitonePixels = frequencyAxisPixels / std::max((viewHigh() - viewLow()) *
+                                                                            std::log2(nyquist() / MIN_FREQUENCY_HZ) *
+                                                                            12.f,
+                                                                        1.f);
+            for (int midi = 12; midi <= 132; ++midi) {
+                if (midi % 12 != 0 && semitonePixels < 18.f) continue;
+                const float frequency = 440.f * std::pow(2.f, (midi - 69) / 12.f);
+                std::string label;
+                if (midi % 12 == 0) label = rack::string::f("C%d", midi / 12 - 1);
+                drawFrequencyGuide(args, frequency, label, midi % 12 != 0, last);
             }
         }
+        drawTimeRuler(args);
+    }
 
-        nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, 26));
-        for (int division = 1; division < 4; ++division) {
-            const float age = division / 4.f;
-            float x = 0.f;
-            float yBottom = 0.f;
-            screenFromLogical(flow(), LogicalPoint(0.f, age), x, yBottom);
+    void drawTimeRuler(const DrawArgs& args) {
+        if (!display) return;
+        const float pixels = isVerticalFlow(flow()) ? box.size.y : box.size.x;
+        const std::vector<TimeTick> ticks = display->timeline.makeTicks(48.f, pixels);
+        nvgFontSize(args.vg, 7.5f);
+        for (size_t i = 0; i < ticks.size(); ++i) {
+            float x = 0.f, yBottom = 0.f;
+            screenFromLogical(flow(), LogicalPoint(0.f, ticks[i].normalizedAge), x, yBottom);
+            const float y = (1.f - yBottom) * box.size.y;
+            nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, 28));
             nvgBeginPath(args.vg);
             if (isVerticalFlow(flow())) {
-                const float y = (1.f - yBottom) * box.size.y;
                 nvgMoveTo(args.vg, 0.f, y);
                 nvgLineTo(args.vg, box.size.x, y);
+                nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+                nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
+                const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                nvgText(args.vg, 2.f, y, label.c_str(), NULL);
             } else {
                 const float displayX = x * box.size.x;
                 nvgMoveTo(args.vg, displayX, 18.f);
                 nvgLineTo(args.vg, displayX, box.size.y);
+                nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+                nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
+                const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                nvgText(args.vg, displayX, box.size.y - 1.f, label.c_str(), NULL);
+            }
+            nvgStroke(args.vg);
+        }
+    }
+
+    void drawMarkers(const DrawArgs& args) {
+        if (!display || (module && !module->showMarkersSetting.load())) return;
+        const std::vector<MarkerEvent>& markers = display->timeline.markers();
+        for (size_t i = 0; i < markers.size(); ++i) {
+            const float age = display->timeline.normalizedAgeForSample(markers[i].timelineSample, markers[i].sampleRate);
+            if (age < 0.f || age > 1.f) continue;
+            float x = 0.f, yBottom = 0.f;
+            screenFromLogical(flow(), LogicalPoint(0.f, age), x, yBottom);
+            const float y = (1.f - yBottom) * box.size.y;
+            const NVGcolor color = markers[i].sequence % 2 ? nvgRGBA(255, 193, 72, 210) : nvgRGBA(71, 224, 255, 210);
+            nvgStrokeColor(args.vg, color);
+            nvgStrokeWidth(args.vg, 1.15f);
+            nvgBeginPath(args.vg);
+            if (isVerticalFlow(flow())) {
+                nvgMoveTo(args.vg, 0.f, y);
+                nvgLineTo(args.vg, box.size.x, y);
+                nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+                nvgFillColor(args.vg, color);
+                const std::string label = rack::string::f("M%02u", markers[i].sequence);
+                nvgText(args.vg, box.size.x - 3.f, y - 1.f, label.c_str(), NULL);
+            } else {
+                const float displayX = x * box.size.x;
+                nvgMoveTo(args.vg, displayX, 18.f);
+                nvgLineTo(args.vg, displayX, box.size.y);
+                nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+                nvgFillColor(args.vg, color);
+                const std::string label = rack::string::f("M%02u", markers[i].sequence);
+                nvgText(args.vg, displayX + 2.f, 20.f, label.c_str(), NULL);
             }
             nvgStroke(args.vg);
         }
@@ -762,30 +968,26 @@ struct WaterfallOverlay : TransparentWidget {
 
     void drawLegend(const DrawArgs& args) {
         const float floorDb = module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB;
-        const float x = box.size.x - 7.f;
-        const float top = 22.f;
-        const float height = 68.f;
-        const int selectedPalette = module ? clampValue(module->paletteSetting.load(), 0, 2) : 0;
-        NVGcolor lowColor = nvgRGB(5, 3, 18);
-        NVGcolor highColor = nvgRGB(255, 224, 88);
-        if (selectedPalette == static_cast<int>(Palette::GRAYSCALE)) {
-            lowColor = nvgRGB(3, 3, 3);
-            highColor = nvgRGB(248, 248, 248);
-        } else if (selectedPalette == static_cast<int>(Palette::VIRIDIS)) {
-            lowColor = nvgRGB(68, 1, 84);
-            highColor = nvgRGB(253, 231, 37);
+        const float x = box.size.x - 7.f, top = 22.f, height = 68.f;
+        NVGcolor low = nvgRGB(5, 3, 18), high = nvgRGB(255, 224, 88);
+        const int palette = module ? module->paletteSetting.load() : 0;
+        if (palette == static_cast<int>(Palette::GRAYSCALE)) {
+            low = nvgRGB(3, 3, 3);
+            high = nvgRGB(248, 248, 248);
+        } else if (palette == static_cast<int>(Palette::VIRIDIS)) {
+            low = nvgRGB(68, 1, 84);
+            high = nvgRGB(253, 231, 37);
         }
-        NVGpaint gradient = nvgLinearGradient(args.vg, x, top + height, x, top, lowColor, highColor);
         nvgBeginPath(args.vg);
         nvgRect(args.vg, x, top, 4.f, height);
-        nvgFillPaint(args.vg, gradient);
+        nvgFillPaint(args.vg, nvgLinearGradient(args.vg, x, top + height, x, top, low, high));
         nvgFill(args.vg);
         nvgFontSize(args.vg, 7.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
         nvgFillColor(args.vg, nvgRGBA(220, 224, 225, 170));
+        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
         nvgText(args.vg, x - 2.f, top, "0", NULL);
-        const std::string floor = rack::string::f("%.0f", floorDb);
         nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        const std::string floor = rack::string::f("%.0f", floorDb);
         nvgText(args.vg, x - 2.f, top + height, floor.c_str(), NULL);
     }
 
@@ -794,10 +996,9 @@ struct WaterfallOverlay : TransparentWidget {
         const LogicalPoint logical = logicalAt(cursor);
         const float full = fullFrequencyCoordinate(logical);
         const float frequency = frequencyFromFullCoordinate(full);
-        float db = 0.f;
+        float displayed = 0.f, raw = 0.f;
         SpectrumRow row;
-        const bool valid = display->sampleAt(full, logical.age, db, row);
-
+        const bool valid = display->sampleAt(full, logical.age, displayed, raw, row);
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStrokeColor(args.vg, nvgRGBA(255, 255, 255, 150));
         nvgBeginPath(args.vg);
@@ -806,40 +1007,53 @@ struct WaterfallOverlay : TransparentWidget {
         nvgMoveTo(args.vg, 0.f, cursor.y);
         nvgLineTo(args.vg, box.size.x, cursor.y);
         nvgStroke(args.vg);
-
         std::string text;
         if (valid) {
-            float ageSeconds = 0.f;
-            if (display->latestMetadata.rowEndSample >= row.rowEndSample && row.sampleRate > 0.f) {
-                ageSeconds =
-                    static_cast<float>(display->latestMetadata.rowEndSample - row.rowEndSample) / row.sampleRate;
+            const float ageSeconds = display->timeline.nearAge() + logical.age * display->timeline.visibleSpan();
+            const bool smoothing = module && (module->frequencySmoothingSetting.load() != 0 ||
+                                              module->temporalSmoothingSetting.load() != 0);
+            text = smoothing
+                       ? rack::string::f("%s Hz  %s  %.1f (%.1f) dBFS  -%.3fs",
+                                         frequencyLabel(frequency).c_str(), noteLabel(frequency).c_str(), displayed,
+                                         raw, ageSeconds)
+                       : rack::string::f("%s Hz  %s  %.1f dBFS  -%.3fs", frequencyLabel(frequency).c_str(),
+                                         noteLabel(frequency).c_str(), displayed, ageSeconds);
+            const std::vector<MarkerEvent>& markers = display->timeline.markers();
+            const float timeAxisPixels = isVerticalFlow(flow()) ? box.size.y : box.size.x;
+            for (size_t i = 0; i < markers.size(); ++i) {
+                const float markerAge =
+                    display->timeline.normalizedAgeForSample(markers[i].timelineSample, markers[i].sampleRate);
+                if (markerAge >= 0.f && markerAge <= 1.f &&
+                    std::fabs(markerAge - logical.age) * timeAxisPixels <= 5.f) {
+                    const double exactAge =
+                        display->timeline.ageForSample(markers[i].timelineSample, markers[i].sampleRate);
+                    text += rack::string::f("  M%02u -%.3fs", markers[i].sequence, exactAge);
+                    break;
+                }
             }
-            text = rack::string::f("%s Hz  %s  %.1f dBFS  -%.2fs", frequencyLabel(frequency).c_str(),
-                                   noteLabel(frequency).c_str(), db, ageSeconds);
         } else {
-            text = rack::string::f("%s Hz  %s  no history", frequencyLabel(frequency).c_str(),
+            text = rack::string::f("%s Hz  %s  gap", frequencyLabel(frequency).c_str(),
                                    noteLabel(frequency).c_str());
         }
-
         nvgFontSize(args.vg, 9.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         float bounds[4];
-        nvgTextBounds(args.vg, cursor.x + 8.f, cursor.y + 8.f, text.c_str(), NULL, bounds);
-        float textX = cursor.x + 8.f;
-        float textY = cursor.y + 8.f;
-        if (bounds[2] > box.size.x - 4.f) textX = cursor.x - (bounds[2] - bounds[0]) - 8.f;
+        nvgTextBounds(args.vg, 0.f, 0.f, text.c_str(), NULL, bounds);
+        float textX = cursor.x + 8.f, textY = cursor.y + 8.f;
+        if (textX + bounds[2] - bounds[0] > box.size.x - 4.f) textX = cursor.x - (bounds[2] - bounds[0]) - 8.f;
         if (textY > box.size.y - 18.f) textY = cursor.y - 17.f;
         nvgBeginPath(args.vg);
         nvgRoundedRect(args.vg, textX - 3.f, textY - 2.f, bounds[2] - bounds[0] + 6.f, 14.f, 2.f);
         nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 190));
         nvgFill(args.vg);
         nvgFillColor(args.vg, nvgRGB(236, 239, 240));
+        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         nvgText(args.vg, textX, textY, text.c_str(), NULL);
     }
 
     void draw(const DrawArgs& args) override {
         nvgSave(args.vg);
         drawGrid(args);
+        drawMarkers(args);
         drawStatus(args);
         drawLegend(args);
         drawCursor(args);
@@ -851,112 +1065,106 @@ struct WaterfallOverlay : TransparentWidget {
         cursor = event.pos;
         event.consume(this);
     }
-
     void onLeave(const event::Leave& event) override {
         hovered = false;
         TransparentWidget::onLeave(event);
     }
-
     void onButton(const event::Button& event) override {
-        if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT &&
-            (event.mods & RACK_MOD_MASK) == 0) {
+        if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT) {
             cursor = event.pos;
-            draggingLegend = event.pos.x >= box.size.x - 14.f && event.pos.y >= 18.f && event.pos.y <= 102.f;
+            draggingLegend = (event.mods & RACK_MOD_MASK) == 0 && event.pos.x >= box.size.x - 14.f &&
+                             event.pos.y >= 18.f && event.pos.y <= 102.f;
+            draggingTime = !draggingLegend && (inTimeGutter(event.pos) || (event.mods & GLFW_MOD_SHIFT));
             event.consume(this);
         }
     }
-
     void onDragMove(const event::DragMove& event) override {
-        if (!module) return;
+        if (!module || !display) return;
         const float zoom = APP->scene->rackScroll->zoomWidget->zoom;
-        cursor.x += event.mouseDelta.x / zoom;
-        cursor.y += event.mouseDelta.y / zoom;
+        cursor += event.mouseDelta.div(zoom);
         cursor.x = clampValue(cursor.x, 0.f, box.size.x);
         cursor.y = clampValue(cursor.y, 0.f, box.size.y);
         if (draggingLegend) {
-            const float next = module->params[Waterfall::RANGE_PARAM].getValue() -
-                               event.mouseDelta.y / std::max(zoom, 0.01f) * 0.4f;
-            module->params[Waterfall::RANGE_PARAM].setValue(clampValue(next, RANGE_MIN_DB, RANGE_MAX_DB));
-            return;
+            module->params[Waterfall::RANGE_PARAM].setValue(
+                clampValue(module->params[Waterfall::RANGE_PARAM].getValue() -
+                               event.mouseDelta.y / std::max(zoom, 0.01f) * 0.4f,
+                           RANGE_MIN_DB, RANGE_MAX_DB));
+        } else if (draggingTime) {
+            const float axisDelta = isVerticalFlow(flow()) ? event.mouseDelta.y / (zoom * box.size.y)
+                                                           : -event.mouseDelta.x / (zoom * box.size.x);
+            display->timeline.pan(axisDelta * display->timeline.visibleSpan());
+            display->lookupDirty = true;
+        } else {
+            const float low = module->viewMinimum.load(), high = module->viewMaximum.load(), span = high - low;
+            const float axisDelta = isVerticalFlow(flow()) ? event.mouseDelta.x / (zoom * box.size.x)
+                                                           : -event.mouseDelta.y / (zoom * box.size.y);
+            float nextLow = clampValue(low - axisDelta * span, 0.f, 1.f - span);
+            module->viewMinimum.store(nextLow);
+            module->viewMaximum.store(nextLow + span);
         }
-
-        const float low = module->viewMinimum.load();
-        const float high = module->viewMaximum.load();
-        const float span = high - low;
-        const float axisDelta = isVerticalFlow(flow()) ? event.mouseDelta.x / (zoom * box.size.x)
-                                                       : -event.mouseDelta.y / (zoom * box.size.y);
-        float nextLow = low - axisDelta * span;
-        nextLow = clampValue(nextLow, 0.f, 1.f - span);
-        module->viewMinimum.store(nextLow);
-        module->viewMaximum.store(nextLow + span);
     }
-
     void onDragEnd(const event::DragEnd& event) override {
-        draggingLegend = false;
+        draggingLegend = draggingTime = false;
         TransparentWidget::onDragEnd(event);
     }
-
     void onHoverScroll(const event::HoverScroll& event) override {
-        if (!module) return;
+        if (!module || !display) return;
         const LogicalPoint logical = logicalAt(event.pos);
-        const float low = module->viewMinimum.load();
-        const float high = module->viewMaximum.load();
-        const float span = high - low;
-        const float anchor = low + logical.frequency * span;
+        const bool timeGesture = inTimeGutter(event.pos) || (APP->window->getMods() & GLFW_MOD_SHIFT);
         const float factor = std::pow(1.0015f, event.scrollDelta.y);
-        const float nextSpan = clampValue(span * factor, 0.03f, 1.f);
-        float nextLow = anchor - logical.frequency * nextSpan;
-        nextLow = clampValue(nextLow, 0.f, 1.f - nextSpan);
-        module->viewMinimum.store(nextLow);
-        module->viewMaximum.store(nextLow + nextSpan);
+        if (timeGesture) {
+            display->timeline.zoom(factor, logical.age);
+            module->timeSpanSetting.store(display->timeline.visibleSpan());
+            display->lookupDirty = true;
+        } else {
+            const float low = module->viewMinimum.load(), high = module->viewMaximum.load(), span = high - low;
+            const float anchor = low + logical.frequency * span;
+            const float nextSpan = clampValue(span * factor, 0.03f, 1.f);
+            const float nextLow = clampValue(anchor - logical.frequency * nextSpan, 0.f, 1.f - nextSpan);
+            module->viewMinimum.store(nextLow);
+            module->viewMaximum.store(nextLow + nextSpan);
+        }
         event.consume(this);
     }
-
     void onDoubleClick(const event::DoubleClick& event) override {
-        if (!module) return;
-        module->viewMinimum.store(0.f);
-        module->viewMaximum.store(1.f);
+        if (!module || !display) return;
+        if (inTimeGutter(cursor)) {
+            display->timeline.returnToLive();
+            module->timeSpanSetting.store(display->timeline.visibleSpan());
+            display->lookupDirty = true;
+        } else {
+            module->viewMinimum.store(0.f);
+            module->viewMaximum.store(1.f);
+        }
         event.consume(this);
     }
 };
 
 struct WaterfallBezel : TransparentWidget {
     void draw(const DrawArgs& args) override {
-        nvgSave(args.vg);
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f);
         nvgStrokeColor(args.vg, nvgRGB(14, 17, 19));
         nvgStrokeWidth(args.vg, 2.f);
         nvgStroke(args.vg);
-        nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, 2.f, 2.f);
-        nvgLineTo(args.vg, box.size.x - 2.f, 2.f);
-        nvgStrokeColor(args.vg, nvgRGBA(255, 255, 255, 40));
-        nvgStrokeWidth(args.vg, 1.f);
-        nvgStroke(args.vg);
-        nvgRestore(args.vg);
     }
 };
 
 struct WaterfallPanelLabels : TransparentWidget {
     void draw(const DrawArgs& args) override {
-        nvgSave(args.vg);
         nvgFillColor(args.vg, settings::preferDarkPanels ? nvgRGB(247, 197, 173) : nvgRGB(236, 237, 241));
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFontSize(args.vg, 13.f);
         nvgTextLetterSpacing(args.vg, 2.f);
         nvgText(args.vg, box.size.x * 0.5f, 13.f, "WATERFALL", NULL);
         nvgTextLetterSpacing(args.vg, 0.f);
-        nvgFontSize(args.vg, 7.5f);
-        const char* labels[] = {"L", "R", "FREEZE IN", "CLEAR IN", "MODE", "RANGE", "FREEZE", "CLEAR"};
-        const float positions[] = {24.f, 65.f, 106.f, 147.f, 198.f, 245.f, 296.f, 337.f};
-        for (int index = 0; index < 8; ++index) {
-            nvgText(args.vg, positions[index], 316.f, labels[index], NULL);
-        }
+        nvgFontSize(args.vg, 6.7f);
+        const char* labels[] = {"L", "R", "FREEZE", "MARK", "CLEAR", "MODE", "RANGE", "FREEZE", "CLEAR"};
+        const float positions[] = {20.f, 58.f, 96.f, 134.f, 172.f, 218.f, 258.f, 300.f, 338.f};
+        for (int index = 0; index < 9; ++index) nvgText(args.vg, positions[index], 316.f, labels[index], NULL);
         nvgFontSize(args.vg, 7.f);
         nvgTextLetterSpacing(args.vg, 2.f);
         nvgText(args.vg, box.size.x * 0.5f, 376.f, "CELLA", NULL);
-        nvgRestore(args.vg);
     }
 };
 
@@ -967,22 +1175,18 @@ struct WaterfallWidget : ModuleWidget {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Waterfall.svg"),
                              asset::plugin(pluginInstance, "res/Waterfall-dark.svg")));
-
-        WaterfallPanelLabels* panelLabels = new WaterfallPanelLabels;
-        panelLabels->box.size = Vec(360.f, 380.f);
-        addChild(panelLabels);
-
+        WaterfallPanelLabels* labels = new WaterfallPanelLabels;
+        labels->box.size = Vec(360.f, 380.f);
+        addChild(labels);
         WaterfallDisplay* display = new WaterfallDisplay;
         display->module = module;
         display->box.pos = Vec(DISPLAY_X, DISPLAY_Y);
         display->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(display);
-
         WaterfallBezel* bezel = new WaterfallBezel;
         bezel->box.pos = display->box.pos;
         bezel->box.size = display->box.size;
         addChild(bezel);
-
         WaterfallOverlay* overlay = new WaterfallOverlay;
         overlay->module = module;
         overlay->display = display;
@@ -990,16 +1194,17 @@ struct WaterfallWidget : ModuleWidget {
         overlay->box.size = display->box.size;
         addChild(overlay);
 
-        const float controlY = 340.f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(24.f, controlY), module, Waterfall::LEFT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(65.f, controlY), module, Waterfall::RIGHT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(106.f, controlY), module, Waterfall::FREEZE_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(147.f, controlY), module, Waterfall::CLEAR_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(198.f, controlY), module, Waterfall::MODE_PARAM));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(245.f, controlY), module, Waterfall::RANGE_PARAM));
-        addParam(createParamCentered<LEDButton>(Vec(296.f, controlY), module, Waterfall::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(296.f, controlY), module, Waterfall::FREEZE_LIGHT));
-        addParam(createParamCentered<VCVButton>(Vec(337.f, controlY), module, Waterfall::CLEAR_PARAM));
+        const float y = 340.f;
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(20.f, y), module, Waterfall::LEFT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(58.f, y), module, Waterfall::RIGHT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(96.f, y), module, Waterfall::FREEZE_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(134.f, y), module, Waterfall::MARK_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(172.f, y), module, Waterfall::CLEAR_INPUT));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(218.f, y), module, Waterfall::MODE_PARAM));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(258.f, y), module, Waterfall::RANGE_PARAM));
+        addParam(createParamCentered<LEDButton>(Vec(300.f, y), module, Waterfall::FREEZE_PARAM));
+        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(300.f, y), module, Waterfall::FREEZE_LIGHT));
+        addParam(createParamCentered<VCVButton>(Vec(338.f, y), module, Waterfall::CLEAR_PARAM));
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -1019,7 +1224,6 @@ struct WaterfallWidget : ModuleWidget {
             "History rate", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->qualitySetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->qualitySetting.store(static_cast<int>(value)); }));
-
         std::vector<std::string> channels;
         for (int channel = 1; channel <= 16; ++channel) channels.push_back(rack::string::f("Channel %d", channel));
         menu->addChild(createIndexSubmenuItem(
@@ -1028,7 +1232,42 @@ struct WaterfallWidget : ModuleWidget {
             [=](size_t value) { waterfall->polyChannelSetting.store(static_cast<int>(value)); }));
 
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuLabel("Display"));
+        menu->addChild(createMenuLabel("Presentation"));
+        menu->addChild(createIndexSubmenuItem(
+            "Rendering", {"Precise", "Smooth"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->renderingStyleSetting.load(), 0, 1)); },
+            [=](size_t value) { waterfall->renderingStyleSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Live trace", {"Off", "Line", "Line + Fill"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->liveTraceSetting.load(), 0, 2)); },
+            [=](size_t value) { waterfall->liveTraceSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Peak trace", {"Off", "Decay", "Infinite hold"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->peakHoldSetting.load(), 0, 2)); },
+            [=](size_t value) { waterfall->peakHoldSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Frequency scale", {"Hz", "Octaves", "Musical", "Combined"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->frequencyScaleSetting.load(), 0, 3)); },
+            [=](size_t value) { waterfall->frequencyScaleSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Frequency smoothing", {"None", "1/48 octave", "1/24 octave", "1/12 octave", "1/6 octave", "1/3 octave"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->frequencySmoothingSetting.load(), 0, 5)); },
+            [=](size_t value) { waterfall->frequencySmoothingSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Temporal smoothing", {"Off", "Fast · 25/250 ms", "Medium · 100/700 ms", "Slow · 300/1500 ms"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->temporalSmoothingSetting.load(), 0, 3)); },
+            [=](size_t value) { waterfall->temporalSmoothingSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "History duration", {"2 seconds", "4 seconds", "8 seconds", "16 seconds", "30 seconds"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->historyDurationSetting.load(), 0, 4)); },
+            [=](size_t value) {
+                waterfall->historyDurationSetting.store(static_cast<int>(value));
+                waterfall->timeSpanSetting.store(static_cast<float>(
+                    historyDurationSeconds(static_cast<HistoryDuration>(static_cast<int>(value)))));
+            }));
+        menu->addChild(createBoolMenuItem("Show markers", "",
+                                          [=]() { return waterfall->showMarkersSetting.load(); },
+                                          [=](bool value) { waterfall->showMarkersSetting.store(value); }));
         menu->addChild(createIndexSubmenuItem(
             "Flow", {"Up", "Down", "Left", "Right"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->flowSetting.load(), 0, 3)); },
@@ -1037,18 +1276,15 @@ struct WaterfallWidget : ModuleWidget {
             "Palette", {"Heat", "Grayscale", "Viridis (color-blind safe)"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->paletteSetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->paletteSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Peak trace", {"Off", "Decay", "Infinite hold"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->peakHoldSetting.load(), 0, 2)); },
-            [=](size_t value) { waterfall->peakHoldSetting.store(static_cast<int>(value)); }));
         menu->addChild(createMenuItem("Reset frequency zoom", "", [=]() {
             waterfall->viewMinimum.store(0.f);
             waterfall->viewMaximum.store(1.f);
         }));
 #ifndef NDEBUG
-        menu->addChild(createMenuLabel(
-            rack::string::f("Dropped display rows: %llu",
-                            static_cast<unsigned long long>(waterfall->droppedRows.load()))));
+        menu->addChild(createMenuLabel(rack::string::f(
+            "Dropped rows / markers: %llu / %llu",
+            static_cast<unsigned long long>(waterfall->droppedRows.load()),
+            static_cast<unsigned long long>(waterfall->droppedMarkers.load()))));
 #endif
     }
 };
