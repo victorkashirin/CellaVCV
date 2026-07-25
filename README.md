@@ -11,7 +11,7 @@
 
 **Waterfall** is a calibrated OpenGL spectrum history display with a fixed 10 V peak = 0 dBFS
 reference, sample-accurate event markers, selectable precise/smooth rendering, calibrated frequency
-and temporal smoothing, selectable FFT overlap, configurable history duration, live and peak traces,
+smoothing, selectable FFT overlap, configurable history duration, live and peak traces,
 cursor inspection, frequency/time navigation, and Up/Down/Left/Right history flow.
 
 ### Frequency Analyzer

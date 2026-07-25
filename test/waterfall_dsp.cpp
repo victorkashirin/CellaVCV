@@ -65,8 +65,8 @@ float runTone(WaterfallAnalyzer& analyzer, FftSize fftSize, WindowFunction windo
     }
     if (peakCell) *peakCell = maximumCell;
 
-    const float expectedCoordinate =
-        std::log(frequency / MIN_FREQUENCY_HZ) / std::log((config.sampleRate * 0.5f) / MIN_FREQUENCY_HZ);
+    const float expectedCoordinate = std::log(frequency / MIN_FREQUENCY_HZ) /
+                                     std::log(displayMaximumFrequency(config.sampleRate) / MIN_FREQUENCY_HZ);
     const int expectedCell = static_cast<int>(std::lround(expectedCoordinate * (NUM_FREQUENCY_CELLS - 1)));
     require(std::abs(maximumCell - expectedCell) <= 3,
             "bin-centred tone maps to its logarithmic frequency cell (actual " +
@@ -143,6 +143,13 @@ void testPaletteCatalog() {
 }
 
 void testCalibrationAndMapping() {
+    requireNear(displayMaximumFrequency(32000.f), 16000.f, 1e-6f,
+                "display follows Nyquist below the 22 kHz cap");
+    requireNear(displayMaximumFrequency(44100.f), 22000.f, 1e-6f,
+                "display is capped at 22 kHz near CD sample rate");
+    requireNear(displayMaximumFrequency(88200.f), 22000.f, 1e-6f,
+                "display remains capped at 22 kHz at high sample rates");
+
     WaterfallAnalyzer analyzer;
     uint64_t generation = 10;
     for (int fft = 0; fft < static_cast<int>(FftSize::COUNT); ++fft) {
@@ -162,6 +169,26 @@ void testCalibrationAndMapping() {
                                        sampleRates[index]);
         requireNear(measured, 0.f, 0.25f, "calibration and log mapping survive sample-rate changes");
     }
+
+    WaterfallConfig ultrasonicConfig;
+    ultrasonicConfig.fftSize = FftSize::FFT_4096;
+    ultrasonicConfig.window = WindowFunction::HANN;
+    ultrasonicConfig.quality = Quality::HIGH;
+    ultrasonicConfig.sampleRate = 88200.f;
+    ultrasonicConfig.generation = generation++;
+    analyzer.configure(ultrasonicConfig);
+    const int ultrasonicBin = 1393;
+    float ultrasonicLeak = INTERNAL_FLOOR_DB;
+    SpectrumRow ultrasonicRow;
+    for (int sample = 0; sample < 8192; ++sample) {
+        const float value = static_cast<float>(
+            std::sin(2.0 * 3.14159265358979323846 * ultrasonicBin * sample / 4096.0));
+        if (!analyzer.processSample(value, ultrasonicRow) || ultrasonicRow.sourceAnalysisSample < 4096) continue;
+        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
+            ultrasonicLeak =
+                std::max(ultrasonicLeak, dequantizeDb(ultrasonicRow.dbTenths[static_cast<size_t>(cell)]));
+    }
+    require(ultrasonicLeak < -100.f, "frequencies above 22 kHz are excluded from analyzed cells");
 }
 
 void testRowsAndFiniteValues() {
@@ -417,7 +444,7 @@ void testMarkersViewportAndTicks() {
     }
 }
 
-void testPresentationSmoothing() {
+void testFrequencySmoothing() {
     SpectrumRow constant = makeTimelineRow(1600);
     constant.dbTenths.fill(quantizeDb(-48.f));
     for (int mode = 0; mode < static_cast<int>(FrequencySmoothing::COUNT); ++mode) {
@@ -435,21 +462,6 @@ void testPresentationSmoothing() {
     require(interpolateNoOvershoot(-80.f, -20.f, -1.f) == -80.f &&
                 interpolateNoOvershoot(-80.f, -20.f, 2.f) == -20.f,
             "trace interpolation cannot overshoot adjacent values");
-
-    TemporalPowerSmoother smoother;
-    smoother.configure(TemporalSmoothing::FAST);
-    SpectrumRow low = makeTimelineRow(1600);
-    SpectrumRow high = makeTimelineRow(3200);
-    low.dbTenths.fill(quantizeDb(-80.f));
-    high.dbTenths.fill(quantizeDb(-20.f));
-    SpectrumRow output;
-    smoother.process(low, output);
-    smoother.process(high, output);
-    const float expectedPower = std::pow(10.f, -8.f) +
-                                (1.f - std::exp(-(1.f / 30.f) / 0.025f)) *
-                                    (std::pow(10.f, -2.f) - std::pow(10.f, -8.f));
-    requireNear(dequantizeDb(output.dbTenths[0]), 10.f * std::log10(expectedPower), 0.15f,
-                "temporal attack uses timestamp-derived delta and selected time constant");
 }
 
 }  // namespace
@@ -489,7 +501,7 @@ int main() {
     testSharedTimelineAndRowRateReconfiguration();
     testHistoryCapacityResizeAndLookup();
     testMarkersViewportAndTicks();
-    testPresentationSmoothing();
+    testFrequencySmoothing();
     std::cout << "Waterfall DSP tests passed" << std::endl;
     return 0;
 }

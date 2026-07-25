@@ -22,7 +22,7 @@ float powerToDb(float power) {
 void FrequencySmoothingKernel::configure(FrequencySmoothing smoothing, float sampleRate) {
     const float width = frequencySmoothingOctaves(smoothing);
     const float cellOctaves =
-        std::log2(std::max(sampleRate * 0.5f, MIN_FREQUENCY_HZ * 1.01f) / MIN_FREQUENCY_HZ) /
+        std::log2(displayMaximumFrequency(sampleRate) / MIN_FREQUENCY_HZ) /
         NUM_FREQUENCY_CELLS;
     for (int center = 0; center < NUM_FREQUENCY_CELLS; ++center) {
         TapRange& range = ranges[static_cast<size_t>(center)];
@@ -60,51 +60,6 @@ void FrequencySmoothingKernel::apply(const SpectrumRow& input, SpectrumRow& outp
         }
         output.dbTenths[static_cast<size_t>(center)] = quantizeDb(powerToDb(power));
     }
-}
-
-void TemporalPowerSmoother::configure(TemporalSmoothing smoothing) {
-    mode = smoothing;
-    reset();
-}
-
-void TemporalPowerSmoother::reset() {
-    state.fill(0.f);
-    previous = SpectrumRow();
-    initialized = false;
-}
-
-void TemporalPowerSmoother::process(const SpectrumRow& input, SpectrumRow& output) {
-    output = input;
-    float attack = 0.f;
-    float release = 0.f;
-    temporalTimeConstants(mode, attack, release);
-    if (mode == TemporalSmoothing::OFF) return;
-
-    double delta = 0.0;
-    if (initialized && input.configGeneration == previous.configGeneration &&
-        input.sampleRate == previous.sampleRate && input.rowEndSample > previous.rowEndSample) {
-        delta = static_cast<double>(input.rowEndSample - previous.rowEndSample) / input.sampleRate;
-    }
-    const double expected = input.displayRowsPerSecond > 0
-                                ? 1.0 / static_cast<double>(input.displayRowsPerSecond)
-                                : 0.0;
-    if (!initialized || !(delta > 0.0) || (expected > 0.0 && delta > std::max(2.5 * expected, 0.2))) {
-        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
-            state[static_cast<size_t>(cell)] =
-                dbToPower(dequantizeDb(input.dbTenths[static_cast<size_t>(cell)]));
-    } else {
-        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
-            const float target = dbToPower(dequantizeDb(input.dbTenths[static_cast<size_t>(cell)]));
-            float& value = state[static_cast<size_t>(cell)];
-            const float timeConstant = target > value ? attack : release;
-            const float alpha = 1.f - std::exp(-static_cast<float>(delta) / std::max(timeConstant, 1e-6f));
-            value += alpha * (target - value);
-        }
-    }
-    for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
-        output.dbTenths[static_cast<size_t>(cell)] = quantizeDb(powerToDb(state[static_cast<size_t>(cell)]));
-    previous = input;
-    initialized = true;
 }
 
 float interpolateNoOvershoot(float left, float right, float fraction) {

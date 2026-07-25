@@ -84,10 +84,12 @@ struct WaterfallAnalyzer::Kernel {
     }
 
     void updateCellMapping(float sampleRate) {
-        const float nyquist = std::max(sampleRate * 0.5f, MIN_FREQUENCY_HZ * 1.01f);
-        const float ratio = nyquist / MIN_FREQUENCY_HZ;
+        const float maximumFrequency = displayMaximumFrequency(sampleRate);
+        const float ratio = maximumFrequency / MIN_FREQUENCY_HZ;
         const float binWidth = sampleRate / static_cast<float>(size);
         const int nyquistBin = size / 2;
+        const int maximumBin =
+            clampValue(static_cast<int>(std::floor(maximumFrequency / binWidth)), 1, nyquistBin);
         for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
             const float lowFraction = static_cast<float>(cell) / NUM_FREQUENCY_CELLS;
             const float highFraction = static_cast<float>(cell + 1) / NUM_FREQUENCY_CELLS;
@@ -95,12 +97,12 @@ struct WaterfallAnalyzer::Kernel {
             const float highFrequency = MIN_FREQUENCY_HZ * std::pow(ratio, highFraction);
             int lowBin = static_cast<int>(std::ceil(lowFrequency / binWidth));
             int highBin = static_cast<int>(std::floor(highFrequency / binWidth));
-            lowBin = clampValue(lowBin, 1, nyquistBin);
-            highBin = clampValue(highBin, 1, nyquistBin);
+            lowBin = clampValue(lowBin, 1, maximumBin);
+            highBin = clampValue(highBin, 1, maximumBin);
             if (highBin < lowBin) {
                 const float centerFrequency = std::sqrt(lowFrequency * highFrequency);
                 lowBin = highBin =
-                    clampValue(static_cast<int>(std::lround(centerFrequency / binWidth)), 1, nyquistBin);
+                    clampValue(static_cast<int>(std::lround(centerFrequency / binWidth)), 1, maximumBin);
             }
             cellBinLow[static_cast<size_t>(cell)] = lowBin;
             cellBinHigh[static_cast<size_t>(cell)] = highBin;

@@ -7,8 +7,8 @@ New modules:
 
 Updates:
 * Waterfall - add sample-accurate markers, precise/smooth rendering, live-trace modes, frequency scales,
-  calibrated smoothing, selectable FFT overlap, timestamped time navigation, and independent 2-30
-  second history duration.
+  calibrated fractional-octave smoothing, selectable FFT overlap, timestamped time navigation, and independent 2-30
+  second history duration. Cap the analyzed and displayed frequency range at 22 kHz.
 
 ### 2.10.0 (2026-07-12)
 

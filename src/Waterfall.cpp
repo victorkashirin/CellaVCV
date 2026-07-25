@@ -91,7 +91,6 @@ struct Waterfall : Module {
     std::atomic<int> liveTraceSetting{static_cast<int>(LiveTraceMode::LINE)};
     std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::COMBINED)};
     std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
-    std::atomic<int> temporalSmoothingSetting{static_cast<int>(TemporalSmoothing::OFF)};
     std::atomic<int> historyDurationSetting{static_cast<int>(HistoryDuration::SECONDS_8)};
     std::atomic<bool> showMarkersSetting{true};
     std::atomic<float> timeSpanSetting{8.f};
@@ -225,7 +224,6 @@ struct Waterfall : Module {
         json_object_set_new(root, "liveTrace", json_integer(liveTraceSetting.load()));
         json_object_set_new(root, "frequencyScale", json_integer(frequencyScaleSetting.load()));
         json_object_set_new(root, "frequencySmoothing", json_integer(frequencySmoothingSetting.load()));
-        json_object_set_new(root, "temporalSmoothing", json_integer(temporalSmoothingSetting.load()));
         json_object_set_new(root, "historyDuration", json_integer(historyDurationSetting.load()));
         json_object_set_new(root, "showMarkers", json_boolean(showMarkersSetting.load()));
         json_object_set_new(root, "timeSpan", json_real(timeSpanSetting.load()));
@@ -260,9 +258,6 @@ struct Waterfall : Module {
         frequencySmoothingSetting.store(getJsonInt(root, "frequencySmoothing", 0,
                                                    static_cast<int>(FrequencySmoothing::COUNT) - 1,
                                                    static_cast<int>(FrequencySmoothing::NONE)));
-        temporalSmoothingSetting.store(getJsonInt(root, "temporalSmoothing", 0,
-                                                  static_cast<int>(TemporalSmoothing::COUNT) - 1,
-                                                  static_cast<int>(TemporalSmoothing::OFF)));
         historyDurationSetting.store(getJsonInt(root, "historyDuration", 0,
                                                 static_cast<int>(HistoryDuration::COUNT) - 1,
                                                 static_cast<int>(HistoryDuration::SECONDS_8)));
@@ -437,7 +432,6 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     WaterfallRenderer renderer;
     HistoryTimeline timeline;
     FrequencySmoothingKernel frequencyKernel;
-    TemporalPowerSmoother temporalSmoother;
     std::vector<SpectrumRow> derivedRows;
     std::vector<bool> dirtyRows;
     std::array<float, NUM_FREQUENCY_CELLS> currentTrace;
@@ -446,9 +440,8 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     uint64_t seenModuleConfigGeneration = 0;
     int appliedCapacity = 0;
     int appliedFrequencySmoothing = -1;
-    int appliedTemporalSmoothing = -1;
     int appliedPeakHold = -1;
-    float appliedSmoothingSampleRate = 48000.f;
+    float appliedFrequencySampleRate = 48000.f;
     bool traceDirty = true;
     bool lookupDirty = true;
     SpectrumRow latestMetadata;
@@ -457,7 +450,6 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
         frequencyKernel.configure(FrequencySmoothing::NONE);
-        temporalSmoother.configure(TemporalSmoothing::OFF);
         resizeCaches(timeline.capacity());
     }
 
@@ -482,7 +474,6 @@ struct WaterfallDisplay : widget::OpenGlWidget {
 
     void clearHistory() {
         timeline.clear();
-        temporalSmoother.reset();
         latestMetadata = SpectrumRow();
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
@@ -495,16 +486,13 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     }
 
     void rebuildDerived() {
-        temporalSmoother.configure(static_cast<TemporalSmoothing>(appliedTemporalSmoothing));
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
         const SpectrumRow* previousRaw = NULL;
         for (int ordered = 0; ordered < timeline.size(); ++ordered) {
             const int physical = timeline.physicalFromOldest(ordered);
             const SpectrumRow* raw = timeline.physicalRow(physical);
-            SpectrumRow frequencySmoothed;
-            frequencyKernel.apply(*raw, frequencySmoothed);
-            temporalSmoother.process(frequencySmoothed, derivedRows[static_cast<size_t>(physical)]);
+            frequencyKernel.apply(*raw, derivedRows[static_cast<size_t>(physical)]);
             float elapsed = 0.f;
             if (previousRaw && previousRaw->sampleRate == raw->sampleRate &&
                 raw->rowEndSample >= previousRaw->rowEndSample)
@@ -542,13 +530,9 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         const int frequencyMode =
             clampValue(module ? module->frequencySmoothingSetting.load() : 0, 0,
                        static_cast<int>(FrequencySmoothing::COUNT) - 1);
-        const int temporalMode =
-            clampValue(module ? module->temporalSmoothingSetting.load() : 0, 0,
-                       static_cast<int>(TemporalSmoothing::COUNT) - 1);
-        if (frequencyMode != appliedFrequencySmoothing || temporalMode != appliedTemporalSmoothing) {
+        if (frequencyMode != appliedFrequencySmoothing) {
             appliedFrequencySmoothing = frequencyMode;
-            appliedTemporalSmoothing = temporalMode;
-            frequencyKernel.configure(static_cast<FrequencySmoothing>(frequencyMode), appliedSmoothingSampleRate);
+            frequencyKernel.configure(static_cast<FrequencySmoothing>(frequencyMode), appliedFrequencySampleRate);
             rebuildDerived();
         }
         const int peak =
@@ -578,11 +562,11 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     }
 
     void addRow(const SpectrumRow& row) {
-        if (row.sampleRate != appliedSmoothingSampleRate) {
-            appliedSmoothingSampleRate = row.sampleRate;
+        if (row.sampleRate != appliedFrequencySampleRate) {
+            appliedFrequencySampleRate = row.sampleRate;
             frequencyKernel.configure(static_cast<FrequencySmoothing>(
                                           std::max(appliedFrequencySmoothing, 0)),
-                                      appliedSmoothingSampleRate);
+                                      appliedFrequencySampleRate);
             if (!timeline.empty()) rebuildDerived();
         }
         float elapsed = 0.f;
@@ -591,9 +575,7 @@ struct WaterfallDisplay : widget::OpenGlWidget {
                 elapsed = static_cast<float>(row.rowEndSample - newest->rowEndSample) / row.sampleRate;
         }
         const int physical = timeline.addRow(row);
-        SpectrumRow frequencySmoothed;
-        frequencyKernel.apply(row, frequencySmoothed);
-        temporalSmoother.process(frequencySmoothed, derivedRows[static_cast<size_t>(physical)]);
+        frequencyKernel.apply(row, derivedRows[static_cast<size_t>(physical)]);
         updateTraces(derivedRows[static_cast<size_t>(physical)], elapsed);
         latestMetadata = row;
         dirtyRows[static_cast<size_t>(physical)] = true;
@@ -841,12 +823,14 @@ struct WaterfallOverlay : TransparentWidget {
     float fullFrequencyCoordinate(const LogicalPoint& logical) const {
         return viewLow() + logical.frequency * (viewHigh() - viewLow());
     }
-    float nyquist() const {
-        return display && display->latestMetadata.sampleRate > 0.f ? display->latestMetadata.sampleRate * 0.5f
-                                                                  : 24000.f;
+    float maximumFrequency() const {
+        const float sampleRate =
+            display && display->latestMetadata.sampleRate > 0.f ? display->latestMetadata.sampleRate : 48000.f;
+        return displayMaximumFrequency(sampleRate);
     }
     float frequencyFromFullCoordinate(float coordinate) const {
-        return MIN_FREQUENCY_HZ * std::pow(nyquist() / MIN_FREQUENCY_HZ, clampValue(coordinate, 0.f, 1.f));
+        return MIN_FREQUENCY_HZ *
+               std::pow(maximumFrequency() / MIN_FREQUENCY_HZ, clampValue(coordinate, 0.f, 1.f));
     }
     bool inTimeGutter(math::Vec position) const {
         return isVerticalFlow(flow()) ? position.x < 40.f : position.y > box.size.y - 18.f;
@@ -854,8 +838,9 @@ struct WaterfallOverlay : TransparentWidget {
 
     void drawFrequencyGuide(const DrawArgs& args, float frequency, const std::string& label, bool secondary,
                             float& lastLabelPosition) {
-        if (frequency < MIN_FREQUENCY_HZ || frequency > nyquist()) return;
-        const float full = std::log(frequency / MIN_FREQUENCY_HZ) / std::log(nyquist() / MIN_FREQUENCY_HZ);
+        if (frequency < MIN_FREQUENCY_HZ || frequency > maximumFrequency()) return;
+        const float full =
+            std::log(frequency / MIN_FREQUENCY_HZ) / std::log(maximumFrequency() / MIN_FREQUENCY_HZ);
         const float visible = (full - viewLow()) / (viewHigh() - viewLow());
         if (visible < 0.f || visible > 1.f) return;
         const float position = visible * (isVerticalFlow(flow()) ? box.size.x : box.size.y);
@@ -903,7 +888,7 @@ struct WaterfallOverlay : TransparentWidget {
     }
 
     void drawGrid(const DrawArgs& args) {
-        if (!(nyquist() > MIN_FREQUENCY_HZ) || viewHigh() <= viewLow()) return;
+        if (!(maximumFrequency() > MIN_FREQUENCY_HZ) || viewHigh() <= viewLow()) return;
         const FrequencyScaleMode scale = static_cast<FrequencyScaleMode>(
             clampValue(module ? module->frequencyScaleSetting.load() : 3, 0,
                        static_cast<int>(FrequencyScaleMode::COUNT) - 1));
@@ -925,7 +910,8 @@ struct WaterfallOverlay : TransparentWidget {
         if (scale == FrequencyScaleMode::MUSICAL) {
             const float frequencyAxisPixels = isVerticalFlow(flow()) ? box.size.x : box.size.y;
             const float semitonePixels = frequencyAxisPixels / std::max((viewHigh() - viewLow()) *
-                                                                            std::log2(nyquist() / MIN_FREQUENCY_HZ) *
+                                                                            std::log2(maximumFrequency() /
+                                                                                      MIN_FREQUENCY_HZ) *
                                                                             12.f,
                                                                         1.f);
             for (int midi = 12; midi <= 132; ++midi) {
@@ -1190,24 +1176,6 @@ struct WaterfallBezel : TransparentWidget {
     }
 };
 
-struct WaterfallPanelLabels : TransparentWidget {
-    void draw(const DrawArgs& args) override {
-        nvgFillColor(args.vg, settings::preferDarkPanels ? nvgRGB(247, 197, 173) : nvgRGB(236, 237, 241));
-        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFontSize(args.vg, 13.f);
-        nvgTextLetterSpacing(args.vg, 2.f);
-        nvgText(args.vg, box.size.x * 0.5f, 13.f, "WATERFALL", NULL);
-        nvgTextLetterSpacing(args.vg, 0.f);
-        nvgFontSize(args.vg, 6.7f);
-        const char* labels[] = {"L", "R", "FREEZE", "MARK", "CLEAR", "RANGE", "FREEZE", "CLEAR"};
-        const float positions[] = {20.f, 58.f, 96.f, 134.f, 172.f, 228.f, 283.f, 338.f};
-        for (int index = 0; index < 8; ++index) nvgText(args.vg, positions[index], 316.f, labels[index], NULL);
-        nvgFontSize(args.vg, 7.f);
-        nvgTextLetterSpacing(args.vg, 2.f);
-        nvgText(args.vg, box.size.x * 0.5f, 376.f, "CELLA", NULL);
-    }
-};
-
 }  // namespace
 
 struct WaterfallWidget : ModuleWidget {
@@ -1215,9 +1183,6 @@ struct WaterfallWidget : ModuleWidget {
         setModule(module);
         setPanel(createPanel(asset::plugin(pluginInstance, "res/Waterfall.svg"),
                              asset::plugin(pluginInstance, "res/Waterfall-dark.svg")));
-        WaterfallPanelLabels* labels = new WaterfallPanelLabels;
-        labels->box.size = Vec(360.f, 380.f);
-        addChild(labels);
         WaterfallDisplay* display = new WaterfallDisplay;
         display->module = module;
         display->box.pos = Vec(DISPLAY_X, DISPLAY_Y);
@@ -1234,16 +1199,19 @@ struct WaterfallWidget : ModuleWidget {
         overlay->box.size = display->box.size;
         addChild(overlay);
 
-        const float y = 340.f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(20.f, y), module, Waterfall::LEFT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(58.f, y), module, Waterfall::RIGHT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(96.f, y), module, Waterfall::FREEZE_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(134.f, y), module, Waterfall::MARK_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(172.f, y), module, Waterfall::CLEAR_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(228.f, y), module, Waterfall::RANGE_PARAM));
-        addParam(createParamCentered<LEDButton>(Vec(283.f, y), module, Waterfall::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(283.f, y), module, Waterfall::FREEZE_LIGHT));
-        addParam(createParamCentered<VCVButton>(Vec(338.f, y), module, Waterfall::CLEAR_PARAM));
+        constexpr float x = 22.5f;
+        constexpr float step = 45.f;
+        constexpr float y = 329.5f;
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 0.f, y), module, Waterfall::LEFT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Waterfall::RIGHT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Waterfall::FREEZE_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 3.f, y), module, Waterfall::CLEAR_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Waterfall::MARK_INPUT));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 5.f, y), module, Waterfall::RANGE_PARAM));
+        addParam(createParamCentered<LEDButton>(Vec(x + step * 6.f, y), module, Waterfall::FREEZE_PARAM));
+        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 6.f, y), module,
+                                                               Waterfall::FREEZE_LIGHT));
+        addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Waterfall::CLEAR_PARAM));
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -1311,10 +1279,6 @@ struct WaterfallWidget : ModuleWidget {
             "Frequency smoothing", {"None", "1/48 octave", "1/24 octave", "1/12 octave", "1/6 octave", "1/3 octave"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->frequencySmoothingSetting.load(), 0, 5)); },
             [=](size_t value) { waterfall->frequencySmoothingSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Temporal smoothing", {"Off", "Fast · 25/250 ms", "Medium · 100/700 ms", "Slow · 300/1500 ms"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->temporalSmoothingSetting.load(), 0, 3)); },
-            [=](size_t value) { waterfall->temporalSmoothingSetting.store(static_cast<int>(value)); }));
         menu->addChild(createIndexSubmenuItem(
             "History duration", {"2 seconds", "4 seconds", "8 seconds", "16 seconds", "30 seconds"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->historyDurationSetting.load(), 0, 4)); },

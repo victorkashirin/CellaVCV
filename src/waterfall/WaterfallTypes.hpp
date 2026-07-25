@@ -13,6 +13,7 @@ constexpr int MARKER_QUEUE_SIZE = 64;
 constexpr int MAX_RETAINED_MARKERS = 128;
 constexpr int TIME_LOOKUP_SIZE = 1024;
 constexpr float MIN_FREQUENCY_HZ = 20.f;
+constexpr float MAX_DISPLAY_FREQUENCY_HZ = 22000.f;
 constexpr float INTERNAL_FLOOR_DB = -160.f;
 constexpr float INTERNAL_CEILING_DB = 24.f;
 constexpr float VOLTAGE_TO_FULL_SCALE = 0.1f;
@@ -89,7 +90,6 @@ enum class FrequencySmoothing : int {
     OCTAVE_1_3,
     COUNT
 };
-enum class TemporalSmoothing : int { OFF, FAST, MEDIUM, SLOW, COUNT };
 enum class HistoryDuration : int { SECONDS_2, SECONDS_4, SECONDS_8, SECONDS_16, SECONDS_30, COUNT };
 
 constexpr std::array<int, static_cast<int>(FftSize::COUNT)> FFT_SIZES = {{1024, 2048, 4096, 8192, 16384}};
@@ -137,6 +137,13 @@ inline float mixInputVoltages(float leftVoltage, float rightVoltage, bool leftCo
 
 inline int fftSizeSamples(FftSize size) {
     return FFT_SIZES[static_cast<int>(size)];
+}
+
+inline float displayMaximumFrequency(float sampleRate) {
+    const float safeSampleRate =
+        std::isfinite(sampleRate) ? std::max(sampleRate, MIN_FREQUENCY_HZ * 2.02f) : 48000.f;
+    return std::max(MIN_FREQUENCY_HZ * 1.01f,
+                    std::min(safeSampleRate * 0.5f, MAX_DISPLAY_FREQUENCY_HZ));
 }
 
 inline int requestedFftHopSize(int fftSize, FftOverlap overlap) {
@@ -188,26 +195,6 @@ inline float frequencySmoothingOctaves(FrequencySmoothing smoothing) {
             return 1.f / 3.f;
         default:
             return 0.f;
-    }
-}
-
-inline void temporalTimeConstants(TemporalSmoothing smoothing, float& attackSeconds, float& releaseSeconds) {
-    switch (smoothing) {
-        case TemporalSmoothing::FAST:
-            attackSeconds = 0.025f;
-            releaseSeconds = 0.250f;
-            break;
-        case TemporalSmoothing::MEDIUM:
-            attackSeconds = 0.100f;
-            releaseSeconds = 0.700f;
-            break;
-        case TemporalSmoothing::SLOW:
-            attackSeconds = 0.300f;
-            releaseSeconds = 1.500f;
-            break;
-        default:
-            attackSeconds = releaseSeconds = 0.f;
-            break;
     }
 }
 

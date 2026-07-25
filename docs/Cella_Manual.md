@@ -27,8 +27,9 @@ module never applies automatic gain or normalizes each spectrum to its loudest f
 * **CLEAR** and its trigger input erase the history without interrupting analysis.
 
 Hover the display for frequency, musical note, and displayed level. Use the mouse wheel to zoom around the
-cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-Nyquist
-range. Shift-wheel zooms time around the cursor and Shift-drag pans time. The time-ruler gutter accepts
+cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-22 kHz
+range. At lower sample rates, the upper limit follows Nyquist. Shift-wheel zooms time around the cursor
+and Shift-drag pans time. The time-ruler gutter accepts
 the same gestures without Shift; double-click it to return to live and restore the configured duration.
 These interactions remain available while frozen.
 
@@ -49,9 +50,8 @@ These interactions remain available while frozen.
   measured or stored values.
 * **Live trace** selects Off, Line, or Line + Fill independently of the peak trace.
 * **Frequency scale** selects Hz, octave, musical, or combined guides.
-* **Frequency smoothing** selects None through 1/3-octave power-domain smoothing.
-* **Temporal smoothing** selects Off, Fast, Medium, or Slow timestamp-driven attack/release smoothing.
-  Smoothing is reversible and is rebuilt from retained raw rows.
+* **Frequency smoothing** selects None through 1/3-octave power-domain smoothing. It is reversible and
+  rebuilt from retained raw rows.
 * **Show markers** hides marker overlays without deleting their timestamps.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.
