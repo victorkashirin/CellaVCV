@@ -38,7 +38,7 @@ Extend the current Dots/Bars choice into a small set of clearly named renderers:
 - Dots: keep the current VFD matrix identity.
 - Bars: classic segmented analyzer, with dim inactive segments.
 - Curve: draw a smooth spectrum line or filled contour across the 12 bands. This is less retro, more studio-like, and useful for reading broad tonal shape.
-- Waterfall: a short scrolling history behind or below the current spectrum. This would be a signature visual mode if performance stays reasonable.
+- Spectrum: a short scrolling history behind or below the current spectrum. This would be a signature visual mode if performance stays reasonable.
 - Hybrid: dots for current level with a faint curve/outline for peak or average level.
 
 Recommended first addition: Curve. It reuses the same band data, is cheap to draw, and gives the module a more modern analysis view without changing DSP.
@@ -139,7 +139,7 @@ These should stay optional, but they would make the display delightful and pract
 5. Add Peak Mode: Off, Classic, Infinite Hold, Average + Peak.
 7. Add Stereo/Mid-Side visual modes.
 8. Add Bass Focus or 24-band layout once the display architecture handles multiple band layouts cleanly.
-9. Consider Waterfall after the cheaper modes are polished. It can be beautiful, but it needs careful performance and visual tuning.
+9. Consider Spectrum after the cheaper modes are polished. It can be beautiful, but it needs careful performance and visual tuning.
 
 ## Signature Direction
 

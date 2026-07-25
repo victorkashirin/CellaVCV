@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.11.0 (2026-07-25)
+
+New modules:
+* Spectrum - Spectrum history analyser.
+
 ### 2.10.0 (2026-07-12)
 
 New modules:

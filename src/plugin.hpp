@@ -18,5 +18,6 @@ extern Model *modelLoudnessCV;
 extern Model *modelIntegral;
 extern Model *model2State;
 extern Model *modelFrequencyAnalyzer;
+extern Model *modelSpectrum;
 
 void addLoudnessCVExpander(ModuleWidget *parentWidget);

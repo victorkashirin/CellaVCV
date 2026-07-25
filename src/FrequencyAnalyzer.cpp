@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "plugin.hpp"
-#include "spectrum/SpectrumAnalyzer.hpp"
+#include "frequency_analyzer/FrequencyAnalyzerEngine.hpp"
 
 namespace {
 
-constexpr int NUM_BANDS = cella::spectrum::SpectrumConfig::NUM_BANDS;
+constexpr int NUM_BANDS = cella::frequency_analyzer::FrequencyAnalyzerConfig::NUM_BANDS;
 constexpr float DISPLAY_WIDTH = 496.f;
 constexpr float DISPLAY_HEIGHT = 320.f;
 constexpr float DISPLAY_Y = 26.f;
@@ -95,8 +95,8 @@ struct FrequencyAnalyzer : Module {
     enum ParamIds { UPPER_PARAM, LOWER_PARAM, FALL_DELAY_PARAM, PEAK_FALL_DELAY_PARAM, NUM_PARAMS };
     enum InputIds { IN_L_INPUT, IN_R_INPUT, NUM_INPUTS };
 
-    cella::spectrum::SpectrumAnalyzer analyzer;
-    dsp::RingBuffer<cella::spectrum::SpectrumFrame, 16> displayFrames;
+    cella::frequency_analyzer::FrequencyAnalyzerEngine analyzer;
+    dsp::RingBuffer<cella::frequency_analyzer::FrequencyAnalyzerFrame, 16> displayFrames;
 
     DisplayMode displayMode = DisplayMode::BARS;
     StereoMode stereoMode = StereoMode::MONO;
@@ -269,9 +269,9 @@ struct FrequencyAnalyzerRenderer {
         attemptedSignatureEffects = signatureEffects;
 
         try {
-            const std::string vertexSource = loadResource("res/shaders/spectrum_gl.vert");
+            const std::string vertexSource = loadResource("res/shaders/frequency_analyzer_gl.vert");
             const std::string fragmentSource =
-                specializeFragmentShader(loadResource("res/shaders/spectrum_gl.frag"), signatureEffects);
+                specializeFragmentShader(loadResource("res/shaders/frequency_analyzer_gl.frag"), signatureEffects);
             GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource, "vertex");
             GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource, "fragment");
             if (!vertexShader || !fragmentShader) {
@@ -346,7 +346,7 @@ struct FrequencyAnalyzerRenderer {
 struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
     FrequencyAnalyzer* module = NULL;
     FrequencyAnalyzerRenderer renderer;
-    cella::spectrum::SpectrumFrame latestFrame;
+    cella::frequency_analyzer::FrequencyAnalyzerFrame latestFrame;
     std::array<std::array<float, NUM_BANDS>, 3> displayed = {};
     std::array<std::array<float, NUM_BANDS>, 3> peaks = {};
     std::array<std::array<float, NUM_BANDS>, 3> ghosts = {};
@@ -443,7 +443,7 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         nvgFillColor(args.vg, nvgRGB(180, 190, 192));
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         for (int band = 0; band < NUM_BANDS; ++band) {
-            const float frequency = cella::spectrum::SpectrumConfig::BAND_CENTERS[band];
+            const float frequency = cella::frequency_analyzer::FrequencyAnalyzerConfig::BAND_CENTERS[band];
             char label[16];
             if (frequency >= 1000.f)
                 std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);
@@ -468,7 +468,7 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
 
     void updateAnimation(float dt, bool receivedFrame) {
         const float peakDelay = module ? std::max(module->params[FrequencyAnalyzer::PEAK_FALL_DELAY_PARAM].getValue(),
-                                                  cella::spectrum::SpectrumConfig::MIN_DELAY_TIME)
+                                                  cella::frequency_analyzer::FrequencyAnalyzerConfig::MIN_DELAY_TIME)
                                        : 1.f;
         const float peakDecay = std::exp(-dt / peakDelay);
         const float ghostDecay = std::exp(-dt / 0.9f);
@@ -688,7 +688,7 @@ struct FrequencyAnalyzerLabels : TransparentWidget {
         const float horizontalMargin = 3.f;
         const float bandWidth = (box.size.x - 2.f * horizontalMargin) / NUM_BANDS;
         for (int band = 0; band < NUM_BANDS; ++band) {
-            const float frequency = cella::spectrum::SpectrumConfig::BAND_CENTERS[band];
+            const float frequency = cella::frequency_analyzer::FrequencyAnalyzerConfig::BAND_CENTERS[band];
             char label[16];
             if (frequency >= 1000.f)
                 std::snprintf(label, sizeof(label), "%.0fk", frequency / 1000.f);

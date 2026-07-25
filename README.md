@@ -7,6 +7,13 @@
 
 <img src="docs/Dark.jpg" alt="Cella - Dark Theme" style="width: 900px;">
 
+### Spectrum
+
+**Spectrum** is a scrolling spectrogram with Classic STFT and time-frequency reassigned analysis,
+adjustable history speed and direction, color palettes, traces, and event markers. Select
+**Analysis → Analysis mode → T-F Reassigned** from the context menu to enable it.
+The reassignment mode is based on research by P. Flandrin, F. Auger, and collaborators.
+
 ### Frequency Analyzer
 
 <img src="docs/images/FrequencyAnalyzer.png" alt="Cella - Frequency Analyzer" style="height: 380px;">
@@ -67,3 +74,11 @@ Signal integrator.
 ### 2State
 
 **2State** is a triple voltage-controlled switch, allowing you to define two distinct voltage levels per channel and switch between them using gate signals or manual buttons. Each section can operate in either a momentary 'GATE' mode or a 'LATCH' mode, where a trigger toggles the output state. Its cascading gate input behavior allows for synchronized control across multiple sections.
+
+## Development
+
+Run the Spectrum calibration, mapping, cadence, safety, and real-time allocation checks with:
+
+```sh
+make spectrum-test
+```
