@@ -26,6 +26,8 @@ constexpr float RANGE_MIN_DB = -140.f;
 constexpr float RANGE_MAX_DB = -40.f;
 constexpr float VERTICAL_TIME_GUTTER = 40.f;
 constexpr float HORIZONTAL_TIME_GUTTER = 18.f;
+constexpr float GRID_TOP_INSET = 0.f;
+constexpr float GRID_BOTTOM_INSET = 3.f;
 
 int getJsonInt(json_t* root, const char* key, int minimum, int maximum, int fallback) {
     json_t* value = json_object_get(root, key);
@@ -95,6 +97,10 @@ struct Waterfall : Module {
     std::atomic<int> frequencyBinsSetting{static_cast<int>(FrequencyBinScale::LOGARITHMIC)};
     std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
     std::atomic<int> historyDurationSetting{static_cast<int>(HistoryDuration::SECONDS_8)};
+    std::atomic<bool> showFrequencyTicksSetting{true};
+    std::atomic<bool> showTimeTicksSetting{true};
+    std::atomic<float> frequencyGridOpacitySetting{1.f};
+    std::atomic<float> timeGridOpacitySetting{1.f};
     std::atomic<bool> showMarkersSetting{true};
     std::atomic<float> markerOpacitySetting{0.82f};
     std::atomic<float> timeSpanSetting{8.f};
@@ -237,6 +243,10 @@ struct Waterfall : Module {
         json_object_set_new(root, "frequencyBins", json_integer(frequencyBinsSetting.load()));
         json_object_set_new(root, "frequencySmoothing", json_integer(frequencySmoothingSetting.load()));
         json_object_set_new(root, "historyDuration", json_integer(historyDurationSetting.load()));
+        json_object_set_new(root, "showFrequencyTicks", json_boolean(showFrequencyTicksSetting.load()));
+        json_object_set_new(root, "showTimeTicks", json_boolean(showTimeTicksSetting.load()));
+        json_object_set_new(root, "frequencyGridOpacity", json_real(frequencyGridOpacitySetting.load()));
+        json_object_set_new(root, "timeGridOpacity", json_real(timeGridOpacitySetting.load()));
         json_object_set_new(root, "showMarkers", json_boolean(showMarkersSetting.load()));
         json_object_set_new(root, "markerOpacity", json_real(markerOpacitySetting.load()));
         json_object_set_new(root, "timeSpan", json_real(timeSpanSetting.load()));
@@ -278,6 +288,14 @@ struct Waterfall : Module {
         historyDurationSetting.store(getJsonInt(root, "historyDuration", 0,
                                                 static_cast<int>(HistoryDuration::COUNT) - 1,
                                                 static_cast<int>(HistoryDuration::SECONDS_8)));
+        json_t* showFrequencyTicks = json_object_get(root, "showFrequencyTicks");
+        showFrequencyTicksSetting.store(
+            json_is_boolean(showFrequencyTicks) ? json_is_true(showFrequencyTicks) : true);
+        json_t* showTimeTicks = json_object_get(root, "showTimeTicks");
+        showTimeTicksSetting.store(json_is_boolean(showTimeTicks) ? json_is_true(showTimeTicks) : true);
+        frequencyGridOpacitySetting.store(
+            getJsonFloat(root, "frequencyGridOpacity", 0.f, 1.f, 1.f));
+        timeGridOpacitySetting.store(getJsonFloat(root, "timeGridOpacity", 0.f, 1.f, 1.f));
         json_t* showMarkers = json_object_get(root, "showMarkers");
         showMarkersSetting.store(json_is_boolean(showMarkers) ? json_is_true(showMarkers) : true);
         markerOpacitySetting.store(getJsonFloat(root, "markerOpacity", 0.f, 1.f, 0.82f));
@@ -324,6 +342,32 @@ struct MarkerOpacitySlider : ui::Slider {
         box.size.x = 200.f;
     }
     ~MarkerOpacitySlider() override { delete quantity; }
+};
+
+struct GridOpacityQuantity : Quantity {
+    std::atomic<float>* setting = NULL;
+    std::string label;
+
+    GridOpacityQuantity(std::atomic<float>* setting, const std::string& label)
+        : setting(setting), label(label) {}
+
+    void setValue(float value) override {
+        if (setting) setting->store(clampValue(value, getMinValue(), getMaxValue()) * 0.01f);
+    }
+    float getValue() override { return setting ? setting->load() * 100.f : getDefaultValue(); }
+    float getMinValue() override { return 0.f; }
+    float getMaxValue() override { return 100.f; }
+    float getDefaultValue() override { return 100.f; }
+    std::string getLabel() override { return label; }
+    std::string getUnit() override { return "%"; }
+};
+
+struct GridOpacitySlider : ui::Slider {
+    GridOpacitySlider(std::atomic<float>* setting, const std::string& label) {
+        quantity = new GridOpacityQuantity(setting, label);
+        box.size.x = 200.f;
+    }
+    ~GridOpacitySlider() override { delete quantity; }
 };
 
 struct WaterfallRenderer {
@@ -904,14 +948,20 @@ struct WaterfallOverlay : TransparentWidget {
         const float visible = (full - viewLow()) / (viewHigh() - viewLow());
         if (visible < 0.f || visible > 1.f) return;
         const float position = visible * (isVerticalFlow(flow()) ? box.size.x : box.size.y);
-        nvgStrokeColor(args.vg, secondary ? nvgRGBA(155, 184, 194, 24) : nvgRGBA(190, 205, 210, 44));
+        const float gridOpacity =
+            clampValue(module ? module->frequencyGridOpacitySetting.load() : 1.f, 0.f, 1.f);
+        const int gridAlpha =
+            static_cast<int>(std::lround((secondary ? 36.f : 64.f) * gridOpacity));
+        nvgStrokeColor(args.vg, secondary ? nvgRGBA(155, 184, 194, gridAlpha)
+                                         : nvgRGBA(190, 205, 210, gridAlpha));
         nvgStrokeWidth(args.vg, secondary ? 0.45f : 0.7f);
         nvgBeginPath(args.vg);
         if (isVerticalFlow(flow())) {
-            nvgMoveTo(args.vg, position, 0.f);
-            nvgLineTo(args.vg, position, box.size.y);
+            nvgMoveTo(args.vg, position, GRID_TOP_INSET);
+            nvgLineTo(args.vg, position, box.size.y - GRID_BOTTOM_INSET);
         } else {
-            const float y = box.size.y - position;
+            const float y =
+                clampValue(box.size.y - position, GRID_TOP_INSET, box.size.y - GRID_BOTTOM_INSET);
             nvgMoveTo(args.vg, 0.f, y);
             nvgLineTo(args.vg, box.size.x, y);
         }
@@ -931,15 +981,16 @@ struct WaterfallOverlay : TransparentWidget {
                 alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
             }
             nvgTextAlign(args.vg, alignment);
-            nvgText(args.vg, labelX, box.size.y - 2.f, label.c_str(), NULL);
+            nvgText(args.vg, labelX, box.size.y - GRID_BOTTOM_INSET - 2.f, label.c_str(), NULL);
         } else {
-            float labelY = box.size.y - position;
+            float labelY =
+                clampValue(box.size.y - position, GRID_TOP_INSET, box.size.y - GRID_BOTTOM_INSET);
             int alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE;
-            if (labelY < 7.f) {
-                labelY = 2.f;
+            if (labelY < GRID_TOP_INSET + 7.f) {
+                labelY = GRID_TOP_INSET + 2.f;
                 alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_TOP;
-            } else if (labelY > box.size.y - 7.f) {
-                labelY = box.size.y - 2.f;
+            } else if (labelY > box.size.y - GRID_BOTTOM_INSET - 7.f) {
+                labelY = box.size.y - GRID_BOTTOM_INSET - 2.f;
                 alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
             }
             nvgTextAlign(args.vg, alignment);
@@ -948,42 +999,48 @@ struct WaterfallOverlay : TransparentWidget {
     }
 
     void drawGrid(const DrawArgs& args) {
-        if (!(maximumFrequency() > MIN_FREQUENCY_HZ) || viewHigh() <= viewLow()) return;
-        const FrequencyScaleMode scale = static_cast<FrequencyScaleMode>(
-            clampValue(module ? module->frequencyScaleSetting.load() : 3, 0,
-                       static_cast<int>(FrequencyScaleMode::COUNT) - 1));
-        static const float hzGuides[] = {20.f, 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f, 20000.f};
-        static const float octaveGuides[] = {31.25f, 62.5f, 125.f, 250.f, 500.f,
-                                            1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
-        float last = -1000.f;
-        if (scale == FrequencyScaleMode::HZ || scale == FrequencyScaleMode::COMBINED) {
-            for (size_t i = 0; i < sizeof(hzGuides) / sizeof(hzGuides[0]); ++i)
-                drawFrequencyGuide(args, hzGuides[i], frequencyLabel(hzGuides[i]), false, last);
-        }
-        if (scale == FrequencyScaleMode::OCTAVES || scale == FrequencyScaleMode::COMBINED) {
-            if (scale == FrequencyScaleMode::OCTAVES) last = -1000.f;
-            for (size_t i = 0; i < sizeof(octaveGuides) / sizeof(octaveGuides[0]); ++i)
-                drawFrequencyGuide(args, octaveGuides[i],
-                                   scale == FrequencyScaleMode::OCTAVES ? frequencyLabel(octaveGuides[i]) : "",
-                                   scale == FrequencyScaleMode::COMBINED, last);
-        }
-        if (scale == FrequencyScaleMode::MUSICAL) {
-            const float frequencyAxisPixels = isVerticalFlow(flow()) ? box.size.x : box.size.y;
-            const float lowFrequency = frequencyFromFullCoordinate(viewLow());
-            const float highFrequency = frequencyFromFullCoordinate(viewHigh());
-            const float visibleSemitones =
-                12.f * std::log2(std::max(highFrequency / lowFrequency, 1.0001f));
-            const float semitonePixels =
-                frequencyAxisPixels / std::max(visibleSemitones, 1.f);
-            for (int midi = 12; midi <= 132; ++midi) {
-                if (midi % 12 != 0 && semitonePixels < 18.f) continue;
-                const float frequency = 440.f * std::pow(2.f, (midi - 69) / 12.f);
-                std::string label;
-                if (midi % 12 == 0) label = rack::string::f("C%d", midi / 12 - 1);
-                drawFrequencyGuide(args, frequency, label, midi % 12 != 0, last);
+        if ((!module || module->showFrequencyTicksSetting.load()) &&
+            maximumFrequency() > MIN_FREQUENCY_HZ && viewHigh() > viewLow()) {
+            const FrequencyScaleMode scale = static_cast<FrequencyScaleMode>(
+                clampValue(module ? module->frequencyScaleSetting.load() : 3, 0,
+                           static_cast<int>(FrequencyScaleMode::COUNT) - 1));
+            static const float hzGuides[] = {
+                20.f, 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f, 20000.f};
+            static const float octaveGuides[] = {
+                31.25f, 62.5f, 125.f, 250.f, 500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
+            float last = -1000.f;
+            if (scale == FrequencyScaleMode::HZ || scale == FrequencyScaleMode::COMBINED) {
+                for (size_t i = 0; i < sizeof(hzGuides) / sizeof(hzGuides[0]); ++i)
+                    drawFrequencyGuide(args, hzGuides[i], frequencyLabel(hzGuides[i]), false, last);
+            }
+            if (scale == FrequencyScaleMode::OCTAVES || scale == FrequencyScaleMode::COMBINED) {
+                if (scale == FrequencyScaleMode::OCTAVES) last = -1000.f;
+                for (size_t i = 0; i < sizeof(octaveGuides) / sizeof(octaveGuides[0]); ++i)
+                    drawFrequencyGuide(args, octaveGuides[i],
+                                       scale == FrequencyScaleMode::OCTAVES
+                                           ? frequencyLabel(octaveGuides[i])
+                                           : "",
+                                       scale == FrequencyScaleMode::COMBINED, last);
+            }
+            if (scale == FrequencyScaleMode::MUSICAL) {
+                const float frequencyAxisPixels =
+                    isVerticalFlow(flow()) ? box.size.x : box.size.y;
+                const float lowFrequency = frequencyFromFullCoordinate(viewLow());
+                const float highFrequency = frequencyFromFullCoordinate(viewHigh());
+                const float visibleSemitones =
+                    12.f * std::log2(std::max(highFrequency / lowFrequency, 1.0001f));
+                const float semitonePixels =
+                    frequencyAxisPixels / std::max(visibleSemitones, 1.f);
+                for (int midi = 12; midi <= 132; ++midi) {
+                    if (midi % 12 != 0 && semitonePixels < 18.f) continue;
+                    const float frequency = 440.f * std::pow(2.f, (midi - 69) / 12.f);
+                    std::string label;
+                    if (midi % 12 == 0) label = rack::string::f("C%d", midi / 12 - 1);
+                    drawFrequencyGuide(args, frequency, label, midi % 12 != 0, last);
+                }
             }
         }
-        drawTimeRuler(args);
+        if (!module || module->showTimeTicksSetting.load()) drawTimeRuler(args);
     }
 
     void drawTimeRuler(const DrawArgs& args) {
@@ -994,29 +1051,36 @@ struct WaterfallOverlay : TransparentWidget {
         for (size_t i = 0; i < ticks.size(); ++i) {
             float x = 0.f, yBottom = 0.f;
             screenFromLogical(flow(), LogicalPoint(0.f, ticks[i].normalizedAge), x, yBottom);
-            const float y = (1.f - yBottom) * box.size.y;
-            nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, 28));
+            const float y = clampValue((1.f - yBottom) * box.size.y, GRID_TOP_INSET,
+                                       box.size.y - GRID_BOTTOM_INSET);
+            const float gridOpacity =
+                clampValue(module ? module->timeGridOpacitySetting.load() : 1.f, 0.f, 1.f);
+            const int gridAlpha = static_cast<int>(std::lround(48.f * gridOpacity));
+            nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, gridAlpha));
             nvgBeginPath(args.vg);
             if (isVerticalFlow(flow())) {
                 nvgMoveTo(args.vg, 0.f, y);
                 nvgLineTo(args.vg, box.size.x, y);
                 float labelY = y;
                 int alignment = NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE;
-                if (y < 7.f) {
-                    labelY = 2.f;
+                if (y < GRID_TOP_INSET + 7.f) {
+                    labelY = GRID_TOP_INSET + 2.f;
                     alignment = NVG_ALIGN_LEFT | NVG_ALIGN_TOP;
-                } else if (y > box.size.y - 7.f) {
-                    labelY = box.size.y - 2.f;
+                } else if (y > box.size.y - GRID_BOTTOM_INSET - 7.f) {
+                    labelY = box.size.y - GRID_BOTTOM_INSET - 2.f;
                     alignment = NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM;
                 }
                 nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
-                const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
-                nvgText(args.vg, 2.f, labelY, label.c_str(), NULL);
+                if (ticks[i].ageSeconds > 0.001f) {
+                    const std::string label =
+                        timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                    nvgText(args.vg, 2.f, labelY, label.c_str(), NULL);
+                }
             } else {
                 const float displayX = x * box.size.x;
-                nvgMoveTo(args.vg, displayX, 0.f);
-                nvgLineTo(args.vg, displayX, box.size.y);
+                nvgMoveTo(args.vg, displayX, GRID_TOP_INSET);
+                nvgLineTo(args.vg, displayX, box.size.y - GRID_BOTTOM_INSET);
                 float labelX = displayX;
                 int alignment = NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM;
                 if (displayX < 15.f) {
@@ -1028,8 +1092,12 @@ struct WaterfallOverlay : TransparentWidget {
                 }
                 nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
-                const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
-                nvgText(args.vg, labelX, box.size.y - 1.f, label.c_str(), NULL);
+                if (ticks[i].ageSeconds > 0.001f) {
+                    const std::string label =
+                        timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                    nvgText(args.vg, labelX, box.size.y - GRID_BOTTOM_INSET - 1.f,
+                            label.c_str(), NULL);
+                }
             }
             nvgStroke(args.vg);
         }
@@ -1210,16 +1278,17 @@ struct WaterfallBezel : TransparentWidget {
         nvgStroke(args.vg);
 
         nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, height - 1.f);
+        nvgLineTo(args.vg, width, height - 1.f);
+        nvgStrokeColor(args.vg, nvgRGB(0x12, 0x12, 0x12));
+        nvgStrokeWidth(args.vg, 2.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
         nvgMoveTo(args.vg, 0.f, height - 2.5f);
         nvgLineTo(args.vg, width, height - 2.5f);
         nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
         nvgStrokeWidth(args.vg, 1.f);
-        nvgStroke(args.vg);
-
-        nvgBeginPath(args.vg);
-        nvgRect(args.vg, 1.f, 1.f, std::max(width - 2.f, 0.f), std::max(height - 2.f, 0.f));
-        nvgStrokeColor(args.vg, nvgRGB(0x12, 0x12, 0x12));
-        nvgStrokeWidth(args.vg, 2.f);
         nvgStroke(args.vg);
 
         nvgRestore(args.vg);
@@ -1362,6 +1431,28 @@ struct WaterfallWidget : ModuleWidget {
                 "Peak", {"Off", "Decay", "Infinite hold"},
                 [=]() { return static_cast<size_t>(clampValue(waterfall->peakHoldSetting.load(), 0, 2)); },
                 [=](size_t value) { waterfall->peakHoldSetting.store(static_cast<int>(value)); }));
+        }));
+        menu->addChild(createSubmenuItem("Ticks", "", [=](Menu* ticksMenu) {
+            ticksMenu->addChild(createSubmenuItem(
+                "Frequency", waterfall->showFrequencyTicksSetting.load() ? "On" : "Off",
+                [=](Menu* frequencyTicksMenu) {
+                    frequencyTicksMenu->addChild(createBoolMenuItem(
+                        "On", "",
+                        [=]() { return waterfall->showFrequencyTicksSetting.load(); },
+                        [=](bool value) { waterfall->showFrequencyTicksSetting.store(value); }));
+                    frequencyTicksMenu->addChild(new GridOpacitySlider(
+                        &waterfall->frequencyGridOpacitySetting, "Frequency grid opacity"));
+                }));
+            ticksMenu->addChild(createSubmenuItem(
+                "Time", waterfall->showTimeTicksSetting.load() ? "On" : "Off",
+                [=](Menu* timeTicksMenu) {
+                    timeTicksMenu->addChild(createBoolMenuItem(
+                        "On", "",
+                        [=]() { return waterfall->showTimeTicksSetting.load(); },
+                        [=](bool value) { waterfall->showTimeTicksSetting.store(value); }));
+                    timeTicksMenu->addChild(new GridOpacitySlider(
+                        &waterfall->timeGridOpacitySetting, "Time grid opacity"));
+                }));
         }));
         menu->addChild(createSubmenuItem("Frequency", "", [=](Menu* frequencyMenu) {
             frequencyMenu->addChild(createIndexSubmenuItem(
