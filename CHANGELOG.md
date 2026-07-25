@@ -7,7 +7,8 @@ New modules:
 
 Updates:
 * Waterfall - add sample-accurate markers, precise/smooth rendering, live-trace modes, frequency scales,
-  calibrated smoothing, timestamped time navigation, and independent 2-30 second history duration.
+  calibrated smoothing, selectable FFT overlap, timestamped time navigation, and independent 2-30
+  second history duration.
 
 ### 2.10.0 (2026-07-12)
 

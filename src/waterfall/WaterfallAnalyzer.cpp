@@ -11,7 +11,6 @@ namespace {
 
 constexpr float PI = 3.14159265358979323846f;
 constexpr float MAGNITUDE_EPSILON = 1e-8f;
-constexpr float MAX_FFTS_PER_SECOND = 240.f;
 
 float windowCoefficient(WindowFunction window, int index, int size) {
     const float phase = 2.f * PI * static_cast<float>(index) / static_cast<float>(size - 1);
@@ -70,7 +69,7 @@ struct WaterfallAnalyzer::Kernel {
     int hopSize = 1;
     bool analyzed = false;
 
-    void reset(float sampleRate) {
+    void reset(float sampleRate, FftOverlap overlap) {
         std::fill(capture.begin(), capture.end(), 0.f);
         std::fill(work.begin(), work.end(), 0.f);
         std::fill(fftOutput.begin(), fftOutput.end(), 0.f);
@@ -80,10 +79,7 @@ struct WaterfallAnalyzer::Kernel {
         filled = 0;
         samplesSinceAnalysis = 0;
         analyzed = false;
-        // Preserve the requested 75% overlap until it would exceed a
-        // deliberately bounded FFT cadence at high sample rates.
-        hopSize =
-            std::max(std::max(size / 4, 1), static_cast<int>(std::ceil(sampleRate / MAX_FFTS_PER_SECOND)));
+        hopSize = effectiveFftHopSize(size, sampleRate, overlap);
         updateCellMapping(sampleRate);
     }
 
@@ -183,6 +179,8 @@ void WaterfallAnalyzer::configure(const WaterfallConfig& newConfig) {
     config.fftSize = static_cast<FftSize>(fftIndex);
     config.window = static_cast<WindowFunction>(
         clampValue(static_cast<int>(config.window), 0, static_cast<int>(WindowFunction::COUNT) - 1));
+    config.fftOverlap = static_cast<FftOverlap>(
+        clampValue(static_cast<int>(config.fftOverlap), 0, static_cast<int>(FftOverlap::COUNT) - 1));
     config.quality =
         static_cast<Quality>(clampValue(static_cast<int>(config.quality), 0, static_cast<int>(Quality::COUNT) - 1));
     config.channelMode = static_cast<ChannelMode>(
@@ -192,11 +190,12 @@ void WaterfallAnalyzer::configure(const WaterfallConfig& newConfig) {
 
     const bool analysisChanged =
         !wasConfigured || oldConfig.fftSize != config.fftSize || oldConfig.window != config.window ||
-        oldConfig.channelMode != config.channelMode || oldConfig.polyChannel != config.polyChannel ||
-        oldConfig.sampleRate != config.sampleRate || oldConfig.generation != config.generation;
+        oldConfig.fftOverlap != config.fftOverlap || oldConfig.channelMode != config.channelMode ||
+        oldConfig.polyChannel != config.polyChannel || oldConfig.sampleRate != config.sampleRate ||
+        oldConfig.generation != config.generation;
     activeKernel = kernels[static_cast<size_t>(fftIndex)].get();
     if (analysisChanged) {
-        activeKernel->reset(config.sampleRate);
+        activeKernel->reset(config.sampleRate, config.fftOverlap);
         processedSamples = 0;
         latestSpectrumSample = 0;
         haveSpectrum = false;

@@ -38,6 +38,9 @@ These interactions remain available while frozen.
 
 * **FFT size** selects 1024, 2048, 4096, 8192, or 16384 samples.
 * **Window** selects Hann, Blackman-Harris, or flat-top analysis.
+* **FFT overlap** selects None, 25%, 50%, 75%, 87.5%, or 93.75%. Higher overlap improves temporal
+  coverage and transient continuity at increased CPU cost; 75% is the default. At combinations of
+  small FFT sizes and high sample rates, the analyzer may reduce the effective overlap to control CPU.
 * **History rate** selects 15, 30, or 60 rows per second. History time is based on processed samples,
   not the GUI frame rate.
 * **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.

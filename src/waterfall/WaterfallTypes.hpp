@@ -21,6 +21,7 @@ constexpr float MAX_SAFE_VOLTAGE = 100.f;
 enum class ChannelMode : int { LEFT, RIGHT, MONO, MID, SIDE, COUNT };
 enum class FftSize : int { FFT_1024, FFT_2048, FFT_4096, FFT_8192, FFT_16384, COUNT };
 enum class WindowFunction : int { HANN, BLACKMAN_HARRIS, FLAT_TOP, COUNT };
+enum class FftOverlap : int { NONE, PERCENT_25, PERCENT_50, PERCENT_75, PERCENT_87_5, PERCENT_93_75, COUNT };
 enum class Quality : int { ECONOMY, NORMAL, HIGH, COUNT };
 // Keep the first three values stable so patches saved by Waterfall Slice 1/2
 // continue to select the same palette.
@@ -92,8 +93,10 @@ enum class TemporalSmoothing : int { OFF, FAST, MEDIUM, SLOW, COUNT };
 enum class HistoryDuration : int { SECONDS_2, SECONDS_4, SECONDS_8, SECONDS_16, SECONDS_30, COUNT };
 
 constexpr std::array<int, static_cast<int>(FftSize::COUNT)> FFT_SIZES = {{1024, 2048, 4096, 8192, 16384}};
+constexpr std::array<int, static_cast<int>(FftOverlap::COUNT)> FFT_HOP_SIXTEENTHS = {{16, 12, 8, 4, 2, 1}};
 constexpr std::array<int, static_cast<int>(Quality::COUNT)> ROW_RATES = {{15, 30, 60}};
 constexpr std::array<int, static_cast<int>(HistoryDuration::COUNT)> HISTORY_DURATIONS = {{2, 4, 8, 16, 30}};
+constexpr float MAX_FFT_ANALYSES_PER_SECOND = 240.f;
 
 template <typename T>
 inline T clampValue(T value, T low, T high) {
@@ -134,6 +137,27 @@ inline float mixInputVoltages(float leftVoltage, float rightVoltage, bool leftCo
 
 inline int fftSizeSamples(FftSize size) {
     return FFT_SIZES[static_cast<int>(size)];
+}
+
+inline int requestedFftHopSize(int fftSize, FftOverlap overlap) {
+    const int safeSize = std::max(fftSize, 1);
+    const int overlapIndex =
+        clampValue(static_cast<int>(overlap), 0, static_cast<int>(FftOverlap::COUNT) - 1);
+    const int hopSixteenths = FFT_HOP_SIXTEENTHS[static_cast<size_t>(overlapIndex)];
+    return std::max(1, (safeSize * hopSixteenths + 15) / 16);
+}
+
+inline int effectiveFftHopSize(int fftSize, float sampleRate, FftOverlap overlap) {
+    const int safeSize = std::max(fftSize, 1);
+    const float safeSampleRate =
+        std::isfinite(sampleRate) ? std::max(sampleRate, 1000.f) : 48000.f;
+    const int cadenceLimitedHop = std::max(
+        1, static_cast<int>(std::ceil(static_cast<double>(safeSampleRate) /
+                                     static_cast<double>(MAX_FFT_ANALYSES_PER_SECOND))));
+    // A hop larger than the FFT would leave gaps in the analyzed signal. At
+    // extreme sample rates, continuous coverage therefore takes precedence
+    // over the soft analysis-cadence ceiling.
+    return std::min(safeSize, std::max(requestedFftHopSize(safeSize, overlap), cadenceLimitedHop));
 }
 
 inline int rowsPerSecond(Quality quality) {
@@ -248,6 +272,7 @@ inline void screenFromLogical(FlowDirection flow, const LogicalPoint& logical, f
 struct WaterfallConfig {
     FftSize fftSize = FftSize::FFT_4096;
     WindowFunction window = WindowFunction::HANN;
+    FftOverlap fftOverlap = FftOverlap::PERCENT_75;
     Quality quality = Quality::NORMAL;
     ChannelMode channelMode = ChannelMode::MONO;
     int polyChannel = 0;

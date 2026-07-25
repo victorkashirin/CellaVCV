@@ -81,6 +81,7 @@ struct Waterfall : Module {
 
     std::atomic<int> fftSizeSetting{static_cast<int>(FftSize::FFT_4096)};
     std::atomic<int> windowSetting{static_cast<int>(WindowFunction::HANN)};
+    std::atomic<int> fftOverlapSetting{static_cast<int>(FftOverlap::PERCENT_75)};
     std::atomic<int> qualitySetting{static_cast<int>(Quality::NORMAL)};
     std::atomic<int> polyChannelSetting{0};
     std::atomic<int> paletteSetting{static_cast<int>(Palette::HEAT)};
@@ -106,6 +107,7 @@ struct Waterfall : Module {
 
     int appliedFftSize = -1;
     int appliedWindow = -1;
+    int appliedFftOverlap = -1;
     int appliedQuality = -1;
     int appliedChannelMode = -1;
     int appliedPolyChannel = -1;
@@ -133,6 +135,8 @@ struct Waterfall : Module {
             clampValue(fftSizeSetting.load(std::memory_order_relaxed), 0, static_cast<int>(FftSize::COUNT) - 1);
         const int window =
             clampValue(windowSetting.load(std::memory_order_relaxed), 0, static_cast<int>(WindowFunction::COUNT) - 1);
+        const int fftOverlap = clampValue(fftOverlapSetting.load(std::memory_order_relaxed), 0,
+                                          static_cast<int>(FftOverlap::COUNT) - 1);
         const int quality =
             clampValue(qualitySetting.load(std::memory_order_relaxed), 0, static_cast<int>(Quality::COUNT) - 1);
         const int channelMode = clampValue(static_cast<int>(std::lround(params[MODE_PARAM].getValue())), 0,
@@ -140,8 +144,8 @@ struct Waterfall : Module {
         const int polyChannel = clampValue(polyChannelSetting.load(std::memory_order_relaxed), 0, 15);
         const bool sampleRateChanged = appliedSampleRate != 0.f && args.sampleRate != appliedSampleRate;
         const bool analysisChanged =
-            fftSize != appliedFftSize || window != appliedWindow || channelMode != appliedChannelMode ||
-            polyChannel != appliedPolyChannel || sampleRateChanged;
+            fftSize != appliedFftSize || window != appliedWindow || fftOverlap != appliedFftOverlap ||
+            channelMode != appliedChannelMode || polyChannel != appliedPolyChannel || sampleRateChanged;
         const bool qualityChanged = quality != appliedQuality;
         if (analysisChanged || qualityChanged || appliedSampleRate == 0.f) {
             if (analysisChanged) {
@@ -151,6 +155,7 @@ struct Waterfall : Module {
             WaterfallConfig next;
             next.fftSize = static_cast<FftSize>(fftSize);
             next.window = static_cast<WindowFunction>(window);
+            next.fftOverlap = static_cast<FftOverlap>(fftOverlap);
             next.quality = static_cast<Quality>(quality);
             next.channelMode = static_cast<ChannelMode>(channelMode);
             next.polyChannel = polyChannel;
@@ -160,6 +165,7 @@ struct Waterfall : Module {
             activeConfigGeneration.store(configGeneration, std::memory_order_release);
             appliedFftSize = fftSize;
             appliedWindow = window;
+            appliedFftOverlap = fftOverlap;
             appliedQuality = quality;
             appliedChannelMode = channelMode;
             appliedPolyChannel = polyChannel;
@@ -209,6 +215,7 @@ struct Waterfall : Module {
         json_t* root = json_object();
         json_object_set_new(root, "fftSize", json_integer(fftSizeSetting.load()));
         json_object_set_new(root, "window", json_integer(windowSetting.load()));
+        json_object_set_new(root, "fftOverlap", json_integer(fftOverlapSetting.load()));
         json_object_set_new(root, "quality", json_integer(qualitySetting.load()));
         json_object_set_new(root, "polyChannel", json_integer(polyChannelSetting.load()));
         json_object_set_new(root, "palette", json_integer(paletteSetting.load()));
@@ -232,6 +239,8 @@ struct Waterfall : Module {
                                         static_cast<int>(FftSize::FFT_4096)));
         windowSetting.store(getJsonInt(root, "window", 0, static_cast<int>(WindowFunction::COUNT) - 1,
                                        static_cast<int>(WindowFunction::HANN)));
+        fftOverlapSetting.store(getJsonInt(root, "fftOverlap", 0, static_cast<int>(FftOverlap::COUNT) - 1,
+                                           static_cast<int>(FftOverlap::PERCENT_75)));
         qualitySetting.store(getJsonInt(root, "quality", 0, static_cast<int>(Quality::COUNT) - 1,
                                         static_cast<int>(Quality::NORMAL)));
         polyChannelSetting.store(getJsonInt(root, "polyChannel", 0, 15, 0));
@@ -1267,6 +1276,13 @@ struct WaterfallWidget : ModuleWidget {
             "Window", {"Hann", "Blackman-Harris", "Flat-top"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->windowSetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->windowSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "FFT overlap", {"None", "25%", "50%", "75%", "87.5%", "93.75%"},
+            [=]() {
+                return static_cast<size_t>(
+                    clampValue(waterfall->fftOverlapSetting.load(), 0, static_cast<int>(FftOverlap::COUNT) - 1));
+            },
+            [=](size_t value) { waterfall->fftOverlapSetting.store(static_cast<int>(value)); }));
         menu->addChild(createIndexSubmenuItem(
             "History rate", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->qualitySetting.load(), 0, 2)); },

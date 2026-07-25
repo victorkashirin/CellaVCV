@@ -191,6 +191,30 @@ void testRowsAndFiniteValues() {
     require(row.rowEndSample == 48000, "row timestamps use processed samples");
 }
 
+void testFftOverlapHopSizes() {
+    WaterfallConfig defaults;
+    require(defaults.fftOverlap == FftOverlap::PERCENT_75, "FFT overlap defaults to 75%");
+
+    const FftOverlap overlaps[] = {
+        FftOverlap::NONE,       FftOverlap::PERCENT_25,   FftOverlap::PERCENT_50,
+        FftOverlap::PERCENT_75, FftOverlap::PERCENT_87_5, FftOverlap::PERCENT_93_75,
+    };
+    const int expectedHops[] = {4096, 3072, 2048, 1024, 512, 256};
+    for (size_t index = 0; index < sizeof(overlaps) / sizeof(overlaps[0]); ++index) {
+        require(requestedFftHopSize(4096, overlaps[index]) == expectedHops[index],
+                "overlap preset maps to the requested power-of-two hop");
+        require(effectiveFftHopSize(4096, 48000.f, overlaps[index]) == expectedHops[index],
+                "48 kHz 4096-point FFT preserves the requested overlap");
+    }
+
+    const int cadenceLimitedHop = effectiveFftHopSize(1024, 192000.f, FftOverlap::PERCENT_93_75);
+    require(cadenceLimitedHop == 800,
+            "analysis cadence ceiling reduces excessive overlap (actual " +
+                std::to_string(cadenceLimitedHop) + ", expected 800)");
+    require(effectiveFftHopSize(1024, 384000.f, FftOverlap::PERCENT_93_75) == 1024,
+            "effective hop never exceeds one FFT window");
+}
+
 void testNoiseCoverageAndTransientAggregation() {
     WaterfallAnalyzer analyzer;
     WaterfallConfig config;
@@ -272,6 +296,7 @@ void testHighRateFftCadenceCap() {
     WaterfallAnalyzer analyzer;
     WaterfallConfig config;
     config.fftSize = FftSize::FFT_1024;
+    config.fftOverlap = FftOverlap::PERCENT_93_75;
     config.quality = Quality::HIGH;
     config.sampleRate = 192000.f;
     config.generation = 150;
@@ -281,7 +306,8 @@ void testHighRateFftCadenceCap() {
     for (int sample = 0; sample < 5000; ++sample) {
         if (analyzer.processSample(0.f, row) && row.sourceAnalysisSample >= 1024) {
             received = true;
-            require(row.effectiveHopSize >= 800, "high-rate small FFT reports its capped effective hop");
+            require(row.effectiveHopSize == 800, "high-rate small FFT reports its capped effective hop");
+            require(row.effectiveHopSize <= row.fftSize, "effective hop cannot leave analysis gaps");
             require(row.sampleRate / row.effectiveHopSize <= 240.01f, "FFT cadence is capped at high sample rates");
             break;
         }
@@ -456,6 +482,7 @@ int main() {
     testPaletteCatalog();
     testCalibrationAndMapping();
     testRowsAndFiniteValues();
+    testFftOverlapHopSizes();
     testNoiseCoverageAndTransientAggregation();
     testNoProcessAllocations();
     testHighRateFftCadenceCap();
