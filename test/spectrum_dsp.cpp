@@ -463,6 +463,21 @@ void testMarkersViewportAndTicks() {
     }
 }
 
+void testHistorySpeedMapping() {
+    requireNear(historyDurationForSpeed(1.f), DEFAULT_HISTORY_SECONDS, 1e-6f,
+                "unity history speed preserves the default duration");
+    requireNear(historyDurationForSpeed(MAX_HISTORY_SPEED), MIN_HISTORY_SECONDS, 1e-6f,
+                "maximum history speed selects the shortest duration");
+    requireNear(historyDurationForSpeed(MIN_HISTORY_SPEED), MAX_HISTORY_SECONDS, 1e-5f,
+                "minimum history speed selects the longest duration");
+
+    const float durations[] = {MIN_HISTORY_SECONDS, 5.f, DEFAULT_HISTORY_SECONDS, 17.f,
+                               MAX_HISTORY_SECONDS};
+    for (float duration : durations)
+        requireNear(historyDurationForSpeed(historySpeedForDuration(duration)), duration, 1e-5f,
+                    "history speed and duration mappings round-trip");
+}
+
 void testFrequencySmoothing() {
     SpectrumRow constant = makeTimelineRow(1600);
     constant.dbTenths.fill(quantizeDb(-48.f));
@@ -522,6 +537,7 @@ int main() {
     testHighRateFftCadenceCap();
     testSharedTimelineAndRowRateReconfiguration();
     testHistoryCapacityResizeAndLookup();
+    testHistorySpeedMapping();
     testMarkersViewportAndTicks();
     testFrequencySmoothing();
     std::cout << "Spectrum DSP tests passed" << std::endl;

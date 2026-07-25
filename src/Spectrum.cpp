@@ -70,8 +70,8 @@ std::string timeLabel(float age, float span) {
 }  // namespace
 
 struct Spectrum : Module {
-    enum ParamIds { MODE_PARAM, RANGE_PARAM, FREEZE_PARAM, CLEAR_PARAM, NUM_PARAMS };
-    enum InputIds { LEFT_INPUT, RIGHT_INPUT, FREEZE_INPUT, MARK_INPUT, CLEAR_INPUT, NUM_INPUTS };
+    enum ParamIds { MODE_PARAM, RANGE_PARAM, FREEZE_PARAM, CLEAR_PARAM, SPEED_PARAM, NUM_PARAMS };
+    enum InputIds { LEFT_INPUT, RIGHT_INPUT, FREEZE_INPUT, MARK_INPUT, NUM_INPUTS };
     enum LightIds { FREEZE_LIGHT, NUM_LIGHTS };
 
     SpectrumAnalyzer analyzer;
@@ -81,7 +81,6 @@ struct Spectrum : Module {
     dsp::SchmittTrigger freezeInputTrigger;
     dsp::SchmittTrigger markInputTrigger;
     dsp::SchmittTrigger clearButtonTrigger;
-    dsp::SchmittTrigger clearInputTrigger;
 
     std::atomic<int> fftSizeSetting{static_cast<int>(FftSize::FFT_4096)};
     std::atomic<int> windowSetting{static_cast<int>(WindowFunction::HANN)};
@@ -96,14 +95,12 @@ struct Spectrum : Module {
     std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::HZ)};
     std::atomic<int> frequencyBinsSetting{static_cast<int>(FrequencyBinScale::LOGARITHMIC)};
     std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
-    std::atomic<float> historyLengthSetting{DEFAULT_HISTORY_SECONDS};
     std::atomic<bool> showFrequencyTicksSetting{true};
     std::atomic<bool> showTimeTicksSetting{true};
     std::atomic<float> frequencyGridOpacitySetting{1.f};
     std::atomic<float> timeGridOpacitySetting{1.f};
     std::atomic<bool> showMarkersSetting{true};
     std::atomic<float> markerOpacitySetting{0.82f};
-    std::atomic<float> timeSpanSetting{DEFAULT_HISTORY_SECONDS};
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
     std::atomic<bool> frozen{false};
@@ -133,11 +130,12 @@ struct Spectrum : Module {
         configParam(RANGE_PARAM, RANGE_MIN_DB, RANGE_MAX_DB, RANGE_DEFAULT_DB, "Display floor", " dBFS");
         configButton(FREEZE_PARAM, "Freeze");
         configButton(CLEAR_PARAM, "Clear");
+        configParam(SPEED_PARAM, std::log2(MIN_HISTORY_SPEED), std::log2(MAX_HISTORY_SPEED), 0.f,
+                    "History speed", "×", 2.f);
         configInput(LEFT_INPUT, "Left");
         configInput(RIGHT_INPUT, "Right");
         configInput(FREEZE_INPUT, "Freeze trigger");
         configInput(MARK_INPUT, "Marker trigger");
-        configInput(CLEAR_INPUT, "Clear trigger");
     }
 
     void process(const ProcessArgs& args) override {
@@ -192,8 +190,7 @@ struct Spectrum : Module {
         const bool freezeEvent = freezeButtonTrigger.process(params[FREEZE_PARAM].getValue()) ||
                                  freezeInputTrigger.process(inputs[FREEZE_INPUT].getVoltage());
         if (freezeEvent) frozen.store(!frozen.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        const bool clearEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue()) ||
-                                clearInputTrigger.process(inputs[CLEAR_INPUT].getVoltage());
+        const bool clearEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue());
         if (clearEvent) clearGeneration.fetch_add(1, std::memory_order_release);
         if (markInputTrigger.process(inputs[MARK_INPUT].getVoltage())) {
             MarkerEvent marker;
@@ -242,14 +239,12 @@ struct Spectrum : Module {
         json_object_set_new(root, "frequencyScale", json_integer(frequencyScaleSetting.load()));
         json_object_set_new(root, "frequencyBins", json_integer(frequencyBinsSetting.load()));
         json_object_set_new(root, "frequencySmoothing", json_integer(frequencySmoothingSetting.load()));
-        json_object_set_new(root, "historyLength", json_real(historyLengthSetting.load()));
         json_object_set_new(root, "showFrequencyTicks", json_boolean(showFrequencyTicksSetting.load()));
         json_object_set_new(root, "showTimeTicks", json_boolean(showTimeTicksSetting.load()));
         json_object_set_new(root, "frequencyGridOpacity", json_real(frequencyGridOpacitySetting.load()));
         json_object_set_new(root, "timeGridOpacity", json_real(timeGridOpacitySetting.load()));
         json_object_set_new(root, "showMarkers", json_boolean(showMarkersSetting.load()));
         json_object_set_new(root, "markerOpacity", json_real(markerOpacitySetting.load()));
-        json_object_set_new(root, "timeSpan", json_real(timeSpanSetting.load()));
         json_object_set_new(root, "viewMinimum", json_real(viewMinimum.load()));
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
         return root;
@@ -285,16 +280,6 @@ struct Spectrum : Module {
         frequencySmoothingSetting.store(getJsonInt(root, "frequencySmoothing", 0,
                                                    static_cast<int>(FrequencySmoothing::COUNT) - 1,
                                                    static_cast<int>(FrequencySmoothing::NONE)));
-        json_t* historyLengthJson = json_object_get(root, "historyLength");
-        if (json_is_number(historyLengthJson)) {
-            historyLengthSetting.store(std::round(clampValue(
-                static_cast<float>(json_number_value(historyLengthJson)), MIN_HISTORY_SECONDS,
-                MAX_HISTORY_SECONDS)));
-        } else {
-            static const float legacyDurations[] = {2.f, 4.f, 8.f, 16.f, 30.f};
-            const int legacyIndex = getJsonInt(root, "historyDuration", 0, 4, 2);
-            historyLengthSetting.store(legacyDurations[legacyIndex]);
-        }
         json_t* showFrequencyTicks = json_object_get(root, "showFrequencyTicks");
         showFrequencyTicksSetting.store(
             json_is_boolean(showFrequencyTicks) ? json_is_true(showFrequencyTicks) : true);
@@ -306,9 +291,6 @@ struct Spectrum : Module {
         json_t* showMarkers = json_object_get(root, "showMarkers");
         showMarkersSetting.store(json_is_boolean(showMarkers) ? json_is_true(showMarkers) : true);
         markerOpacitySetting.store(getJsonFloat(root, "markerOpacity", 0.f, 1.f, 0.82f));
-        const float historyLength = historyLengthSetting.load();
-        timeSpanSetting.store(
-            getJsonFloat(root, "timeSpan", 0.25f, historyLength, historyLength));
         float minimum = getJsonFloat(root, "viewMinimum", 0.f, 0.99f, 0.f);
         float maximum = getJsonFloat(root, "viewMaximum", 0.01f, 1.f, 1.f);
         if (maximum - minimum < 0.01f) {
@@ -375,48 +357,6 @@ struct GridOpacitySlider : ui::Slider {
         box.size.x = 200.f;
     }
     ~GridOpacitySlider() override { delete quantity; }
-};
-
-struct HistoryLengthQuantity : Quantity {
-    Spectrum* module = NULL;
-
-    explicit HistoryLengthQuantity(Spectrum* module) : module(module) {}
-
-    void setValue(float value) override {
-        const float seconds =
-            std::round(clampValue(value, getMinValue(), getMaxValue()));
-        if (module) {
-            module->historyLengthSetting.store(seconds);
-            module->timeSpanSetting.store(seconds);
-        }
-    }
-    float getValue() override {
-        return module ? module->historyLengthSetting.load() : getDefaultValue();
-    }
-    float getMinValue() override { return MIN_HISTORY_SECONDS; }
-    float getMaxValue() override { return MAX_HISTORY_SECONDS; }
-    float getDefaultValue() override { return DEFAULT_HISTORY_SECONDS; }
-    std::string getDisplayValueString() override {
-        return rack::string::f("%.0f", getValue());
-    }
-    std::string getLabel() override { return "History length"; }
-    std::string getUnit() override { return " s"; }
-};
-
-struct HistoryLengthSlider : ui::Slider {
-    explicit HistoryLengthSlider(Spectrum* module) {
-        quantity = new HistoryLengthQuantity(module);
-        box.size.x = 200.f;
-    }
-    ~HistoryLengthSlider() override { delete quantity; }
-
-    void onEnter(const event::Enter& event) override {
-        if (ui::Menu* menu = dynamic_cast<ui::Menu*>(parent)) {
-            menu->activeEntry = NULL;
-            menu->setChildMenu(NULL);
-        }
-        ui::Slider::onEnter(event);
-    }
 };
 
 struct NonClosingCheckMenuItem : MenuItem {
@@ -643,6 +583,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     int appliedFrequencySmoothing = -1;
     int appliedFrequencyBins = -1;
     int appliedPeakHold = -1;
+    float appliedHistorySpeed = -1.f;
     float appliedFrequencySampleRate = 48000.f;
     bool traceDirty = true;
     bool lookupDirty = true;
@@ -710,9 +651,13 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     void syncSettings() {
         const int quality =
             clampValue(module ? module->qualitySetting.load() : static_cast<int>(Quality::HIGH), 0, 2);
-        const float retained =
-            clampValue(module ? module->historyLengthSetting.load() : DEFAULT_HISTORY_SECONDS,
-                       MIN_HISTORY_SECONDS, MAX_HISTORY_SECONDS);
+        const float historySpeed =
+            module ? clampValue(std::exp2(module->params[Spectrum::SPEED_PARAM].getValue()),
+                                MIN_HISTORY_SPEED, MAX_HISTORY_SPEED)
+                   : 1.f;
+        const float retained = historyDurationForSpeed(historySpeed);
+        const bool historySpeedChanged = std::fabs(historySpeed - appliedHistorySpeed) > 1e-5f;
+        appliedHistorySpeed = historySpeed;
         int desired = historyRowCapacity(retained, rowsPerSecond(static_cast<Quality>(quality)));
         GLint maximumTexture = 2048;
         if (renderer.program) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
@@ -725,10 +670,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             renderer.allocatedRows = 0;
             rebuildDerived();
         }
-        if (module) {
-            timeline.setVisibleSpan(module->timeSpanSetting.load());
-            module->timeSpanSetting.store(timeline.visibleSpan());
-        }
+        if (historySpeedChanged) timeline.setVisibleSpan(retained);
         const int frequencyMode =
             clampValue(module ? module->frequencySmoothingSetting.load() : 0, 0,
                        static_cast<int>(FrequencySmoothing::COUNT) - 1);
@@ -1397,7 +1339,6 @@ struct SpectrumOverlay : TransparentWidget {
         if (!module || !display) return;
         if (inTimeGutter(cursor)) {
             display->timeline.returnToLive();
-            module->timeSpanSetting.store(display->timeline.visibleSpan());
             display->lookupDirty = true;
         } else {
             module->viewMinimum.store(0.f);
@@ -1475,11 +1416,12 @@ struct SpectrumWidget : ModuleWidget {
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Spectrum::RIGHT_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Spectrum::MARK_INPUT));
         addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 3.f, y), module, Spectrum::RANGE_PARAM));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Spectrum::FREEZE_INPUT));
-        addParam(createParamCentered<LEDButton>(Vec(x + step * 5.f, y), module, Spectrum::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 5.f, y), module,
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 4.f, y), module,
+                                                           Spectrum::SPEED_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 5.f, y), module, Spectrum::FREEZE_INPUT));
+        addParam(createParamCentered<LEDButton>(Vec(x + step * 6.f, y), module, Spectrum::FREEZE_PARAM));
+        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 6.f, y), module,
                                                                Spectrum::FREEZE_LIGHT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 6.f, y), module, Spectrum::CLEAR_INPUT));
         addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Spectrum::CLEAR_PARAM));
     }
 
@@ -1532,7 +1474,6 @@ struct SpectrumWidget : ModuleWidget {
             "Flow", {"Up", "Down", "Left", "Right"},
             [=]() { return static_cast<size_t>(clampValue(spectrum->flowSetting.load(), 0, 3)); },
             [=](size_t value) { spectrum->flowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(new HistoryLengthSlider(spectrum));
         const Palette selectedPalette = static_cast<Palette>(
             clampValue(spectrum->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
         menu->addChild(createSubmenuItem(

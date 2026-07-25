@@ -94,11 +94,26 @@ constexpr std::array<int, static_cast<int>(Quality::COUNT)> ROW_RATES = {{15, 30
 constexpr float MIN_HISTORY_SECONDS = 2.f;
 constexpr float MAX_HISTORY_SECONDS = 30.f;
 constexpr float DEFAULT_HISTORY_SECONDS = 8.f;
+constexpr float MIN_HISTORY_SPEED = DEFAULT_HISTORY_SECONDS / MAX_HISTORY_SECONDS;
+constexpr float MAX_HISTORY_SPEED = DEFAULT_HISTORY_SECONDS / MIN_HISTORY_SECONDS;
 constexpr float MAX_FFT_ANALYSES_PER_SECOND = 240.f;
 
 template <typename T>
 inline T clampValue(T value, T low, T high) {
     return value < low ? low : (value > high ? high : value);
+}
+
+inline float historyDurationForSpeed(float speed) {
+    const float safeSpeed =
+        clampValue(std::isfinite(speed) ? speed : 1.f, MIN_HISTORY_SPEED, MAX_HISTORY_SPEED);
+    return DEFAULT_HISTORY_SECONDS / safeSpeed;
+}
+
+inline float historySpeedForDuration(float seconds) {
+    const float safeDuration =
+        clampValue(std::isfinite(seconds) ? seconds : DEFAULT_HISTORY_SECONDS,
+                   MIN_HISTORY_SECONDS, MAX_HISTORY_SECONDS);
+    return DEFAULT_HISTORY_SECONDS / safeDuration;
 }
 
 inline float sanitizeVoltage(float voltage) {
