@@ -31,6 +31,10 @@ pan it and double-click to reset it.
 
 ### **Context menu**
 
+* **Open expanded view** enlarges the live display to fill the Rack window without clearing its
+  history. Press Space to freeze or resume the flow. Press Escape, click the close button, or click
+  outside the display to return to the module.
+
 The **Analysis** section contains:
 
 * **Analysis mode:** selects **Classic** or **T-F Reassigned** analysis. Classic is the
