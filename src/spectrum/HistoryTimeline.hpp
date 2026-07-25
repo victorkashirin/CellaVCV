@@ -1,13 +1,13 @@
 #pragma once
 
-#include "WaterfallTypes.hpp"
+#include "SpectrumTypes.hpp"
 
 #include <array>
 #include <cstddef>
 #include <vector>
 
 namespace cella {
-namespace waterfall {
+namespace spectrum {
 
 struct TimelineSelection {
     int olderPhysical = -1;
@@ -83,5 +83,5 @@ class HistoryTimeline {
     void clampViewport();
 };
 
-}  // namespace waterfall
+}  // namespace spectrum
 }  // namespace cella

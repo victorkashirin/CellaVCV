@@ -4,7 +4,7 @@
 #include <cmath>
 
 namespace cella {
-namespace waterfall {
+namespace spectrum {
 
 HistoryTimeline::HistoryTimeline(int requestedCapacity)
     : rows(static_cast<size_t>(std::max(requestedCapacity, 4))) {
@@ -274,5 +274,5 @@ void HistoryTimeline::purgeMarkers() {
         retainedMarkers.end());
 }
 
-}  // namespace waterfall
+}  // namespace spectrum
 }  // namespace cella

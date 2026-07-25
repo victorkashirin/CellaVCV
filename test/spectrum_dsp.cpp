@@ -1,8 +1,8 @@
-#include "../src/waterfall/WaterfallAnalyzer.hpp"
-#include "../src/waterfall/HistoryTimeline.hpp"
-#include "../src/waterfall/WaterfallPresentation.hpp"
-#include "../src/waterfall/WaterfallPalettes.hpp"
-#include "../src/waterfall/WaterfallTypes.hpp"
+#include "../src/spectrum/SpectrumAnalyzer.hpp"
+#include "../src/spectrum/HistoryTimeline.hpp"
+#include "../src/spectrum/SpectrumPresentation.hpp"
+#include "../src/spectrum/SpectrumPalettes.hpp"
+#include "../src/spectrum/SpectrumTypes.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -13,7 +13,7 @@
 #include <new>
 #include <string>
 
-using namespace cella::waterfall;
+using namespace cella::spectrum;
 
 namespace {
 
@@ -35,10 +35,10 @@ void requireNear(float actual, float expected, float tolerance, const std::strin
     }
 }
 
-float runTone(WaterfallAnalyzer& analyzer, FftSize fftSize, WindowFunction window, float peakAmplitude,
+float runTone(SpectrumAnalyzer& analyzer, FftSize fftSize, WindowFunction window, float peakAmplitude,
               uint64_t generation, int* peakCell = NULL, float sampleRate = 48000.f,
               FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC) {
-    WaterfallConfig config;
+    SpectrumConfig config;
     config.fftSize = fftSize;
     config.window = window;
     config.quality = Quality::HIGH;
@@ -162,7 +162,7 @@ void testCalibrationAndMapping() {
         }
     }
 
-    WaterfallAnalyzer analyzer;
+    SpectrumAnalyzer analyzer;
     uint64_t generation = 10;
     for (int fft = 0; fft < static_cast<int>(FftSize::COUNT); ++fft) {
         for (int window = 0; window < static_cast<int>(WindowFunction::COUNT); ++window) {
@@ -189,7 +189,7 @@ void testCalibrationAndMapping() {
         requireNear(measured, 0.f, 0.25f, "calibration and log mapping survive sample-rate changes");
     }
 
-    WaterfallConfig ultrasonicConfig;
+    SpectrumConfig ultrasonicConfig;
     ultrasonicConfig.fftSize = FftSize::FFT_4096;
     ultrasonicConfig.window = WindowFunction::HANN;
     ultrasonicConfig.quality = Quality::HIGH;
@@ -211,8 +211,8 @@ void testCalibrationAndMapping() {
 }
 
 void testRowsAndFiniteValues() {
-    WaterfallAnalyzer analyzer;
-    WaterfallConfig config;
+    SpectrumAnalyzer analyzer;
+    SpectrumConfig config;
     config.quality = Quality::NORMAL;
     config.sampleRate = 48000.f;
     config.generation = 91;
@@ -238,7 +238,7 @@ void testRowsAndFiniteValues() {
 }
 
 void testFftOverlapHopSizes() {
-    WaterfallConfig defaults;
+    SpectrumConfig defaults;
     require(defaults.fftOverlap == FftOverlap::PERCENT_75, "FFT overlap defaults to 75%");
 
     const FftOverlap overlaps[] = {
@@ -262,8 +262,8 @@ void testFftOverlapHopSizes() {
 }
 
 void testNoiseCoverageAndTransientAggregation() {
-    WaterfallAnalyzer analyzer;
-    WaterfallConfig config;
+    SpectrumAnalyzer analyzer;
+    SpectrumConfig config;
     config.fftSize = FftSize::FFT_4096;
     config.window = WindowFunction::HANN;
     config.quality = Quality::HIGH;
@@ -321,8 +321,8 @@ void testNoiseCoverageAndTransientAggregation() {
 }
 
 void testNoProcessAllocations() {
-    WaterfallAnalyzer analyzer;
-    WaterfallConfig config;
+    SpectrumAnalyzer analyzer;
+    SpectrumConfig config;
     config.fftSize = FftSize::FFT_1024;
     config.quality = Quality::HIGH;
     analyzer.configure(config);
@@ -339,8 +339,8 @@ void testNoProcessAllocations() {
 }
 
 void testHighRateFftCadenceCap() {
-    WaterfallAnalyzer analyzer;
-    WaterfallConfig config;
+    SpectrumAnalyzer analyzer;
+    SpectrumConfig config;
     config.fftSize = FftSize::FFT_1024;
     config.fftOverlap = FftOverlap::PERCENT_93_75;
     config.quality = Quality::HIGH;
@@ -375,8 +375,8 @@ SpectrumRow makeTimelineRow(uint64_t sample, uint64_t generation = 1, int rate =
 }
 
 void testSharedTimelineAndRowRateReconfiguration() {
-    WaterfallAnalyzer analyzer;
-    WaterfallConfig config;
+    SpectrumAnalyzer analyzer;
+    SpectrumConfig config;
     config.quality = Quality::NORMAL;
     config.generation = 500;
     analyzer.configure(config);
@@ -524,6 +524,6 @@ int main() {
     testHistoryCapacityResizeAndLookup();
     testMarkersViewportAndTicks();
     testFrequencySmoothing();
-    std::cout << "Waterfall DSP tests passed" << std::endl;
+    std::cout << "Spectrum DSP tests passed" << std::endl;
     return 0;
 }

@@ -7,9 +7,9 @@
 
 <img src="docs/Dark.jpg" alt="Cella - Dark Theme" style="width: 900px;">
 
-### Waterfall
+### Spectrum
 
-**Waterfall** is a calibrated OpenGL spectrum history display with a fixed 10 V peak = 0 dBFS
+**Spectrum** is a calibrated OpenGL spectrum history display with a fixed 10 V peak = 0 dBFS
 reference, sample-accurate event markers, selectable precise/smooth rendering, calibrated frequency
 smoothing, selectable FFT overlap, configurable history duration, live and peak traces,
 logarithmic/linear/Mel frequency bins, cursor inspection, frequency/time navigation, and
@@ -78,8 +78,8 @@ Signal integrator.
 
 ## Development
 
-Run the Waterfall calibration, mapping, cadence, safety, and real-time allocation checks with:
+Run the Spectrum calibration, mapping, cadence, safety, and real-time allocation checks with:
 
 ```sh
-make waterfall-test
+make spectrum-test
 ```

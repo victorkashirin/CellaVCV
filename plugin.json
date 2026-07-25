@@ -162,11 +162,11 @@
       ]
     },
     {
-      "slug": "Waterfall",
-      "name": "Waterfall",
-      "description": "Calibrated OpenGL waterfall spectrum analyser",
-      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#waterfall",
-      "keywords": "spectrum spectrogram fft analyzer analyser waterfall",
+      "slug": "Spectrum",
+      "name": "Spectrum",
+      "description": "Calibrated OpenGL spectrum history analyser",
+      "manualUrl": "https://github.com/victorkashirin/CellaVCV/blob/main/docs/Cella_Manual.md#spectrum",
+      "keywords": "spectrum spectrogram fft analyzer analyser history",
       "tags": [
         "Visual",
         "Utility"

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "WaterfallTypes.hpp"
+#include "SpectrumTypes.hpp"
 
 #include <array>
 #include <vector>
 
 namespace cella {
-namespace waterfall {
+namespace spectrum {
 
 class FrequencySmoothingKernel {
   public:
@@ -24,5 +24,5 @@ class FrequencySmoothingKernel {
 
 float interpolateNoOvershoot(float left, float right, float fraction);
 
-}  // namespace waterfall
+}  // namespace spectrum
 }  // namespace cella

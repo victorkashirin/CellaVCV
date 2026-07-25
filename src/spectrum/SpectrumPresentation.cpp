@@ -1,10 +1,10 @@
-#include "WaterfallPresentation.hpp"
+#include "SpectrumPresentation.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace cella {
-namespace waterfall {
+namespace spectrum {
 
 namespace {
 constexpr float POWER_EPSILON = 1e-16f;
@@ -84,5 +84,5 @@ float interpolateNoOvershoot(float left, float right, float fraction) {
     return left + clampValue(fraction, 0.f, 1.f) * (right - left);
 }
 
-}  // namespace waterfall
+}  // namespace spectrum
 }  // namespace cella

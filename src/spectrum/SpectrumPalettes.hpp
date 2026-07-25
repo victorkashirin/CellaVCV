@@ -1,6 +1,6 @@
 #pragma once
 
-#include "WaterfallTypes.hpp"
+#include "SpectrumTypes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace cella {
-namespace waterfall {
+namespace spectrum {
 
 constexpr int PALETTE_CONTROL_POINTS = 12;
 constexpr int PALETTE_LUT_SIZE = 256;
@@ -184,5 +184,5 @@ inline std::array<unsigned char, PALETTE_LUT_SIZE * 4> buildPaletteLut(Palette p
     return result;
 }
 
-}  // namespace waterfall
+}  // namespace spectrum
 }  // namespace cella

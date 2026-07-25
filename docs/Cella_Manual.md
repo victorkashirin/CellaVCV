@@ -10,9 +10,9 @@ Code is licensed under GPL v3.0.
 
 All graphics are copyright 2024-2025 Victor Kashirin and licensed under CC BY-SA 4.0.
 
-# **Waterfall**
+# **Spectrum**
 
-**Waterfall** is a calibrated spectrum history display. Its fixed reference is 10 V peak = 0 dBFS, so a
+**Spectrum** is a calibrated spectrum history display. Its fixed reference is 10 V peak = 0 dBFS, so a
 5 V peak sine reads approximately -6.02 dBFS. The display range and palette affect visibility only; the
 module never applies automatic gain or normalizes each spectrum to its loudest frequency.
 

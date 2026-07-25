@@ -18,5 +18,5 @@ void init(Plugin *p) {
     p->addModel(modelIntegral);
     p->addModel(model2State);
     p->addModel(modelFrequencyAnalyzer);
-    p->addModel(modelWaterfall);
+    p->addModel(modelSpectrum);
 }

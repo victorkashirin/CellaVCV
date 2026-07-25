@@ -1,9 +1,9 @@
 #include "plugin.hpp"
-#include "waterfall/HistoryTimeline.hpp"
-#include "waterfall/WaterfallAnalyzer.hpp"
-#include "waterfall/WaterfallPalettes.hpp"
-#include "waterfall/WaterfallPresentation.hpp"
-#include "waterfall/WaterfallTypes.hpp"
+#include "spectrum/HistoryTimeline.hpp"
+#include "spectrum/SpectrumAnalyzer.hpp"
+#include "spectrum/SpectrumPalettes.hpp"
+#include "spectrum/SpectrumPresentation.hpp"
+#include "spectrum/SpectrumTypes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-using namespace cella::waterfall;
+using namespace cella::spectrum;
 
 namespace {
 
@@ -69,12 +69,12 @@ std::string timeLabel(float age, float span) {
 
 }  // namespace
 
-struct Waterfall : Module {
+struct Spectrum : Module {
     enum ParamIds { MODE_PARAM, RANGE_PARAM, FREEZE_PARAM, CLEAR_PARAM, NUM_PARAMS };
     enum InputIds { LEFT_INPUT, RIGHT_INPUT, FREEZE_INPUT, MARK_INPUT, CLEAR_INPUT, NUM_INPUTS };
     enum LightIds { FREEZE_LIGHT, NUM_LIGHTS };
 
-    WaterfallAnalyzer analyzer;
+    SpectrumAnalyzer analyzer;
     dsp::RingBuffer<SpectrumRow, ROW_QUEUE_SIZE> displayRows;
     dsp::RingBuffer<MarkerEvent, MARKER_QUEUE_SIZE> markerEvents;
     dsp::SchmittTrigger freezeButtonTrigger;
@@ -126,7 +126,7 @@ struct Waterfall : Module {
     uint64_t timelineSample = 0;
     uint32_t markerSequence = 0;
 
-    Waterfall() {
+    Spectrum() {
         config(NUM_PARAMS, NUM_INPUTS, 0, NUM_LIGHTS);
         configSwitch(MODE_PARAM, 0.f, static_cast<float>(static_cast<int>(ChannelMode::COUNT) - 1),
                      static_cast<float>(ChannelMode::MONO), "Channel", {"Left", "Right", "Mono", "Mid", "Side"});
@@ -166,7 +166,7 @@ struct Waterfall : Module {
                 ++configGeneration;
                 if (sampleRateChanged) timelineSample = 0;
             }
-            WaterfallConfig next;
+            SpectrumConfig next;
             next.fftSize = static_cast<FftSize>(fftSize);
             next.window = static_cast<WindowFunction>(window);
             next.fftOverlap = static_cast<FftOverlap>(fftOverlap);
@@ -325,9 +325,9 @@ struct Waterfall : Module {
 namespace {
 
 struct MarkerOpacityQuantity : Quantity {
-    Waterfall* module = NULL;
+    Spectrum* module = NULL;
 
-    explicit MarkerOpacityQuantity(Waterfall* module) : module(module) {}
+    explicit MarkerOpacityQuantity(Spectrum* module) : module(module) {}
 
     void setValue(float value) override {
         if (module)
@@ -344,7 +344,7 @@ struct MarkerOpacityQuantity : Quantity {
 };
 
 struct MarkerOpacitySlider : ui::Slider {
-    explicit MarkerOpacitySlider(Waterfall* module) {
+    explicit MarkerOpacitySlider(Spectrum* module) {
         quantity = new MarkerOpacityQuantity(module);
         box.size.x = 200.f;
     }
@@ -378,9 +378,9 @@ struct GridOpacitySlider : ui::Slider {
 };
 
 struct HistoryLengthQuantity : Quantity {
-    Waterfall* module = NULL;
+    Spectrum* module = NULL;
 
-    explicit HistoryLengthQuantity(Waterfall* module) : module(module) {}
+    explicit HistoryLengthQuantity(Spectrum* module) : module(module) {}
 
     void setValue(float value) override {
         const float seconds =
@@ -404,7 +404,7 @@ struct HistoryLengthQuantity : Quantity {
 };
 
 struct HistoryLengthSlider : ui::Slider {
-    explicit HistoryLengthSlider(Waterfall* module) {
+    explicit HistoryLengthSlider(Spectrum* module) {
         quantity = new HistoryLengthQuantity(module);
         box.size.x = 200.f;
     }
@@ -482,7 +482,7 @@ MenuItem* createNonClosingIndexSubmenuItem(const std::string& text,
     return item;
 }
 
-struct WaterfallRenderer {
+struct SpectrumRenderer {
     GLuint program = 0;
     GLuint historyTexture = 0;
     GLuint traceTexture = 0;
@@ -521,7 +521,7 @@ struct WaterfallRenderer {
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
         std::vector<GLchar> log(static_cast<size_t>(std::max(length, 1)));
         glGetShaderInfoLog(shader, length, NULL, log.data());
-        WARN("Waterfall %s shader compilation failed: %s", label, log.data());
+        WARN("Spectrum %s shader compilation failed: %s", label, log.data());
         glDeleteShader(shader);
         return 0;
     }
@@ -531,9 +531,9 @@ struct WaterfallRenderer {
             if (initializationAttempted) return false;
             initializationAttempted = true;
             try {
-                GLuint vertex = compile(GL_VERTEX_SHADER, loadResource("res/shaders/waterfall_gl.vert"), "vertex");
+                GLuint vertex = compile(GL_VERTEX_SHADER, loadResource("res/shaders/spectrum_gl.vert"), "vertex");
                 GLuint fragment =
-                    compile(GL_FRAGMENT_SHADER, loadResource("res/shaders/waterfall_gl.frag"), "fragment");
+                    compile(GL_FRAGMENT_SHADER, loadResource("res/shaders/spectrum_gl.frag"), "fragment");
                 if (!vertex || !fragment) return false;
                 program = glCreateProgram();
                 glAttachShader(program, vertex);
@@ -587,7 +587,7 @@ struct WaterfallRenderer {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PALETTE_LUT_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
             } catch (const std::exception& exception) {
-                WARN("Waterfall shader resources could not be loaded: %s", exception.what());
+                WARN("Spectrum shader resources could not be loaded: %s", exception.what());
                 return false;
             }
         }
@@ -628,9 +628,9 @@ struct WaterfallRenderer {
     }
 };
 
-struct WaterfallDisplay : widget::OpenGlWidget {
-    Waterfall* module = NULL;
-    WaterfallRenderer renderer;
+struct SpectrumDisplay : widget::OpenGlWidget {
+    Spectrum* module = NULL;
+    SpectrumRenderer renderer;
     HistoryTimeline timeline;
     FrequencySmoothingKernel frequencyKernel;
     std::vector<SpectrumRow> derivedRows;
@@ -648,7 +648,7 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     bool lookupDirty = true;
     SpectrumRow latestMetadata;
 
-    WaterfallDisplay() {
+    SpectrumDisplay() {
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
         frequencyKernel.configure(FrequencySmoothing::NONE, 48000.f,
@@ -665,7 +665,7 @@ struct WaterfallDisplay : widget::OpenGlWidget {
 
     void onContextCreate(const ContextCreateEvent& event) override {
         widget::OpenGlWidget::onContextCreate(event);
-        renderer = WaterfallRenderer();
+        renderer = SpectrumRenderer();
         dirtyRows.assign(dirtyRows.size(), true);
         traceDirty = lookupDirty = true;
     }
@@ -962,7 +962,7 @@ struct WaterfallDisplay : widget::OpenGlWidget {
             glUniform2f(renderer.viewLocation, module ? module->viewMinimum.load() : 0.f,
                         module ? module->viewMaximum.load() : 1.f);
             glUniform2f(renderer.rangeLocation,
-                        module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB, 0.f);
+                        module ? module->params[Spectrum::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB, 0.f);
             glUniform1i(renderer.peakHoldLocation, module ? clampValue(module->peakHoldSetting.load(), 0, 2) : 1);
             glUniform1i(renderer.liveTraceLocation, module ? clampValue(module->liveTraceSetting.load(), 0, 2) : 1);
             glUniform1i(renderer.styleLocation,
@@ -1012,9 +1012,9 @@ struct WaterfallDisplay : widget::OpenGlWidget {
     }
 };
 
-struct WaterfallOverlay : TransparentWidget {
-    Waterfall* module = NULL;
-    WaterfallDisplay* display = NULL;
+struct SpectrumOverlay : TransparentWidget {
+    Spectrum* module = NULL;
+    SpectrumDisplay* display = NULL;
     bool hovered = false;
     bool draggingTime = false;
     math::Vec cursor;
@@ -1370,7 +1370,7 @@ struct WaterfallOverlay : TransparentWidget {
     }
 };
 
-struct WaterfallBezel : TransparentWidget {
+struct SpectrumBezel : TransparentWidget {
     void draw(const DrawArgs& args) override {
         const float width = box.size.x;
         const float height = box.size.y;
@@ -1410,21 +1410,21 @@ struct WaterfallBezel : TransparentWidget {
 
 }  // namespace
 
-struct WaterfallWidget : ModuleWidget {
-    WaterfallWidget(Waterfall* module) {
+struct SpectrumWidget : ModuleWidget {
+    SpectrumWidget(Spectrum* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Waterfall.svg"),
-                             asset::plugin(pluginInstance, "res/Waterfall-dark.svg")));
-        WaterfallDisplay* display = new WaterfallDisplay;
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/Spectrum.svg"),
+                             asset::plugin(pluginInstance, "res/Spectrum-dark.svg")));
+        SpectrumDisplay* display = new SpectrumDisplay;
         display->module = module;
         display->box.pos = Vec(DISPLAY_X, DISPLAY_Y);
         display->box.size = Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT);
         addChild(display);
-        WaterfallBezel* bezel = new WaterfallBezel;
+        SpectrumBezel* bezel = new SpectrumBezel;
         bezel->box.pos = display->box.pos;
         bezel->box.size = display->box.size;
         addChild(bezel);
-        WaterfallOverlay* overlay = new WaterfallOverlay;
+        SpectrumOverlay* overlay = new SpectrumOverlay;
         overlay->module = module;
         overlay->display = display;
         overlay->box.pos = display->box.pos;
@@ -1434,77 +1434,77 @@ struct WaterfallWidget : ModuleWidget {
         constexpr float x = 22.5f;
         constexpr float step = 45.f;
         constexpr float y = 329.5f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 0.f, y), module, Waterfall::LEFT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Waterfall::RIGHT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Waterfall::MARK_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 3.f, y), module, Waterfall::RANGE_PARAM));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Waterfall::FREEZE_INPUT));
-        addParam(createParamCentered<LEDButton>(Vec(x + step * 5.f, y), module, Waterfall::FREEZE_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 0.f, y), module, Spectrum::LEFT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Spectrum::RIGHT_INPUT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Spectrum::MARK_INPUT));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 3.f, y), module, Spectrum::RANGE_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Spectrum::FREEZE_INPUT));
+        addParam(createParamCentered<LEDButton>(Vec(x + step * 5.f, y), module, Spectrum::FREEZE_PARAM));
         addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 5.f, y), module,
-                                                               Waterfall::FREEZE_LIGHT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 6.f, y), module, Waterfall::CLEAR_INPUT));
-        addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Waterfall::CLEAR_PARAM));
+                                                               Spectrum::FREEZE_LIGHT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 6.f, y), module, Spectrum::CLEAR_INPUT));
+        addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Spectrum::CLEAR_PARAM));
     }
 
     void appendContextMenu(Menu* menu) override {
-        Waterfall* waterfall = dynamic_cast<Waterfall*>(module);
-        if (!waterfall) return;
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        if (!spectrum) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Channel mode", {"Left", "Right", "Mono", "Mid", "Side"},
             [=]() {
                 return static_cast<size_t>(
-                    clampValue(static_cast<int>(std::lround(waterfall->params[Waterfall::MODE_PARAM].getValue())),
+                    clampValue(static_cast<int>(std::lround(spectrum->params[Spectrum::MODE_PARAM].getValue())),
                                0, static_cast<int>(ChannelMode::COUNT) - 1));
             },
             [=](size_t value) {
-                waterfall->params[Waterfall::MODE_PARAM].setValue(
+                spectrum->params[Spectrum::MODE_PARAM].setValue(
                     static_cast<float>(clampValue(static_cast<int>(value), 0,
                                                   static_cast<int>(ChannelMode::COUNT) - 1)));
             }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "FFT size", {"1024", "2048", "4096", "8192", "16384"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->fftSizeSetting.load(), 0, 4)); },
-            [=](size_t value) { waterfall->fftSizeSetting.store(static_cast<int>(value)); }));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->fftSizeSetting.load(), 0, 4)); },
+            [=](size_t value) { spectrum->fftSizeSetting.store(static_cast<int>(value)); }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "FFT overlap", {"None", "25%", "50%", "75%", "87.5%", "93.75%"},
             [=]() {
                 return static_cast<size_t>(
-                    clampValue(waterfall->fftOverlapSetting.load(), 0, static_cast<int>(FftOverlap::COUNT) - 1));
+                    clampValue(spectrum->fftOverlapSetting.load(), 0, static_cast<int>(FftOverlap::COUNT) - 1));
             },
-            [=](size_t value) { waterfall->fftOverlapSetting.store(static_cast<int>(value)); }));
+            [=](size_t value) { spectrum->fftOverlapSetting.store(static_cast<int>(value)); }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Window", {"Hann", "Blackman-Harris", "Flat-top"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->windowSetting.load(), 0, 2)); },
-            [=](size_t value) { waterfall->windowSetting.store(static_cast<int>(value)); }));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->windowSetting.load(), 0, 2)); },
+            [=](size_t value) { spectrum->windowSetting.store(static_cast<int>(value)); }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Time detail", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->qualitySetting.load(), 0, 2)); },
-            [=](size_t value) { waterfall->qualitySetting.store(static_cast<int>(value)); }));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->qualitySetting.load(), 0, 2)); },
+            [=](size_t value) { spectrum->qualitySetting.store(static_cast<int>(value)); }));
         std::vector<std::string> channels;
         for (int channel = 1; channel <= 16; ++channel) channels.push_back(rack::string::f("Channel %d", channel));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Polyphonic voice", channels,
-            [=]() { return static_cast<size_t>(clampValue(waterfall->polyChannelSetting.load(), 0, 15)); },
-            [=](size_t value) { waterfall->polyChannelSetting.store(static_cast<int>(value)); }));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->polyChannelSetting.load(), 0, 15)); },
+            [=](size_t value) { spectrum->polyChannelSetting.store(static_cast<int>(value)); }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Presentation"));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Flow", {"Up", "Down", "Left", "Right"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->flowSetting.load(), 0, 3)); },
-            [=](size_t value) { waterfall->flowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(new HistoryLengthSlider(waterfall));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->flowSetting.load(), 0, 3)); },
+            [=](size_t value) { spectrum->flowSetting.store(static_cast<int>(value)); }));
+        menu->addChild(new HistoryLengthSlider(spectrum));
         const Palette selectedPalette = static_cast<Palette>(
-            clampValue(waterfall->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
+            clampValue(spectrum->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
         menu->addChild(createSubmenuItem(
             "Palette", paletteDefinition(selectedPalette).name, [=](Menu* paletteMenu) {
                 for (const PaletteMenuGroup& group : paletteMenuGroups()) {
                     const std::vector<Palette> palettes = group.palettes;
                     std::string activeName;
                     for (Palette palette : palettes) {
-                        if (palette == static_cast<Palette>(waterfall->paletteSetting.load()))
+                        if (palette == static_cast<Palette>(spectrum->paletteSetting.load()))
                             activeName = paletteDefinition(palette).name;
                     }
                     paletteMenu->addChild(createSubmenuItem(
@@ -1513,11 +1513,11 @@ struct WaterfallWidget : ModuleWidget {
                                 groupMenu->addChild(createNonClosingCheckMenuItem(
                                     paletteDefinition(palette).name,
                                     [=]() {
-                                        return waterfall->paletteSetting.load() ==
+                                        return spectrum->paletteSetting.load() ==
                                                static_cast<int>(palette);
                                     },
                                     [=]() {
-                                        waterfall->paletteSetting.store(static_cast<int>(palette));
+                                        spectrum->paletteSetting.store(static_cast<int>(palette));
                                     }));
                             }
                         }));
@@ -1525,38 +1525,38 @@ struct WaterfallWidget : ModuleWidget {
             }));
         menu->addChild(createNonClosingIndexSubmenuItem(
             "Rendering", {"Precise", "Smooth"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->renderingStyleSetting.load(), 0, 1)); },
-            [=](size_t value) { waterfall->renderingStyleSetting.store(static_cast<int>(value)); }));
+            [=]() { return static_cast<size_t>(clampValue(spectrum->renderingStyleSetting.load(), 0, 1)); },
+            [=](size_t value) { spectrum->renderingStyleSetting.store(static_cast<int>(value)); }));
         menu->addChild(createSubmenuItem("Trace", "", [=](Menu* traceMenu) {
             traceMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Live", {"Off", "Line", "Line + Fill"},
-                [=]() { return static_cast<size_t>(clampValue(waterfall->liveTraceSetting.load(), 0, 2)); },
-                [=](size_t value) { waterfall->liveTraceSetting.store(static_cast<int>(value)); }));
+                [=]() { return static_cast<size_t>(clampValue(spectrum->liveTraceSetting.load(), 0, 2)); },
+                [=](size_t value) { spectrum->liveTraceSetting.store(static_cast<int>(value)); }));
             traceMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Peak", {"Off", "Decay", "Infinite hold"},
-                [=]() { return static_cast<size_t>(clampValue(waterfall->peakHoldSetting.load(), 0, 2)); },
-                [=](size_t value) { waterfall->peakHoldSetting.store(static_cast<int>(value)); }));
+                [=]() { return static_cast<size_t>(clampValue(spectrum->peakHoldSetting.load(), 0, 2)); },
+                [=](size_t value) { spectrum->peakHoldSetting.store(static_cast<int>(value)); }));
         }));
         menu->addChild(createSubmenuItem("Ticks", "", [=](Menu* ticksMenu) {
             ticksMenu->addChild(createSubmenuItem(
-                "Frequency", waterfall->showFrequencyTicksSetting.load() ? "On" : "Off",
+                "Frequency", spectrum->showFrequencyTicksSetting.load() ? "On" : "Off",
                 [=](Menu* frequencyTicksMenu) {
                     frequencyTicksMenu->addChild(createNonClosingBoolMenuItem(
                         "On",
-                        [=]() { return waterfall->showFrequencyTicksSetting.load(); },
-                        [=](bool value) { waterfall->showFrequencyTicksSetting.store(value); }));
+                        [=]() { return spectrum->showFrequencyTicksSetting.load(); },
+                        [=](bool value) { spectrum->showFrequencyTicksSetting.store(value); }));
                     frequencyTicksMenu->addChild(new GridOpacitySlider(
-                        &waterfall->frequencyGridOpacitySetting, "Frequency grid opacity"));
+                        &spectrum->frequencyGridOpacitySetting, "Frequency grid opacity"));
                 }));
             ticksMenu->addChild(createSubmenuItem(
-                "Time", waterfall->showTimeTicksSetting.load() ? "On" : "Off",
+                "Time", spectrum->showTimeTicksSetting.load() ? "On" : "Off",
                 [=](Menu* timeTicksMenu) {
                     timeTicksMenu->addChild(createNonClosingBoolMenuItem(
                         "On",
-                        [=]() { return waterfall->showTimeTicksSetting.load(); },
-                        [=](bool value) { waterfall->showTimeTicksSetting.store(value); }));
+                        [=]() { return spectrum->showTimeTicksSetting.load(); },
+                        [=](bool value) { spectrum->showTimeTicksSetting.store(value); }));
                     timeTicksMenu->addChild(new GridOpacitySlider(
-                        &waterfall->timeGridOpacitySetting, "Time grid opacity"));
+                        &spectrum->timeGridOpacitySetting, "Time grid opacity"));
                 }));
         }));
         menu->addChild(createSubmenuItem("Frequency", "", [=](Menu* frequencyMenu) {
@@ -1564,47 +1564,47 @@ struct WaterfallWidget : ModuleWidget {
                 "Scale", {"Hz", "Octaves", "Musical", "Combined"},
                 [=]() {
                     return static_cast<size_t>(
-                        clampValue(waterfall->frequencyScaleSetting.load(), 0, 3));
+                        clampValue(spectrum->frequencyScaleSetting.load(), 0, 3));
                 },
                 [=](size_t value) {
-                    waterfall->frequencyScaleSetting.store(static_cast<int>(value));
+                    spectrum->frequencyScaleSetting.store(static_cast<int>(value));
                 }));
             frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Smoothing",
                 {"None", "1/48 octave", "1/24 octave", "1/12 octave", "1/6 octave", "1/3 octave"},
                 [=]() {
                     return static_cast<size_t>(
-                        clampValue(waterfall->frequencySmoothingSetting.load(), 0, 5));
+                        clampValue(spectrum->frequencySmoothingSetting.load(), 0, 5));
                 },
                 [=](size_t value) {
-                    waterfall->frequencySmoothingSetting.store(static_cast<int>(value));
+                    spectrum->frequencySmoothingSetting.store(static_cast<int>(value));
                 }));
             frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Bins", {"Log", "Linear", "Mel"},
                 [=]() {
                     return static_cast<size_t>(
-                        clampValue(waterfall->frequencyBinsSetting.load(), 0,
+                        clampValue(spectrum->frequencyBinsSetting.load(), 0,
                                    static_cast<int>(FrequencyBinScale::COUNT) - 1));
                 },
                 [=](size_t value) {
-                    waterfall->frequencyBinsSetting.store(static_cast<int>(value));
-                    waterfall->viewMinimum.store(0.f);
-                    waterfall->viewMaximum.store(1.f);
+                    spectrum->frequencyBinsSetting.store(static_cast<int>(value));
+                    spectrum->viewMinimum.store(0.f);
+                    spectrum->viewMaximum.store(1.f);
                 }));
             frequencyMenu->addChild(new MenuSeparator);
             frequencyMenu->addChild(createMenuItem("Reset zoom", "", [=]() {
-                waterfall->viewMinimum.store(0.f);
-                waterfall->viewMaximum.store(1.f);
+                spectrum->viewMinimum.store(0.f);
+                spectrum->viewMaximum.store(1.f);
             }));
         }));
         menu->addChild(createSubmenuItem("Markers", "", [=](Menu* markersMenu) {
             markersMenu->addChild(createNonClosingBoolMenuItem(
                 "Show markers",
-                [=]() { return waterfall->showMarkersSetting.load(); },
-                [=](bool value) { waterfall->showMarkersSetting.store(value); }));
-            markersMenu->addChild(new MarkerOpacitySlider(waterfall));
+                [=]() { return spectrum->showMarkersSetting.load(); },
+                [=](bool value) { spectrum->showMarkersSetting.store(value); }));
+            markersMenu->addChild(new MarkerOpacitySlider(spectrum));
         }));
     }
 };
 
-Model* modelWaterfall = createModel<Waterfall, WaterfallWidget>("Waterfall");
+Model* modelSpectrum = createModel<Spectrum, SpectrumWidget>("Spectrum");

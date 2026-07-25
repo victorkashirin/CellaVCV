@@ -3,10 +3,10 @@
 ### 2.11.0 (2026-07-25)
 
 New modules:
-* Waterfall - calibrated OpenGL waterfall spectrum analyser with four-way flow.
+* Spectrum - calibrated OpenGL spectrum history analyser with four-way flow.
 
 Updates:
-* Waterfall - add sample-accurate markers, precise/smooth rendering, live-trace modes, frequency scales,
+* Spectrum - add sample-accurate markers, precise/smooth rendering, live-trace modes, frequency scales,
   calibrated fractional-octave smoothing, selectable FFT overlap, timestamped time navigation, and independent 2-30
   second history duration. Cap the analyzed and displayed frequency range at 22 kHz.
 
