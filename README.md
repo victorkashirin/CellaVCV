@@ -7,6 +7,12 @@
 
 <img src="docs/Dark.jpg" alt="Cella - Dark Theme" style="width: 900px;">
 
+### Waterfall
+
+**Waterfall** is a calibrated OpenGL spectrum history display with a fixed 10 V peak = 0 dBFS
+reference, selectable FFT and window settings, live and peak traces, cursor inspection, freeze,
+frequency zoom, and Up/Down/Left/Right history flow.
+
 ### Frequency Analyzer
 
 <img src="docs/images/FrequencyAnalyzer.png" alt="Cella - Frequency Analyzer" style="height: 380px;">
@@ -67,3 +73,11 @@ Signal integrator.
 ### 2State
 
 **2State** is a triple voltage-controlled switch, allowing you to define two distinct voltage levels per channel and switch between them using gate signals or manual buttons. Each section can operate in either a momentary 'GATE' mode or a 'LATCH' mode, where a trigger toggles the output state. Its cascading gate input behavior allows for synchronized control across multiple sections.
+
+## Development
+
+Run the Waterfall calibration, mapping, cadence, safety, and real-time allocation checks with:
+
+```sh
+make waterfall-test
+```

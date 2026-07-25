@@ -1,6 +1,6 @@
 # Cella – User Manual
 
-# Version 2.10.0
+# Version 2.11.0
 
 # **LICENSE**
 
@@ -9,6 +9,39 @@ Source code for this plugin can be found on GitHub: [https://github.com/victorka
 Code is licensed under GPL v3.0.
 
 All graphics are copyright 2024-2025 Victor Kashirin and licensed under CC BY-SA 4.0.
+
+# **Waterfall**
+
+**Waterfall** is a calibrated spectrum history display. Its fixed reference is 10 V peak = 0 dBFS, so a
+5 V peak sine reads approximately -6.02 dBFS. The display range and palette affect visibility only; the
+module never applies automatic gain or normalizes each spectrum to its loudest frequency.
+
+### **Controls and inputs**
+
+* **L** and **R** accept audio. When R is disconnected it is normalled from L.
+* **MODE** selects Left, Right, Mono, Mid, or Side. Mono keeps a single connected input at unity gain;
+  Mid and Side use `(L + R) / 2` and `(L - R) / 2`.
+* **RANGE** sets the visible floor from -140 to -40 dBFS. The ceiling remains 0 dBFS.
+* **FREEZE** and its trigger input latch the displayed history. Analysis continues, but frozen pixels,
+  traces, cursor values, and timestamps are preserved until unfreezing.
+* **CLEAR** and its trigger input erase the history without interrupting analysis.
+
+Hover the display for frequency, musical note, level, and age. Use the mouse wheel to zoom around the
+cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-Nyquist
+range. Drag the color legend vertically to adjust the display floor. These interactions remain
+available while frozen.
+
+### **Context menu**
+
+* **FFT size** selects 1024, 2048, 4096, 8192, or 16384 samples.
+* **Window** selects Hann, Blackman-Harris, or flat-top analysis.
+* **History rate** selects 15, 30, or 60 rows per second. History time is based on processed samples,
+  not the GUI frame rate.
+* **Polyphonic voice** selects one input channel from 1 to 16.
+* **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
+  horizontal flows it runs bottom-to-top.
+* **Palette** selects Heat, Grayscale, or Viridis.
+* **Peak trace** selects Off, Decay, or Infinite hold.
 
 
 # **Frequency Analyzer**

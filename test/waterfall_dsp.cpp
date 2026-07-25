@@ -1,0 +1,290 @@
+#include "../src/waterfall/WaterfallAnalyzer.hpp"
+#include "../src/waterfall/WaterfallTypes.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <new>
+#include <string>
+
+using namespace cella::waterfall;
+
+namespace {
+
+std::atomic<size_t> allocationCount(0);
+std::atomic<bool> countAllocations(false);
+
+void require(bool condition, const std::string& message) {
+    if (!condition) {
+        std::cerr << "FAIL: " << message << std::endl;
+        std::exit(1);
+    }
+}
+
+void requireNear(float actual, float expected, float tolerance, const std::string& message) {
+    if (!std::isfinite(actual) || std::fabs(actual - expected) > tolerance) {
+        std::cerr << "FAIL: " << message << " (actual " << actual << ", expected " << expected << " +/- "
+                  << tolerance << ")" << std::endl;
+        std::exit(1);
+    }
+}
+
+float runTone(WaterfallAnalyzer& analyzer, FftSize fftSize, WindowFunction window, float peakAmplitude,
+              uint64_t generation, int* peakCell = NULL, float sampleRate = 48000.f) {
+    WaterfallConfig config;
+    config.fftSize = fftSize;
+    config.window = window;
+    config.quality = Quality::HIGH;
+    config.sampleRate = sampleRate;
+    config.generation = generation;
+    analyzer.configure(config);
+
+    const int size = fftSizeSamples(fftSize);
+    const int bin = 97;
+    const float frequency = bin * config.sampleRate / size;
+    float maximumDb = INTERNAL_FLOOR_DB;
+    int maximumCell = 0;
+    SpectrumRow row;
+    for (int sample = 0; sample < size * 2; ++sample) {
+        const float value = peakAmplitude * std::sin(2.f * 3.14159265358979323846f * frequency * sample /
+                                                     config.sampleRate);
+        if (!analyzer.processSample(value, row) || row.sourceAnalysisSample < static_cast<uint64_t>(size)) continue;
+        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+            const float db = dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]);
+            if (db > maximumDb) {
+                maximumDb = db;
+                maximumCell = cell;
+            }
+        }
+    }
+    if (peakCell) *peakCell = maximumCell;
+
+    const float expectedCoordinate =
+        std::log(frequency / MIN_FREQUENCY_HZ) / std::log((config.sampleRate * 0.5f) / MIN_FREQUENCY_HZ);
+    const int expectedCell = static_cast<int>(std::lround(expectedCoordinate * (NUM_FREQUENCY_CELLS - 1)));
+    require(std::abs(maximumCell - expectedCell) <= 3,
+            "bin-centred tone maps to its logarithmic frequency cell (actual " +
+                std::to_string(maximumCell) + ", expected " + std::to_string(expectedCell) + ")");
+    return maximumDb;
+}
+
+void testChannelMath() {
+    requireNear(mixInputVoltages(8.f, 2.f, true, true, ChannelMode::LEFT), 8.f, 1e-6f, "left mode");
+    requireNear(mixInputVoltages(8.f, 2.f, true, true, ChannelMode::RIGHT), 2.f, 1e-6f, "right mode");
+    requireNear(mixInputVoltages(8.f, 2.f, true, true, ChannelMode::MONO), 5.f, 1e-6f, "mono average");
+    requireNear(mixInputVoltages(8.f, 2.f, true, true, ChannelMode::MID), 5.f, 1e-6f, "mid average");
+    requireNear(mixInputVoltages(8.f, 2.f, true, true, ChannelMode::SIDE), 3.f, 1e-6f, "side difference");
+    requireNear(mixInputVoltages(8.f, 0.f, true, false, ChannelMode::RIGHT), 8.f, 1e-6f, "L normals to R");
+    requireNear(mixInputVoltages(8.f, 0.f, true, false, ChannelMode::SIDE), 0.f, 1e-6f,
+                "L-only side is silent");
+    requireNear(mixInputVoltages(8.f, 0.f, true, false, ChannelMode::MONO), 8.f, 1e-6f,
+                "single connected mono remains unity");
+    requireNear(mixInputVoltages(std::numeric_limits<float>::infinity(), 0.f, true, false, ChannelMode::LEFT), 0.f,
+                1e-6f, "non-finite voltage is silence");
+    requireNear(mixInputVoltages(1000.f, 0.f, true, false, ChannelMode::LEFT), 100.f, 1e-6f,
+                "pathological voltage is safety-clamped");
+}
+
+void testFlowTransforms() {
+    for (int direction = 0; direction < static_cast<int>(FlowDirection::COUNT); ++direction) {
+        const FlowDirection flow = static_cast<FlowDirection>(direction);
+        const LogicalPoint expected(0.31f, 0.73f);
+        float x = 0.f;
+        float y = 0.f;
+        screenFromLogical(flow, expected, x, y);
+        const LogicalPoint actual = logicalFromScreen(flow, x, y);
+        requireNear(actual.frequency, expected.frequency, 1e-6f, "flow frequency round trip");
+        requireNear(actual.age, expected.age, 1e-6f, "flow age round trip");
+    }
+
+    requireNear(logicalFromScreen(FlowDirection::UP, 0.5f, 0.f).age, 0.f, 1e-6f, "up newest edge");
+    requireNear(logicalFromScreen(FlowDirection::DOWN, 0.5f, 1.f).age, 0.f, 1e-6f, "down newest edge");
+    requireNear(logicalFromScreen(FlowDirection::LEFT, 1.f, 0.5f).age, 0.f, 1e-6f, "left newest edge");
+    requireNear(logicalFromScreen(FlowDirection::RIGHT, 0.f, 0.5f).age, 0.f, 1e-6f, "right newest edge");
+}
+
+void testCalibrationAndMapping() {
+    WaterfallAnalyzer analyzer;
+    uint64_t generation = 10;
+    for (int fft = 0; fft < static_cast<int>(FftSize::COUNT); ++fft) {
+        for (int window = 0; window < static_cast<int>(WindowFunction::COUNT); ++window) {
+            const float fullScale = runTone(analyzer, static_cast<FftSize>(fft), static_cast<WindowFunction>(window),
+                                            10.f * VOLTAGE_TO_FULL_SCALE, generation++);
+            requireNear(fullScale, 0.f, 0.25f, "10 V peak reference is 0 dBFS");
+        }
+    }
+    const float halfScale =
+        runTone(analyzer, FftSize::FFT_4096, WindowFunction::HANN, 5.f * VOLTAGE_TO_FULL_SCALE, generation++);
+    requireNear(halfScale, -6.0206f, 0.2f, "5 V peak reference is -6.02 dBFS");
+
+    const float sampleRates[] = {44100.f, 48000.f, 96000.f, 192000.f};
+    for (size_t index = 0; index < sizeof(sampleRates) / sizeof(sampleRates[0]); ++index) {
+        const float measured = runTone(analyzer, FftSize::FFT_4096, WindowFunction::HANN, 1.f, generation++, NULL,
+                                       sampleRates[index]);
+        requireNear(measured, 0.f, 0.25f, "calibration and log mapping survive sample-rate changes");
+    }
+}
+
+void testRowsAndFiniteValues() {
+    WaterfallAnalyzer analyzer;
+    WaterfallConfig config;
+    config.quality = Quality::NORMAL;
+    config.sampleRate = 48000.f;
+    config.generation = 91;
+    analyzer.configure(config);
+
+    int rows = 0;
+    SpectrumRow row;
+    for (int sample = 0; sample < 48000; ++sample) {
+        float value = 0.f;
+        if (sample == 20000) value = std::numeric_limits<float>::quiet_NaN();
+        if (analyzer.processSample(value, row)) {
+            ++rows;
+            require(row.configGeneration == config.generation, "row carries current config generation");
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+                const float db = dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]);
+                require(std::isfinite(db) && db >= INTERNAL_FLOOR_DB && db <= INTERNAL_CEILING_DB,
+                        "every row value is finite and bounded");
+            }
+        }
+    }
+    require(rows == 30, "sample clock produces exactly 30 rows in one second");
+    require(row.rowEndSample == 48000, "row timestamps use processed samples");
+}
+
+void testNoiseCoverageAndTransientAggregation() {
+    WaterfallAnalyzer analyzer;
+    WaterfallConfig config;
+    config.fftSize = FftSize::FFT_4096;
+    config.window = WindowFunction::HANN;
+    config.quality = Quality::HIGH;
+    config.sampleRate = 48000.f;
+    config.generation = 120;
+    analyzer.configure(config);
+
+    uint32_t noiseState = 0x12345678u;
+    SpectrumRow row;
+    bool checkedNoise = false;
+    for (int sample = 0; sample < 8192; ++sample) {
+        noiseState = noiseState * 1664525u + 1013904223u;
+        const float noise = (static_cast<float>((noiseState >> 8) & 0xffffu) / 32767.5f - 1.f) * 0.25f;
+        if (analyzer.processSample(noise, row) && row.sourceAnalysisSample >= 4096) {
+            checkedNoise = true;
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+                require(dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]) > INTERNAL_FLOOR_DB,
+                        "white noise leaves no unmapped logarithmic cells");
+            }
+        }
+    }
+    require(checkedNoise, "noise produced an analyzed row");
+
+    config.fftSize = FftSize::FFT_1024;
+    config.quality = Quality::ECONOMY;
+    config.generation = 121;
+    analyzer.configure(config);
+    const float frequency = 97.f * config.sampleRate / 1024.f;
+    bool publishedTransientBucket = false;
+    for (int sample = 0; sample < 3200; ++sample) {
+        const float value = sample < 1024
+                                ? std::sin(2.f * 3.14159265358979323846f * frequency * sample / config.sampleRate)
+                                : 0.f;
+        if (analyzer.processSample(value, row)) {
+            float maximum = INTERNAL_FLOOR_DB;
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+                maximum = std::max(maximum, dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]));
+            }
+            requireNear(maximum, 0.f, 0.3f, "row max aggregation preserves a short transient");
+            publishedTransientBucket = true;
+        }
+    }
+    require(publishedTransientBucket, "transient bucket was published");
+
+    config.generation = 122;
+    analyzer.configure(config);
+    bool sawNewGeneration = false;
+    for (int sample = 0; sample < 3200; ++sample) {
+        if (analyzer.processSample(0.f, row)) {
+            sawNewGeneration = true;
+            require(row.configGeneration == 122, "runtime reconfiguration cannot publish an old generation");
+        }
+    }
+    require(sawNewGeneration, "reconfigured analyzer published a row");
+}
+
+void testNoProcessAllocations() {
+    WaterfallAnalyzer analyzer;
+    WaterfallConfig config;
+    config.fftSize = FftSize::FFT_1024;
+    config.quality = Quality::HIGH;
+    analyzer.configure(config);
+    SpectrumRow row;
+
+    // Warm the FFT code before measuring in case the linked math runtime has
+    // one-time initialization unrelated to the analyzer.
+    for (int i = 0; i < 2048; ++i) analyzer.processSample(0.f, row);
+    const size_t before = allocationCount.load();
+    countAllocations.store(true);
+    for (int i = 0; i < 4096; ++i) analyzer.processSample(0.f, row);
+    countAllocations.store(false);
+    require(allocationCount.load() == before, "processSample performs no heap allocations");
+}
+
+void testHighRateFftCadenceCap() {
+    WaterfallAnalyzer analyzer;
+    WaterfallConfig config;
+    config.fftSize = FftSize::FFT_1024;
+    config.quality = Quality::HIGH;
+    config.sampleRate = 192000.f;
+    config.generation = 150;
+    analyzer.configure(config);
+    SpectrumRow row;
+    bool received = false;
+    for (int sample = 0; sample < 5000; ++sample) {
+        if (analyzer.processSample(0.f, row) && row.sourceAnalysisSample >= 1024) {
+            received = true;
+            require(row.effectiveHopSize >= 800, "high-rate small FFT reports its capped effective hop");
+            require(row.sampleRate / row.effectiveHopSize <= 240.01f, "FFT cadence is capped at high sample rates");
+            break;
+        }
+    }
+    require(received, "high-rate analyzer produced a row");
+}
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+    if (countAllocations.load()) allocationCount.fetch_add(1);
+    void* pointer = std::malloc(size);
+    if (!pointer) throw std::bad_alloc();
+    return pointer;
+}
+
+void* operator new[](std::size_t size) {
+    if (countAllocations.load()) allocationCount.fetch_add(1);
+    void* pointer = std::malloc(size);
+    if (!pointer) throw std::bad_alloc();
+    return pointer;
+}
+
+void operator delete(void* pointer) noexcept {
+    std::free(pointer);
+}
+
+void operator delete[](void* pointer) noexcept {
+    std::free(pointer);
+}
+
+int main() {
+    testChannelMath();
+    testFlowTransforms();
+    testCalibrationAndMapping();
+    testRowsAndFiniteValues();
+    testNoiseCoverageAndTransientAggregation();
+    testNoProcessAllocations();
+    testHighRateFftCadenceCap();
+    std::cout << "Waterfall DSP tests passed" << std::endl;
+    return 0;
+}
