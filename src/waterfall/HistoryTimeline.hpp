@@ -25,7 +25,8 @@ struct TimeTick {
 
 class HistoryTimeline {
   public:
-    explicit HistoryTimeline(int capacity = historyRowCapacity(8.f, 30));
+    explicit HistoryTimeline(
+        int capacity = historyRowCapacity(DEFAULT_HISTORY_SECONDS, 30));
 
     void clear();
     void setCapacity(int capacity);

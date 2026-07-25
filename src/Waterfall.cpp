@@ -96,14 +96,14 @@ struct Waterfall : Module {
     std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::COMBINED)};
     std::atomic<int> frequencyBinsSetting{static_cast<int>(FrequencyBinScale::LOGARITHMIC)};
     std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
-    std::atomic<int> historyDurationSetting{static_cast<int>(HistoryDuration::SECONDS_8)};
+    std::atomic<float> historyLengthSetting{DEFAULT_HISTORY_SECONDS};
     std::atomic<bool> showFrequencyTicksSetting{true};
     std::atomic<bool> showTimeTicksSetting{true};
     std::atomic<float> frequencyGridOpacitySetting{1.f};
     std::atomic<float> timeGridOpacitySetting{1.f};
     std::atomic<bool> showMarkersSetting{true};
     std::atomic<float> markerOpacitySetting{0.82f};
-    std::atomic<float> timeSpanSetting{8.f};
+    std::atomic<float> timeSpanSetting{DEFAULT_HISTORY_SECONDS};
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
     std::atomic<bool> frozen{false};
@@ -242,7 +242,7 @@ struct Waterfall : Module {
         json_object_set_new(root, "frequencyScale", json_integer(frequencyScaleSetting.load()));
         json_object_set_new(root, "frequencyBins", json_integer(frequencyBinsSetting.load()));
         json_object_set_new(root, "frequencySmoothing", json_integer(frequencySmoothingSetting.load()));
-        json_object_set_new(root, "historyDuration", json_integer(historyDurationSetting.load()));
+        json_object_set_new(root, "historyLength", json_real(historyLengthSetting.load()));
         json_object_set_new(root, "showFrequencyTicks", json_boolean(showFrequencyTicksSetting.load()));
         json_object_set_new(root, "showTimeTicks", json_boolean(showTimeTicksSetting.load()));
         json_object_set_new(root, "frequencyGridOpacity", json_real(frequencyGridOpacitySetting.load()));
@@ -285,9 +285,16 @@ struct Waterfall : Module {
         frequencySmoothingSetting.store(getJsonInt(root, "frequencySmoothing", 0,
                                                    static_cast<int>(FrequencySmoothing::COUNT) - 1,
                                                    static_cast<int>(FrequencySmoothing::NONE)));
-        historyDurationSetting.store(getJsonInt(root, "historyDuration", 0,
-                                                static_cast<int>(HistoryDuration::COUNT) - 1,
-                                                static_cast<int>(HistoryDuration::SECONDS_8)));
+        json_t* historyLengthJson = json_object_get(root, "historyLength");
+        if (json_is_number(historyLengthJson)) {
+            historyLengthSetting.store(std::round(clampValue(
+                static_cast<float>(json_number_value(historyLengthJson)), MIN_HISTORY_SECONDS,
+                MAX_HISTORY_SECONDS)));
+        } else {
+            static const float legacyDurations[] = {2.f, 4.f, 8.f, 16.f, 30.f};
+            const int legacyIndex = getJsonInt(root, "historyDuration", 0, 4, 2);
+            historyLengthSetting.store(legacyDurations[legacyIndex]);
+        }
         json_t* showFrequencyTicks = json_object_get(root, "showFrequencyTicks");
         showFrequencyTicksSetting.store(
             json_is_boolean(showFrequencyTicks) ? json_is_true(showFrequencyTicks) : true);
@@ -299,9 +306,9 @@ struct Waterfall : Module {
         json_t* showMarkers = json_object_get(root, "showMarkers");
         showMarkersSetting.store(json_is_boolean(showMarkers) ? json_is_true(showMarkers) : true);
         markerOpacitySetting.store(getJsonFloat(root, "markerOpacity", 0.f, 1.f, 0.82f));
-        const int duration = historyDurationSeconds(static_cast<HistoryDuration>(historyDurationSetting.load()));
-        timeSpanSetting.store(getJsonFloat(root, "timeSpan", 0.25f, static_cast<float>(duration),
-                                           static_cast<float>(duration)));
+        const float historyLength = historyLengthSetting.load();
+        timeSpanSetting.store(
+            getJsonFloat(root, "timeSpan", 0.25f, historyLength, historyLength));
         float minimum = getJsonFloat(root, "viewMinimum", 0.f, 0.99f, 0.f);
         float maximum = getJsonFloat(root, "viewMaximum", 0.01f, 1.f, 1.f);
         if (maximum - minimum < 0.01f) {
@@ -368,6 +375,48 @@ struct GridOpacitySlider : ui::Slider {
         box.size.x = 200.f;
     }
     ~GridOpacitySlider() override { delete quantity; }
+};
+
+struct HistoryLengthQuantity : Quantity {
+    Waterfall* module = NULL;
+
+    explicit HistoryLengthQuantity(Waterfall* module) : module(module) {}
+
+    void setValue(float value) override {
+        const float seconds =
+            std::round(clampValue(value, getMinValue(), getMaxValue()));
+        if (module) {
+            module->historyLengthSetting.store(seconds);
+            module->timeSpanSetting.store(seconds);
+        }
+    }
+    float getValue() override {
+        return module ? module->historyLengthSetting.load() : getDefaultValue();
+    }
+    float getMinValue() override { return MIN_HISTORY_SECONDS; }
+    float getMaxValue() override { return MAX_HISTORY_SECONDS; }
+    float getDefaultValue() override { return DEFAULT_HISTORY_SECONDS; }
+    std::string getDisplayValueString() override {
+        return rack::string::f("%.0f", getValue());
+    }
+    std::string getLabel() override { return "History length"; }
+    std::string getUnit() override { return " s"; }
+};
+
+struct HistoryLengthSlider : ui::Slider {
+    explicit HistoryLengthSlider(Waterfall* module) {
+        quantity = new HistoryLengthQuantity(module);
+        box.size.x = 200.f;
+    }
+    ~HistoryLengthSlider() override { delete quantity; }
+
+    void onEnter(const event::Enter& event) override {
+        if (ui::Menu* menu = dynamic_cast<ui::Menu*>(parent)) {
+            menu->activeEntry = NULL;
+            menu->setChildMenu(NULL);
+        }
+        ui::Slider::onEnter(event);
+    }
 };
 
 struct WaterfallRenderer {
@@ -597,11 +646,9 @@ struct WaterfallDisplay : widget::OpenGlWidget {
 
     void syncSettings() {
         const int quality = clampValue(module ? module->qualitySetting.load() : 1, 0, 2);
-        const int durationIndex =
-            clampValue(module ? module->historyDurationSetting.load() : 2, 0,
-                       static_cast<int>(HistoryDuration::COUNT) - 1);
         const float retained =
-            static_cast<float>(historyDurationSeconds(static_cast<HistoryDuration>(durationIndex)));
+            clampValue(module ? module->historyLengthSetting.load() : DEFAULT_HISTORY_SECONDS,
+                       MIN_HISTORY_SECONDS, MAX_HISTORY_SECONDS);
         int desired = historyRowCapacity(retained, rowsPerSecond(static_cast<Quality>(quality)));
         GLint maximumTexture = 2048;
         if (renderer.program) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
@@ -1382,14 +1429,7 @@ struct WaterfallWidget : ModuleWidget {
             "Flow", {"Up", "Down", "Left", "Right"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->flowSetting.load(), 0, 3)); },
             [=](size_t value) { waterfall->flowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
-            "History duration", {"2 seconds", "4 seconds", "8 seconds", "16 seconds", "30 seconds"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->historyDurationSetting.load(), 0, 4)); },
-            [=](size_t value) {
-                waterfall->historyDurationSetting.store(static_cast<int>(value));
-                waterfall->timeSpanSetting.store(static_cast<float>(
-                    historyDurationSeconds(static_cast<HistoryDuration>(static_cast<int>(value)))));
-            }));
+        menu->addChild(new HistoryLengthSlider(waterfall));
         const Palette selectedPalette = static_cast<Palette>(
             clampValue(waterfall->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
         menu->addChild(createSubmenuItem(

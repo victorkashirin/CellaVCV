@@ -88,12 +88,12 @@ enum class FrequencySmoothing : int {
     OCTAVE_1_3,
     COUNT
 };
-enum class HistoryDuration : int { SECONDS_2, SECONDS_4, SECONDS_8, SECONDS_16, SECONDS_30, COUNT };
-
 constexpr std::array<int, static_cast<int>(FftSize::COUNT)> FFT_SIZES = {{1024, 2048, 4096, 8192, 16384}};
 constexpr std::array<int, static_cast<int>(FftOverlap::COUNT)> FFT_HOP_SIXTEENTHS = {{16, 12, 8, 4, 2, 1}};
 constexpr std::array<int, static_cast<int>(Quality::COUNT)> ROW_RATES = {{15, 30, 60}};
-constexpr std::array<int, static_cast<int>(HistoryDuration::COUNT)> HISTORY_DURATIONS = {{2, 4, 8, 16, 30}};
+constexpr float MIN_HISTORY_SECONDS = 2.f;
+constexpr float MAX_HISTORY_SECONDS = 30.f;
+constexpr float DEFAULT_HISTORY_SECONDS = 8.f;
 constexpr float MAX_FFT_ANALYSES_PER_SECOND = 240.f;
 
 template <typename T>
@@ -202,10 +202,6 @@ inline int effectiveFftHopSize(int fftSize, float sampleRate, FftOverlap overlap
 
 inline int rowsPerSecond(Quality quality) {
     return ROW_RATES[static_cast<int>(quality)];
-}
-
-inline int historyDurationSeconds(HistoryDuration duration) {
-    return HISTORY_DURATIONS[static_cast<int>(duration)];
 }
 
 inline int historyRowCapacity(float seconds, int effectiveRowsPerSecond) {
