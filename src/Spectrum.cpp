@@ -86,14 +86,14 @@ struct Spectrum : Module {
     std::atomic<int> fftSizeSetting{static_cast<int>(FftSize::FFT_4096)};
     std::atomic<int> windowSetting{static_cast<int>(WindowFunction::HANN)};
     std::atomic<int> fftOverlapSetting{static_cast<int>(FftOverlap::PERCENT_75)};
-    std::atomic<int> qualitySetting{static_cast<int>(Quality::NORMAL)};
+    std::atomic<int> qualitySetting{static_cast<int>(Quality::HIGH)};
     std::atomic<int> polyChannelSetting{0};
     std::atomic<int> paletteSetting{static_cast<int>(Palette::INFERNO)};
-    std::atomic<int> peakHoldSetting{static_cast<int>(PeakHold::DECAY)};
-    std::atomic<int> flowSetting{static_cast<int>(FlowDirection::UP)};
-    std::atomic<int> renderingStyleSetting{static_cast<int>(RenderingStyle::SMOOTH)};
-    std::atomic<int> liveTraceSetting{static_cast<int>(LiveTraceMode::LINE)};
-    std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::COMBINED)};
+    std::atomic<int> peakHoldSetting{static_cast<int>(PeakHold::OFF)};
+    std::atomic<int> flowSetting{static_cast<int>(FlowDirection::LEFT)};
+    std::atomic<int> renderingStyleSetting{static_cast<int>(RenderingStyle::PRECISE)};
+    std::atomic<int> liveTraceSetting{static_cast<int>(LiveTraceMode::OFF)};
+    std::atomic<int> frequencyScaleSetting{static_cast<int>(FrequencyScaleMode::HZ)};
     std::atomic<int> frequencyBinsSetting{static_cast<int>(FrequencyBinScale::LOGARITHMIC)};
     std::atomic<int> frequencySmoothingSetting{static_cast<int>(FrequencySmoothing::NONE)};
     std::atomic<float> historyLengthSetting{DEFAULT_HISTORY_SECONDS};
@@ -263,22 +263,22 @@ struct Spectrum : Module {
         fftOverlapSetting.store(getJsonInt(root, "fftOverlap", 0, static_cast<int>(FftOverlap::COUNT) - 1,
                                            static_cast<int>(FftOverlap::PERCENT_75)));
         qualitySetting.store(getJsonInt(root, "quality", 0, static_cast<int>(Quality::COUNT) - 1,
-                                        static_cast<int>(Quality::NORMAL)));
+                                        static_cast<int>(Quality::HIGH)));
         polyChannelSetting.store(getJsonInt(root, "polyChannel", 0, 15, 0));
         paletteSetting.store(
             getJsonInt(root, "palette", 0, static_cast<int>(Palette::COUNT) - 1,
                        static_cast<int>(Palette::INFERNO)));
         peakHoldSetting.store(getJsonInt(root, "peakHold", 0, static_cast<int>(PeakHold::COUNT) - 1,
-                                         static_cast<int>(PeakHold::DECAY)));
+                                         static_cast<int>(PeakHold::OFF)));
         flowSetting.store(getJsonInt(root, "flow", 0, static_cast<int>(FlowDirection::COUNT) - 1,
-                                     static_cast<int>(FlowDirection::UP)));
+                                     static_cast<int>(FlowDirection::LEFT)));
         renderingStyleSetting.store(getJsonInt(root, "renderingStyle", 0, static_cast<int>(RenderingStyle::COUNT) - 1,
-                                               static_cast<int>(RenderingStyle::SMOOTH)));
+                                               static_cast<int>(RenderingStyle::PRECISE)));
         liveTraceSetting.store(getJsonInt(root, "liveTrace", 0, static_cast<int>(LiveTraceMode::COUNT) - 1,
-                                         static_cast<int>(LiveTraceMode::LINE)));
+                                         static_cast<int>(LiveTraceMode::OFF)));
         frequencyScaleSetting.store(getJsonInt(root, "frequencyScale", 0,
                                                static_cast<int>(FrequencyScaleMode::COUNT) - 1,
-                                               static_cast<int>(FrequencyScaleMode::COMBINED)));
+                                               static_cast<int>(FrequencyScaleMode::HZ)));
         frequencyBinsSetting.store(getJsonInt(root, "frequencyBins", 0,
                                               static_cast<int>(FrequencyBinScale::COUNT) - 1,
                                               static_cast<int>(FrequencyBinScale::LOGARITHMIC)));
@@ -708,7 +708,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     }
 
     void syncSettings() {
-        const int quality = clampValue(module ? module->qualitySetting.load() : 1, 0, 2);
+        const int quality =
+            clampValue(module ? module->qualitySetting.load() : static_cast<int>(Quality::HIGH), 0, 2);
         const float retained =
             clampValue(module ? module->historyLengthSetting.load() : DEFAULT_HISTORY_SECONDS,
                        MIN_HISTORY_SECONDS, MAX_HISTORY_SECONDS);
@@ -743,7 +744,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             rebuildDerived();
         }
         const int peak =
-            clampValue(module ? module->peakHoldSetting.load() : 1, 0, static_cast<int>(PeakHold::COUNT) - 1);
+            clampValue(module ? module->peakHoldSetting.load() : static_cast<int>(PeakHold::OFF), 0,
+                       static_cast<int>(PeakHold::COUNT) - 1);
         if (peak != appliedPeakHold) {
             appliedPeakHold = peak;
             rebuildDerived();
@@ -752,7 +754,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
 
     void updateTraces(const SpectrumRow& row, float elapsedSeconds) {
         const PeakHold peakMode = static_cast<PeakHold>(
-            clampValue(module ? module->peakHoldSetting.load() : static_cast<int>(PeakHold::DECAY), 0,
+            clampValue(module ? module->peakHoldSetting.load() : static_cast<int>(PeakHold::OFF), 0,
                        static_cast<int>(PeakHold::COUNT) - 1));
         for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
             const float value = dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]);
@@ -958,15 +960,22 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             glBindTexture(GL_TEXTURE_2D, renderer.paletteTexture);
             glUniform1i(renderer.paletteLocation, 3);
             glUniform1f(renderer.rowsLocation, static_cast<float>(timeline.capacity()));
-            glUniform1i(renderer.flowLocation, module ? clampValue(module->flowSetting.load(), 0, 3) : 0);
+            glUniform1i(renderer.flowLocation,
+                        module ? clampValue(module->flowSetting.load(), 0, 3)
+                               : static_cast<int>(FlowDirection::LEFT));
             glUniform2f(renderer.viewLocation, module ? module->viewMinimum.load() : 0.f,
                         module ? module->viewMaximum.load() : 1.f);
             glUniform2f(renderer.rangeLocation,
                         module ? module->params[Spectrum::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB, 0.f);
-            glUniform1i(renderer.peakHoldLocation, module ? clampValue(module->peakHoldSetting.load(), 0, 2) : 1);
-            glUniform1i(renderer.liveTraceLocation, module ? clampValue(module->liveTraceSetting.load(), 0, 2) : 1);
+            glUniform1i(renderer.peakHoldLocation,
+                        module ? clampValue(module->peakHoldSetting.load(), 0, 2)
+                               : static_cast<int>(PeakHold::OFF));
+            glUniform1i(renderer.liveTraceLocation,
+                        module ? clampValue(module->liveTraceSetting.load(), 0, 2)
+                               : static_cast<int>(LiveTraceMode::OFF));
             glUniform1i(renderer.styleLocation,
-                        module ? clampValue(module->renderingStyleSetting.load(), 0, 1) : 1);
+                        module ? clampValue(module->renderingStyleSetting.load(), 0, 1)
+                               : static_cast<int>(RenderingStyle::PRECISE));
             glUniform2f(renderer.logicalPixelLocation, 1.f / std::max(framebuffer.x, 1.f),
                         1.f / std::max(framebuffer.y, 1.f));
             drawQuad();
@@ -1013,15 +1022,27 @@ struct SpectrumDisplay : widget::OpenGlWidget {
 };
 
 struct SpectrumOverlay : TransparentWidget {
+    struct LabelBounds {
+        float left;
+        float top;
+        float right;
+        float bottom;
+
+        LabelBounds(float left, float top, float right, float bottom)
+            : left(left), top(top), right(right), bottom(bottom) {}
+    };
+
     Spectrum* module = NULL;
     SpectrumDisplay* display = NULL;
     bool hovered = false;
     bool draggingTime = false;
     math::Vec cursor;
+    std::vector<LabelBounds> frequencyLabelBounds;
 
     FlowDirection flow() const {
         return static_cast<FlowDirection>(
-            clampValue(module ? module->flowSetting.load() : 0, 0, static_cast<int>(FlowDirection::COUNT) - 1));
+            clampValue(module ? module->flowSetting.load() : static_cast<int>(FlowDirection::LEFT), 0,
+                       static_cast<int>(FlowDirection::COUNT) - 1));
     }
     float viewLow() const { return module ? module->viewMinimum.load() : 0.f; }
     float viewHigh() const { return module ? module->viewMaximum.load() : 1.f; }
@@ -1048,6 +1069,23 @@ struct SpectrumOverlay : TransparentWidget {
     bool inTimeGutter(math::Vec position) const {
         return isVerticalFlow(flow()) ? position.x < VERTICAL_TIME_GUTTER
                                       : position.y > box.size.y - HORIZONTAL_TIME_GUTTER;
+    }
+
+    LabelBounds textBounds(const DrawArgs& args, float x, float y, const std::string& label) const {
+        float bounds[4] = {};
+        nvgTextBounds(args.vg, x, y, label.c_str(), NULL, bounds);
+        constexpr float LABEL_CLEARANCE = 1.f;
+        return {bounds[0] - LABEL_CLEARANCE, bounds[1] - LABEL_CLEARANCE,
+                bounds[2] + LABEL_CLEARANCE, bounds[3] + LABEL_CLEARANCE};
+    }
+
+    bool overlapsFrequencyLabel(const LabelBounds& bounds) const {
+        for (const LabelBounds& frequencyBounds : frequencyLabelBounds) {
+            if (bounds.left <= frequencyBounds.right && bounds.right >= frequencyBounds.left &&
+                bounds.top <= frequencyBounds.bottom && bounds.bottom >= frequencyBounds.top)
+                return true;
+        }
+        return false;
     }
 
     void drawFrequencyGuide(const DrawArgs& args, float frequency, const std::string& label, bool secondary,
@@ -1095,6 +1133,7 @@ struct SpectrumOverlay : TransparentWidget {
             nvgTextAlign(args.vg, alignment);
             const float labelY =
                 labelsAtTop ? GRID_TOP_INSET + 2.f : box.size.y - GRID_BOTTOM_INSET - 2.f;
+            frequencyLabelBounds.push_back(textBounds(args, labelX, labelY, label));
             nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
         } else {
             float labelY =
@@ -1111,33 +1150,30 @@ struct SpectrumOverlay : TransparentWidget {
             }
             nvgTextAlign(args.vg, alignment);
             const float labelX = labelsAtLeft ? 3.f : box.size.x - 3.f;
+            frequencyLabelBounds.push_back(textBounds(args, labelX, labelY, label));
             nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
         }
     }
 
     void drawGrid(const DrawArgs& args) {
+        frequencyLabelBounds.clear();
         if ((!module || module->showFrequencyTicksSetting.load()) &&
             maximumFrequency() > MIN_FREQUENCY_HZ && viewHigh() > viewLow()) {
             const FrequencyScaleMode scale = static_cast<FrequencyScaleMode>(
-                clampValue(module ? module->frequencyScaleSetting.load() : 3, 0,
+                clampValue(module ? module->frequencyScaleSetting.load() : static_cast<int>(FrequencyScaleMode::HZ), 0,
                            static_cast<int>(FrequencyScaleMode::COUNT) - 1));
             static const float hzGuides[] = {
                 20.f, 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f, 20000.f};
             static const float octaveGuides[] = {
                 31.25f, 62.5f, 125.f, 250.f, 500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f};
             float last = -1000.f;
-            if (scale == FrequencyScaleMode::HZ || scale == FrequencyScaleMode::COMBINED) {
+            if (scale == FrequencyScaleMode::HZ) {
                 for (size_t i = 0; i < sizeof(hzGuides) / sizeof(hzGuides[0]); ++i)
                     drawFrequencyGuide(args, hzGuides[i], frequencyLabel(hzGuides[i]), false, last);
             }
-            if (scale == FrequencyScaleMode::OCTAVES || scale == FrequencyScaleMode::COMBINED) {
-                if (scale == FrequencyScaleMode::OCTAVES) last = -1000.f;
+            if (scale == FrequencyScaleMode::OCTAVES) {
                 for (size_t i = 0; i < sizeof(octaveGuides) / sizeof(octaveGuides[0]); ++i)
-                    drawFrequencyGuide(args, octaveGuides[i],
-                                       scale == FrequencyScaleMode::OCTAVES
-                                           ? frequencyLabel(octaveGuides[i])
-                                           : "",
-                                       scale == FrequencyScaleMode::COMBINED, last);
+                    drawFrequencyGuide(args, octaveGuides[i], frequencyLabel(octaveGuides[i]), false, last);
             }
             if (scale == FrequencyScaleMode::MUSICAL) {
                 const float frequencyAxisPixels =
@@ -1189,9 +1225,9 @@ struct SpectrumOverlay : TransparentWidget {
                 }
                 nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
-                if (ticks[i].ageSeconds > 0.001f) {
-                    const std::string label =
-                        timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                const std::string label =
+                    timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                if (!overlapsFrequencyLabel(textBounds(args, 2.f, labelY, label))) {
                     nvgText(args.vg, 2.f, labelY, label.c_str(), NULL);
                 }
             } else {
@@ -1209,9 +1245,10 @@ struct SpectrumOverlay : TransparentWidget {
                 }
                 nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
-                if (ticks[i].ageSeconds > 0.001f) {
-                    const std::string label =
-                        timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                const std::string label =
+                    timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
+                if (!overlapsFrequencyLabel(
+                        textBounds(args, labelX, box.size.y - GRID_BOTTOM_INSET - 1.f, label))) {
                     nvgText(args.vg, labelX, box.size.y - GRID_BOTTOM_INSET - 1.f,
                             label.c_str(), NULL);
                 }
@@ -1561,10 +1598,11 @@ struct SpectrumWidget : ModuleWidget {
         }));
         menu->addChild(createSubmenuItem("Frequency", "", [=](Menu* frequencyMenu) {
             frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
-                "Scale", {"Hz", "Octaves", "Musical", "Combined"},
+                "Scale", {"Hz", "Octaves", "Musical"},
                 [=]() {
                     return static_cast<size_t>(
-                        clampValue(spectrum->frequencyScaleSetting.load(), 0, 3));
+                        clampValue(spectrum->frequencyScaleSetting.load(), 0,
+                                   static_cast<int>(FrequencyScaleMode::COUNT) - 1));
                 },
                 [=](size_t value) {
                     spectrum->frequencyScaleSetting.store(static_cast<int>(value));

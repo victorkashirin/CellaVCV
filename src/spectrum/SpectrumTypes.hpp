@@ -77,7 +77,7 @@ enum class PeakHold : int { OFF, DECAY, INFINITE, COUNT };
 enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
 enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };
 enum class LiveTraceMode : int { OFF, LINE, LINE_FILL, COUNT };
-enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COMBINED, COUNT };
+enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COUNT };
 enum class FrequencyBinScale : int { LOGARITHMIC, LINEAR, MEL, COUNT };
 enum class FrequencySmoothing : int {
     NONE,
@@ -289,7 +289,7 @@ struct SpectrumConfig {
     FftSize fftSize = FftSize::FFT_4096;
     WindowFunction window = WindowFunction::HANN;
     FftOverlap fftOverlap = FftOverlap::PERCENT_75;
-    Quality quality = Quality::NORMAL;
+    Quality quality = Quality::HIGH;
     ChannelMode channelMode = ChannelMode::MONO;
     FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC;
     int polyChannel = 0;
