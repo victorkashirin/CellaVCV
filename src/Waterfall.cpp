@@ -419,6 +419,69 @@ struct HistoryLengthSlider : ui::Slider {
     }
 };
 
+struct NonClosingCheckMenuItem : MenuItem {
+    std::function<bool()> checked;
+    std::function<void()> action;
+
+    void step() override {
+        rightText = CHECKMARK(checked());
+        MenuItem::step();
+    }
+
+    void onAction(const event::Action& event) override {
+        action();
+        event.unconsume();
+    }
+};
+
+MenuItem* createNonClosingCheckMenuItem(const std::string& text,
+                                        std::function<bool()> checked,
+                                        std::function<void()> action) {
+    NonClosingCheckMenuItem* item = createMenuItem<NonClosingCheckMenuItem>(text);
+    item->checked = checked;
+    item->action = action;
+    return item;
+}
+
+MenuItem* createNonClosingBoolMenuItem(const std::string& text,
+                                       std::function<bool()> getter,
+                                       std::function<void(bool)> setter) {
+    return createNonClosingCheckMenuItem(text, getter, [=]() { setter(!getter()); });
+}
+
+struct NonClosingIndexSubmenuItem : MenuItem {
+    std::function<size_t()> getter;
+    std::function<void(size_t)> setter;
+    std::vector<std::string> labels;
+
+    void step() override {
+        const size_t index = getter();
+        rightText = (index < labels.size() ? labels[index] : "") + "  " + RIGHT_ARROW;
+        MenuItem::step();
+    }
+
+    Menu* createChildMenu() override {
+        Menu* menu = new Menu;
+        for (size_t i = 0; i < labels.size(); ++i) {
+            menu->addChild(createNonClosingCheckMenuItem(
+                labels[i], [=]() { return getter() == i; }, [=]() { setter(i); }));
+        }
+        return menu;
+    }
+};
+
+MenuItem* createNonClosingIndexSubmenuItem(const std::string& text,
+                                           const std::vector<std::string>& labels,
+                                           std::function<size_t()> getter,
+                                           std::function<void(size_t)> setter) {
+    NonClosingIndexSubmenuItem* item =
+        createMenuItem<NonClosingIndexSubmenuItem>(text);
+    item->getter = getter;
+    item->setter = setter;
+    item->labels = labels;
+    return item;
+}
+
 struct WaterfallRenderer {
     GLuint program = 0;
     GLuint historyTexture = 0;
@@ -1019,29 +1082,36 @@ struct WaterfallOverlay : TransparentWidget {
         nvgFontSize(args.vg, 8.f);
         if (isVerticalFlow(flow())) {
             float labelX = position;
-            int alignment = NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM;
+            const bool labelsAtTop = flow() == FlowDirection::UP;
+            const int verticalAlignment = labelsAtTop ? NVG_ALIGN_TOP : NVG_ALIGN_BOTTOM;
+            int alignment = NVG_ALIGN_CENTER | verticalAlignment;
             if (position < 15.f) {
                 labelX = 2.f;
-                alignment = NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM;
+                alignment = NVG_ALIGN_LEFT | verticalAlignment;
             } else if (position > box.size.x - 15.f) {
                 labelX = box.size.x - 2.f;
-                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
+                alignment = NVG_ALIGN_RIGHT | verticalAlignment;
             }
             nvgTextAlign(args.vg, alignment);
-            nvgText(args.vg, labelX, box.size.y - GRID_BOTTOM_INSET - 2.f, label.c_str(), NULL);
+            const float labelY =
+                labelsAtTop ? GRID_TOP_INSET + 2.f : box.size.y - GRID_BOTTOM_INSET - 2.f;
+            nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
         } else {
             float labelY =
                 clampValue(box.size.y - position, GRID_TOP_INSET, box.size.y - GRID_BOTTOM_INSET);
-            int alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE;
+            const bool labelsAtLeft = flow() == FlowDirection::LEFT;
+            const int horizontalAlignment = labelsAtLeft ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
+            int alignment = horizontalAlignment | NVG_ALIGN_MIDDLE;
             if (labelY < GRID_TOP_INSET + 7.f) {
                 labelY = GRID_TOP_INSET + 2.f;
-                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_TOP;
+                alignment = horizontalAlignment | NVG_ALIGN_TOP;
             } else if (labelY > box.size.y - GRID_BOTTOM_INSET - 7.f) {
                 labelY = box.size.y - GRID_BOTTOM_INSET - 2.f;
-                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
+                alignment = horizontalAlignment | NVG_ALIGN_BOTTOM;
             }
             nvgTextAlign(args.vg, alignment);
-            nvgText(args.vg, box.size.x - 3.f, labelY, label.c_str(), NULL);
+            const float labelX = labelsAtLeft ? 3.f : box.size.x - 3.f;
+            nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
         }
     }
 
@@ -1272,22 +1342,18 @@ struct WaterfallOverlay : TransparentWidget {
         TransparentWidget::onDragEnd(event);
     }
     void onHoverScroll(const event::HoverScroll& event) override {
-        if (!module || !display) return;
-        const LogicalPoint logical = logicalAt(event.pos);
-        const bool timeGesture = inTimeGutter(event.pos) || (APP->window->getMods() & GLFW_MOD_SHIFT);
-        const float factor = std::pow(1.0015f, event.scrollDelta.y);
-        if (timeGesture) {
-            display->timeline.zoom(factor, logical.age);
-            module->timeSpanSetting.store(display->timeline.visibleSpan());
-            display->lookupDirty = true;
-        } else {
-            const float low = module->viewMinimum.load(), high = module->viewMaximum.load(), span = high - low;
-            const float anchor = low + logical.frequency * span;
-            const float nextSpan = clampValue(span * factor, 0.03f, 1.f);
-            const float nextLow = clampValue(anchor - logical.frequency * nextSpan, 0.f, 1.f - nextSpan);
-            module->viewMinimum.store(nextLow);
-            module->viewMaximum.store(nextLow + nextSpan);
+        if (!module || !display || !(APP->window->getMods() & GLFW_MOD_SHIFT)) {
+            TransparentWidget::onHoverScroll(event);
+            return;
         }
+        const LogicalPoint logical = logicalAt(event.pos);
+        const float factor = std::pow(1.0015f, event.scrollDelta.y);
+        const float low = module->viewMinimum.load(), high = module->viewMaximum.load(), span = high - low;
+        const float anchor = low + logical.frequency * span;
+        const float nextSpan = clampValue(span * factor, 0.03f, 1.f);
+        const float nextLow = clampValue(anchor - logical.frequency * nextSpan, 0.f, 1.f - nextSpan);
+        module->viewMinimum.store(nextLow);
+        module->viewMaximum.store(nextLow + nextSpan);
         event.consume(this);
     }
     void onDoubleClick(const event::DoubleClick& event) override {
@@ -1370,13 +1436,13 @@ struct WaterfallWidget : ModuleWidget {
         constexpr float y = 329.5f;
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 0.f, y), module, Waterfall::LEFT_INPUT));
         addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Waterfall::RIGHT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Waterfall::FREEZE_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 3.f, y), module, Waterfall::CLEAR_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Waterfall::MARK_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 5.f, y), module, Waterfall::RANGE_PARAM));
-        addParam(createParamCentered<LEDButton>(Vec(x + step * 6.f, y), module, Waterfall::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 6.f, y), module,
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Waterfall::MARK_INPUT));
+        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 3.f, y), module, Waterfall::RANGE_PARAM));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 4.f, y), module, Waterfall::FREEZE_INPUT));
+        addParam(createParamCentered<LEDButton>(Vec(x + step * 5.f, y), module, Waterfall::FREEZE_PARAM));
+        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 5.f, y), module,
                                                                Waterfall::FREEZE_LIGHT));
+        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 6.f, y), module, Waterfall::CLEAR_INPUT));
         addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Waterfall::CLEAR_PARAM));
     }
 
@@ -1385,7 +1451,7 @@ struct WaterfallWidget : ModuleWidget {
         if (!waterfall) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Channel mode", {"Left", "Right", "Mono", "Mid", "Side"},
             [=]() {
                 return static_cast<size_t>(
@@ -1397,35 +1463,35 @@ struct WaterfallWidget : ModuleWidget {
                     static_cast<float>(clampValue(static_cast<int>(value), 0,
                                                   static_cast<int>(ChannelMode::COUNT) - 1)));
             }));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "FFT size", {"1024", "2048", "4096", "8192", "16384"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->fftSizeSetting.load(), 0, 4)); },
             [=](size_t value) { waterfall->fftSizeSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "FFT overlap", {"None", "25%", "50%", "75%", "87.5%", "93.75%"},
             [=]() {
                 return static_cast<size_t>(
                     clampValue(waterfall->fftOverlapSetting.load(), 0, static_cast<int>(FftOverlap::COUNT) - 1));
             },
             [=](size_t value) { waterfall->fftOverlapSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Window", {"Hann", "Blackman-Harris", "Flat-top"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->windowSetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->windowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Time detail", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->qualitySetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->qualitySetting.store(static_cast<int>(value)); }));
         std::vector<std::string> channels;
         for (int channel = 1; channel <= 16; ++channel) channels.push_back(rack::string::f("Channel %d", channel));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Polyphonic voice", channels,
             [=]() { return static_cast<size_t>(clampValue(waterfall->polyChannelSetting.load(), 0, 15)); },
             [=](size_t value) { waterfall->polyChannelSetting.store(static_cast<int>(value)); }));
 
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Presentation"));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Flow", {"Up", "Down", "Left", "Right"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->flowSetting.load(), 0, 3)); },
             [=](size_t value) { waterfall->flowSetting.store(static_cast<int>(value)); }));
@@ -1444,30 +1510,29 @@ struct WaterfallWidget : ModuleWidget {
                     paletteMenu->addChild(createSubmenuItem(
                         group.name, activeName, [=](Menu* groupMenu) {
                             for (Palette palette : palettes) {
-                                groupMenu->addChild(createCheckMenuItem(
-                                    paletteDefinition(palette).name, "",
+                                groupMenu->addChild(createNonClosingCheckMenuItem(
+                                    paletteDefinition(palette).name,
                                     [=]() {
                                         return waterfall->paletteSetting.load() ==
                                                static_cast<int>(palette);
                                     },
                                     [=]() {
                                         waterfall->paletteSetting.store(static_cast<int>(palette));
-                                    },
-                                    false, true));
+                                    }));
                             }
                         }));
                 }
             }));
-        menu->addChild(createIndexSubmenuItem(
+        menu->addChild(createNonClosingIndexSubmenuItem(
             "Rendering", {"Precise", "Smooth"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->renderingStyleSetting.load(), 0, 1)); },
             [=](size_t value) { waterfall->renderingStyleSetting.store(static_cast<int>(value)); }));
         menu->addChild(createSubmenuItem("Trace", "", [=](Menu* traceMenu) {
-            traceMenu->addChild(createIndexSubmenuItem(
+            traceMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Live", {"Off", "Line", "Line + Fill"},
                 [=]() { return static_cast<size_t>(clampValue(waterfall->liveTraceSetting.load(), 0, 2)); },
                 [=](size_t value) { waterfall->liveTraceSetting.store(static_cast<int>(value)); }));
-            traceMenu->addChild(createIndexSubmenuItem(
+            traceMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Peak", {"Off", "Decay", "Infinite hold"},
                 [=]() { return static_cast<size_t>(clampValue(waterfall->peakHoldSetting.load(), 0, 2)); },
                 [=](size_t value) { waterfall->peakHoldSetting.store(static_cast<int>(value)); }));
@@ -1476,8 +1541,8 @@ struct WaterfallWidget : ModuleWidget {
             ticksMenu->addChild(createSubmenuItem(
                 "Frequency", waterfall->showFrequencyTicksSetting.load() ? "On" : "Off",
                 [=](Menu* frequencyTicksMenu) {
-                    frequencyTicksMenu->addChild(createBoolMenuItem(
-                        "On", "",
+                    frequencyTicksMenu->addChild(createNonClosingBoolMenuItem(
+                        "On",
                         [=]() { return waterfall->showFrequencyTicksSetting.load(); },
                         [=](bool value) { waterfall->showFrequencyTicksSetting.store(value); }));
                     frequencyTicksMenu->addChild(new GridOpacitySlider(
@@ -1486,8 +1551,8 @@ struct WaterfallWidget : ModuleWidget {
             ticksMenu->addChild(createSubmenuItem(
                 "Time", waterfall->showTimeTicksSetting.load() ? "On" : "Off",
                 [=](Menu* timeTicksMenu) {
-                    timeTicksMenu->addChild(createBoolMenuItem(
-                        "On", "",
+                    timeTicksMenu->addChild(createNonClosingBoolMenuItem(
+                        "On",
                         [=]() { return waterfall->showTimeTicksSetting.load(); },
                         [=](bool value) { waterfall->showTimeTicksSetting.store(value); }));
                     timeTicksMenu->addChild(new GridOpacitySlider(
@@ -1495,7 +1560,7 @@ struct WaterfallWidget : ModuleWidget {
                 }));
         }));
         menu->addChild(createSubmenuItem("Frequency", "", [=](Menu* frequencyMenu) {
-            frequencyMenu->addChild(createIndexSubmenuItem(
+            frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Scale", {"Hz", "Octaves", "Musical", "Combined"},
                 [=]() {
                     return static_cast<size_t>(
@@ -1504,7 +1569,7 @@ struct WaterfallWidget : ModuleWidget {
                 [=](size_t value) {
                     waterfall->frequencyScaleSetting.store(static_cast<int>(value));
                 }));
-            frequencyMenu->addChild(createIndexSubmenuItem(
+            frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Smoothing",
                 {"None", "1/48 octave", "1/24 octave", "1/12 octave", "1/6 octave", "1/3 octave"},
                 [=]() {
@@ -1514,7 +1579,7 @@ struct WaterfallWidget : ModuleWidget {
                 [=](size_t value) {
                     waterfall->frequencySmoothingSetting.store(static_cast<int>(value));
                 }));
-            frequencyMenu->addChild(createIndexSubmenuItem(
+            frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
                 "Bins", {"Log", "Linear", "Mel"},
                 [=]() {
                     return static_cast<size_t>(
@@ -1533,8 +1598,8 @@ struct WaterfallWidget : ModuleWidget {
             }));
         }));
         menu->addChild(createSubmenuItem("Markers", "", [=](Menu* markersMenu) {
-            markersMenu->addChild(createBoolMenuItem(
-                "Show markers", "",
+            markersMenu->addChild(createNonClosingBoolMenuItem(
+                "Show markers",
                 [=]() { return waterfall->showMarkersSetting.load(); },
                 [=](bool value) { waterfall->showMarkersSetting.store(value); }));
             markersMenu->addChild(new MarkerOpacitySlider(waterfall));

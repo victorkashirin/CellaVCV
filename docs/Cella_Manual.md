@@ -26,11 +26,11 @@ module never applies automatic gain or normalizes each spectrum to its loudest f
   changing flow, zooming, or panning time, and are removed by Clear or when they leave retained history.
 * **CLEAR** and its trigger input erase the history without interrupting analysis.
 
-Hover the display for frequency, musical note, and displayed level. Use the mouse wheel to zoom around the
-cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-22 kHz
-range. At lower sample rates, the upper limit follows Nyquist. Shift-wheel zooms time around the cursor
-and Shift-drag pans time. The time-ruler gutter accepts
-the same gestures without Shift; double-click it to return to live and restore the configured duration.
+Hover the display for frequency, musical note, and displayed level. Use Shift-wheel to zoom the frequency
+range around the cursor, drag along the frequency axis to pan, and double-click to restore the full
+20 Hz-to-22 kHz range. At lower sample rates, the upper limit follows Nyquist. Ordinary wheel scrolling
+is left to Rack. Shift-drag pans time; double-click the time-ruler gutter to return to live and restore
+the configured duration.
 These interactions remain available while frozen.
 
 ### **Context menu**
@@ -46,7 +46,8 @@ These interactions remain available while frozen.
   retained in the display; timing is based on processed samples, not the GUI frame rate.
 * **Polyphonic voice** selects one input channel from 1 to 16.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
-  horizontal flows it runs bottom-to-top.
+  horizontal flows it runs bottom-to-top. Frequency tick labels follow the destination edge, opposite
+  the edge where new data enters.
 * **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
 * **Palette** selects from 46 spectrogram color maps, including perceptually uniform options from
   CMasher and Matplotlib, plus Seaborn's Mako and Rocket. Every map fades from
