@@ -2,5 +2,5 @@
 <svg width="360" height="380" viewBox="0 0 360 380" xmlns="http://www.w3.org/2000/svg">
   <rect width="360" height="380" fill="#909090"/>
   <path d="M0 25h360M0 373h360" stroke="#ecedf1" stroke-width=".8"/>
-  <rect x="4" y="26" width="352" height="280" rx="2" fill="#303336" stroke="#d9dcdf" stroke-opacity=".5"/>
+  <rect x="0" y="26" width="360" height="280" fill="#303336"/>
 </svg>

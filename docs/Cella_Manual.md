@@ -32,8 +32,7 @@ Hover the display for frequency, musical note, level, and age. Use the mouse whe
 cursor, drag along the frequency axis to pan, and double-click to restore the full 20 Hz-to-Nyquist
 range. Shift-wheel zooms time around the cursor and Shift-drag pans time. The time-ruler gutter accepts
 the same gestures without Shift; double-click it to return to live and restore the configured duration.
-Drag the color legend vertically to adjust the display floor. These interactions remain available while
-frozen.
+These interactions remain available while frozen.
 
 ### **Context menu**
 

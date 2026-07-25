@@ -16,17 +16,13 @@ using namespace cella::waterfall;
 
 namespace {
 
-constexpr float DISPLAY_X = 5.f;
-constexpr float DISPLAY_Y = 27.f;
-constexpr float DISPLAY_WIDTH = 350.f;
-constexpr float DISPLAY_HEIGHT = 278.f;
+constexpr float DISPLAY_X = 0.f;
+constexpr float DISPLAY_Y = 26.f;
+constexpr float DISPLAY_WIDTH = 360.f;
+constexpr float DISPLAY_HEIGHT = 280.f;
 constexpr float RANGE_DEFAULT_DB = -100.f;
 constexpr float RANGE_MIN_DB = -140.f;
 constexpr float RANGE_MAX_DB = -40.f;
-
-const char* const CHANNEL_NAMES[] = {"L", "R", "Mono", "Mid", "Side"};
-const char* const WINDOW_NAMES[] = {"Hann", "Blackman-Harris", "Flat-top"};
-const char* const QUALITY_NAMES[] = {"15 Hz", "30 Hz", "60 Hz"};
 
 int getJsonInt(json_t* root, const char* key, int minimum, int maximum, int fallback) {
     json_t* value = json_object_get(root, key);
@@ -785,7 +781,6 @@ struct WaterfallOverlay : TransparentWidget {
     Waterfall* module = NULL;
     WaterfallDisplay* display = NULL;
     bool hovered = false;
-    bool draggingLegend = false;
     bool draggingTime = false;
     math::Vec cursor;
 
@@ -813,26 +808,6 @@ struct WaterfallOverlay : TransparentWidget {
         return isVerticalFlow(flow()) ? position.x < 40.f : position.y > box.size.y - 18.f;
     }
 
-    void drawStatus(const DrawArgs& args) {
-        const int mode = module ? clampValue(static_cast<int>(std::lround(module->params[Waterfall::MODE_PARAM].getValue())),
-                                             0, 4)
-                                : 2;
-        const int fft = module ? clampValue(module->fftSizeSetting.load(), 0, 4) : 2;
-        const int window = module ? clampValue(module->windowSetting.load(), 0, 2) : 0;
-        const int quality = module ? clampValue(module->qualitySetting.load(), 0, 2) : 1;
-        const float range = module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB;
-        const bool frozen = module && module->frozen.load();
-        const float retained = display ? display->timeline.retainedDuration() : 8.f;
-        const std::string status = rack::string::f(
-            "%s  %d %s  %s  %.1fs  %.0f..0 dBFS%s%s", CHANNEL_NAMES[mode], FFT_SIZES[fft],
-            WINDOW_NAMES[window], QUALITY_NAMES[quality], retained, range, frozen ? "  FROZEN" : "",
-            display && !display->timeline.followsLive() ? "  DETACHED" : "");
-        nvgFontSize(args.vg, 9.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(args.vg, frozen ? nvgRGB(255, 196, 92) : nvgRGB(186, 198, 202));
-        nvgText(args.vg, 7.f, 5.f, status.c_str(), NULL);
-    }
-
     void drawFrequencyGuide(const DrawArgs& args, float frequency, const std::string& label, bool secondary,
                             float& lastLabelPosition) {
         if (frequency < MIN_FREQUENCY_HZ || frequency > nyquist()) return;
@@ -844,12 +819,12 @@ struct WaterfallOverlay : TransparentWidget {
         nvgStrokeWidth(args.vg, secondary ? 0.45f : 0.7f);
         nvgBeginPath(args.vg);
         if (isVerticalFlow(flow())) {
-            nvgMoveTo(args.vg, position, 18.f);
+            nvgMoveTo(args.vg, position, 0.f);
             nvgLineTo(args.vg, position, box.size.y);
         } else {
             const float y = box.size.y - position;
             nvgMoveTo(args.vg, 0.f, y);
-            nvgLineTo(args.vg, box.size.x - 10.f, y);
+            nvgLineTo(args.vg, box.size.x, y);
         }
         nvgStroke(args.vg);
         if (label.empty() || std::fabs(position - lastLabelPosition) < 31.f) return;
@@ -857,11 +832,29 @@ struct WaterfallOverlay : TransparentWidget {
         nvgFillColor(args.vg, secondary ? nvgRGBA(180, 198, 204, 95) : nvgRGBA(190, 205, 210, 155));
         nvgFontSize(args.vg, 8.f);
         if (isVerticalFlow(flow())) {
-            nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
-            nvgText(args.vg, position, box.size.y - 2.f, label.c_str(), NULL);
+            float labelX = position;
+            int alignment = NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM;
+            if (position < 15.f) {
+                labelX = 2.f;
+                alignment = NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM;
+            } else if (position > box.size.x - 15.f) {
+                labelX = box.size.x - 2.f;
+                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
+            }
+            nvgTextAlign(args.vg, alignment);
+            nvgText(args.vg, labelX, box.size.y - 2.f, label.c_str(), NULL);
         } else {
-            nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-            nvgText(args.vg, box.size.x - 3.f, box.size.y - position, label.c_str(), NULL);
+            float labelY = box.size.y - position;
+            int alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE;
+            if (labelY < 7.f) {
+                labelY = 2.f;
+                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_TOP;
+            } else if (labelY > box.size.y - 7.f) {
+                labelY = box.size.y - 2.f;
+                alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
+            }
+            nvgTextAlign(args.vg, alignment);
+            nvgText(args.vg, box.size.x - 3.f, labelY, label.c_str(), NULL);
         }
     }
 
@@ -916,18 +909,36 @@ struct WaterfallOverlay : TransparentWidget {
             if (isVerticalFlow(flow())) {
                 nvgMoveTo(args.vg, 0.f, y);
                 nvgLineTo(args.vg, box.size.x, y);
-                nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+                float labelY = y;
+                int alignment = NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE;
+                if (y < 7.f) {
+                    labelY = 2.f;
+                    alignment = NVG_ALIGN_LEFT | NVG_ALIGN_TOP;
+                } else if (y > box.size.y - 7.f) {
+                    labelY = box.size.y - 2.f;
+                    alignment = NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM;
+                }
+                nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
                 const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
-                nvgText(args.vg, 2.f, y, label.c_str(), NULL);
+                nvgText(args.vg, 2.f, labelY, label.c_str(), NULL);
             } else {
                 const float displayX = x * box.size.x;
-                nvgMoveTo(args.vg, displayX, 18.f);
+                nvgMoveTo(args.vg, displayX, 0.f);
                 nvgLineTo(args.vg, displayX, box.size.y);
-                nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+                float labelX = displayX;
+                int alignment = NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM;
+                if (displayX < 15.f) {
+                    labelX = 2.f;
+                    alignment = NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM;
+                } else if (displayX > box.size.x - 15.f) {
+                    labelX = box.size.x - 2.f;
+                    alignment = NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM;
+                }
+                nvgTextAlign(args.vg, alignment);
                 nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
                 const std::string label = timeLabel(ticks[i].ageSeconds, display->timeline.visibleSpan());
-                nvgText(args.vg, displayX, box.size.y - 1.f, label.c_str(), NULL);
+                nvgText(args.vg, labelX, box.size.y - 1.f, label.c_str(), NULL);
             }
             nvgStroke(args.vg);
         }
@@ -955,40 +966,16 @@ struct WaterfallOverlay : TransparentWidget {
                 nvgText(args.vg, box.size.x - 3.f, y - 1.f, label.c_str(), NULL);
             } else {
                 const float displayX = x * box.size.x;
-                nvgMoveTo(args.vg, displayX, 18.f);
+                nvgMoveTo(args.vg, displayX, 0.f);
                 nvgLineTo(args.vg, displayX, box.size.y);
                 nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
                 nvgFillColor(args.vg, color);
                 const std::string label = rack::string::f("M%02u", markers[i].sequence);
-                nvgText(args.vg, displayX + 2.f, 20.f, label.c_str(), NULL);
+                const float labelX = std::min(displayX + 2.f, box.size.x - 24.f);
+                nvgText(args.vg, labelX, 2.f, label.c_str(), NULL);
             }
             nvgStroke(args.vg);
         }
-    }
-
-    void drawLegend(const DrawArgs& args) {
-        const float floorDb = module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB;
-        const float x = box.size.x - 7.f, top = 22.f, height = 68.f;
-        NVGcolor low = nvgRGB(5, 3, 18), high = nvgRGB(255, 224, 88);
-        const int palette = module ? module->paletteSetting.load() : 0;
-        if (palette == static_cast<int>(Palette::GRAYSCALE)) {
-            low = nvgRGB(3, 3, 3);
-            high = nvgRGB(248, 248, 248);
-        } else if (palette == static_cast<int>(Palette::VIRIDIS)) {
-            low = nvgRGB(68, 1, 84);
-            high = nvgRGB(253, 231, 37);
-        }
-        nvgBeginPath(args.vg);
-        nvgRect(args.vg, x, top, 4.f, height);
-        nvgFillPaint(args.vg, nvgLinearGradient(args.vg, x, top + height, x, top, low, high));
-        nvgFill(args.vg);
-        nvgFontSize(args.vg, 7.f);
-        nvgFillColor(args.vg, nvgRGBA(220, 224, 225, 170));
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-        nvgText(args.vg, x - 2.f, top, "0", NULL);
-        nvgTextAlign(args.vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        const std::string floor = rack::string::f("%.0f", floorDb);
-        nvgText(args.vg, x - 2.f, top + height, floor.c_str(), NULL);
     }
 
     void drawCursor(const DrawArgs& args) {
@@ -1002,7 +989,7 @@ struct WaterfallOverlay : TransparentWidget {
         nvgStrokeWidth(args.vg, 0.8f);
         nvgStrokeColor(args.vg, nvgRGBA(255, 255, 255, 150));
         nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, cursor.x, 18.f);
+        nvgMoveTo(args.vg, cursor.x, 0.f);
         nvgLineTo(args.vg, cursor.x, box.size.y);
         nvgMoveTo(args.vg, 0.f, cursor.y);
         nvgLineTo(args.vg, box.size.x, cursor.y);
@@ -1054,8 +1041,6 @@ struct WaterfallOverlay : TransparentWidget {
         nvgSave(args.vg);
         drawGrid(args);
         drawMarkers(args);
-        drawStatus(args);
-        drawLegend(args);
         drawCursor(args);
         nvgRestore(args.vg);
     }
@@ -1072,9 +1057,7 @@ struct WaterfallOverlay : TransparentWidget {
     void onButton(const event::Button& event) override {
         if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT) {
             cursor = event.pos;
-            draggingLegend = (event.mods & RACK_MOD_MASK) == 0 && event.pos.x >= box.size.x - 14.f &&
-                             event.pos.y >= 18.f && event.pos.y <= 102.f;
-            draggingTime = !draggingLegend && (inTimeGutter(event.pos) || (event.mods & GLFW_MOD_SHIFT));
+            draggingTime = inTimeGutter(event.pos) || (event.mods & GLFW_MOD_SHIFT);
             event.consume(this);
         }
     }
@@ -1084,12 +1067,7 @@ struct WaterfallOverlay : TransparentWidget {
         cursor += event.mouseDelta.div(zoom);
         cursor.x = clampValue(cursor.x, 0.f, box.size.x);
         cursor.y = clampValue(cursor.y, 0.f, box.size.y);
-        if (draggingLegend) {
-            module->params[Waterfall::RANGE_PARAM].setValue(
-                clampValue(module->params[Waterfall::RANGE_PARAM].getValue() -
-                               event.mouseDelta.y / std::max(zoom, 0.01f) * 0.4f,
-                           RANGE_MIN_DB, RANGE_MAX_DB));
-        } else if (draggingTime) {
+        if (draggingTime) {
             const float axisDelta = isVerticalFlow(flow()) ? event.mouseDelta.y / (zoom * box.size.y)
                                                            : -event.mouseDelta.x / (zoom * box.size.x);
             display->timeline.pan(axisDelta * display->timeline.visibleSpan());
@@ -1104,7 +1082,7 @@ struct WaterfallOverlay : TransparentWidget {
         }
     }
     void onDragEnd(const event::DragEnd& event) override {
-        draggingLegend = draggingTime = false;
+        draggingTime = false;
         TransparentWidget::onDragEnd(event);
     }
     void onHoverScroll(const event::HoverScroll& event) override {
@@ -1142,11 +1120,45 @@ struct WaterfallOverlay : TransparentWidget {
 
 struct WaterfallBezel : TransparentWidget {
     void draw(const DrawArgs& args) override {
+        const float width = box.size.x;
+        const float height = box.size.y;
+        nvgSave(args.vg);
+
         nvgBeginPath(args.vg);
-        nvgRect(args.vg, 0.5f, 0.5f, box.size.x - 1.f, box.size.y - 1.f);
-        nvgStrokeColor(args.vg, nvgRGB(14, 17, 19));
+        nvgMoveTo(args.vg, 0.f, -0.5f);
+        nvgLineTo(args.vg, width, -0.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(0.f, 0.f, 0.f, 0.24f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, height + 0.5f);
+        nvgLineTo(args.vg, width, height + 0.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.25f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, 2.5f);
+        nvgLineTo(args.vg, width, 2.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgMoveTo(args.vg, 0.f, height - 2.5f);
+        nvgLineTo(args.vg, width, height - 2.5f);
+        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
+        nvgStrokeWidth(args.vg, 1.f);
+        nvgStroke(args.vg);
+
+        nvgBeginPath(args.vg);
+        nvgRect(args.vg, 1.f, 1.f, std::max(width - 2.f, 0.f), std::max(height - 2.f, 0.f));
+        nvgStrokeColor(args.vg, nvgRGB(0x12, 0x12, 0x12));
         nvgStrokeWidth(args.vg, 2.f);
         nvgStroke(args.vg);
+
+        nvgRestore(args.vg);
     }
 };
 

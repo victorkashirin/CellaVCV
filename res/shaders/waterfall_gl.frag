@@ -17,9 +17,17 @@ const float CELLS = 512.0;
 const float INTERNAL_FLOOR = -160.0;
 const float INTERNAL_CEILING = 24.0;
 const float TRACE_DEPTH = 0.105;
+const float TRACE_EDGE_INSET = 0.008;
 
 float decodeDb(float encoded) {
     return mix(INTERNAL_FLOOR, INTERNAL_CEILING, encoded);
+}
+
+float traceAge(float db) {
+    // The zero-amplitude baseline is fixed against the outer display edge.
+    // Increasing signal level grows inward toward the history/trace divider.
+    float level = clamp((db - uRange.x) / max(uRange.y - uRange.x, 1.0), 0.0, 1.0);
+    return TRACE_EDGE_INSET + level * (TRACE_DEPTH - 2.0 * TRACE_EDGE_INSET);
 }
 
 vec2 logicalCoordinates(vec2 uv) {
@@ -126,24 +134,25 @@ void main() {
                                ? (floor(frequency * CELLS) + 0.5) / CELLS
                                : frequency;
     vec2 trace = texture2D(uTrace, vec2(clamp(traceFrequency, 0.0, 1.0), 0.5)).rg;
-    float current = clamp((decodeDb(trace.r) - uRange.x) / max(uRange.y - uRange.x, 1.0), 0.0, 1.0);
-    float peak = clamp((decodeDb(trace.g) - uRange.x) / max(uRange.y - uRange.x, 1.0), 0.0, 1.0);
+    float currentDb = decodeDb(trace.r);
+    float peakDb = decodeDb(trace.g);
     float pixelAge = uFlow < 2 ? uLogicalPixel.y : uLogicalPixel.x;
     float lineWidth = max(1.15 * pixelAge, 0.0012);
     if (uLiveTrace != 0) {
-        float currentAge = 0.008 + (1.0 - current) * (TRACE_DEPTH - 0.016);
+        float currentAge = traceAge(currentDb);
         float distance = abs(logical.y - currentAge);
         float glow = 1.0 - smoothstep(lineWidth * 1.2, lineWidth * 4.5, distance);
         float line = 1.0 - smoothstep(lineWidth * 0.35, lineWidth * 1.3, distance);
         color = mix(color, vec3(1.0, 0.98, 0.90), line * 0.93 + glow * 0.12);
         if (uLiveTrace == 2) {
-            float fill = step(currentAge, logical.y) * step(logical.y, TRACE_DEPTH);
-            float gradient = clamp((TRACE_DEPTH - logical.y) / max(TRACE_DEPTH - currentAge, 0.001), 0.0, 1.0);
+            float fill = step(TRACE_EDGE_INSET, logical.y) * step(logical.y, currentAge);
+            float gradient =
+                clamp((currentAge - logical.y) / max(currentAge - TRACE_EDGE_INSET, 0.001), 0.0, 1.0);
             color = mix(color, vec3(0.95, 0.88, 0.58), fill * gradient * 0.10);
         }
     }
     if (uPeakHold != 0) {
-        float peakAge = 0.008 + (1.0 - peak) * (TRACE_DEPTH - 0.016);
+        float peakAge = traceAge(peakDb);
         float peakLine = 1.0 - smoothstep(lineWidth * 0.4, lineWidth * 1.5, abs(logical.y - peakAge));
         color = mix(color, vec3(0.30, 0.95, 1.0), peakLine * 0.84);
     }
