@@ -69,7 +69,7 @@ struct WaterfallAnalyzer::Kernel {
     int hopSize = 1;
     bool analyzed = false;
 
-    void reset(float sampleRate, FftOverlap overlap) {
+    void reset(float sampleRate, FftOverlap overlap, FrequencyBinScale frequencyBins) {
         std::fill(capture.begin(), capture.end(), 0.f);
         std::fill(work.begin(), work.end(), 0.f);
         std::fill(fftOutput.begin(), fftOutput.end(), 0.f);
@@ -80,12 +80,11 @@ struct WaterfallAnalyzer::Kernel {
         samplesSinceAnalysis = 0;
         analyzed = false;
         hopSize = effectiveFftHopSize(size, sampleRate, overlap);
-        updateCellMapping(sampleRate);
+        updateCellMapping(sampleRate, frequencyBins);
     }
 
-    void updateCellMapping(float sampleRate) {
+    void updateCellMapping(float sampleRate, FrequencyBinScale frequencyBins) {
         const float maximumFrequency = displayMaximumFrequency(sampleRate);
-        const float ratio = maximumFrequency / MIN_FREQUENCY_HZ;
         const float binWidth = sampleRate / static_cast<float>(size);
         const int nyquistBin = size / 2;
         const int maximumBin =
@@ -93,14 +92,17 @@ struct WaterfallAnalyzer::Kernel {
         for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
             const float lowFraction = static_cast<float>(cell) / NUM_FREQUENCY_CELLS;
             const float highFraction = static_cast<float>(cell + 1) / NUM_FREQUENCY_CELLS;
-            const float lowFrequency = MIN_FREQUENCY_HZ * std::pow(ratio, lowFraction);
-            const float highFrequency = MIN_FREQUENCY_HZ * std::pow(ratio, highFraction);
+            const float lowFrequency =
+                frequencyHzForCoordinate(lowFraction, maximumFrequency, frequencyBins);
+            const float highFrequency =
+                frequencyHzForCoordinate(highFraction, maximumFrequency, frequencyBins);
             int lowBin = static_cast<int>(std::ceil(lowFrequency / binWidth));
             int highBin = static_cast<int>(std::floor(highFrequency / binWidth));
             lowBin = clampValue(lowBin, 1, maximumBin);
             highBin = clampValue(highBin, 1, maximumBin);
             if (highBin < lowBin) {
-                const float centerFrequency = std::sqrt(lowFrequency * highFrequency);
+                const float centerFrequency = frequencyHzForCoordinate(
+                    0.5f * (lowFraction + highFraction), maximumFrequency, frequencyBins);
                 lowBin = highBin =
                     clampValue(static_cast<int>(std::lround(centerFrequency / binWidth)), 1, maximumBin);
             }
@@ -187,17 +189,20 @@ void WaterfallAnalyzer::configure(const WaterfallConfig& newConfig) {
         static_cast<Quality>(clampValue(static_cast<int>(config.quality), 0, static_cast<int>(Quality::COUNT) - 1));
     config.channelMode = static_cast<ChannelMode>(
         clampValue(static_cast<int>(config.channelMode), 0, static_cast<int>(ChannelMode::COUNT) - 1));
+    config.frequencyBins = static_cast<FrequencyBinScale>(
+        clampValue(static_cast<int>(config.frequencyBins), 0,
+                   static_cast<int>(FrequencyBinScale::COUNT) - 1));
     config.polyChannel = clampValue(config.polyChannel, 0, 15);
     config.sampleRate = std::max(config.sampleRate, 1000.f);
 
     const bool analysisChanged =
         !wasConfigured || oldConfig.fftSize != config.fftSize || oldConfig.window != config.window ||
         oldConfig.fftOverlap != config.fftOverlap || oldConfig.channelMode != config.channelMode ||
-        oldConfig.polyChannel != config.polyChannel || oldConfig.sampleRate != config.sampleRate ||
-        oldConfig.generation != config.generation;
+        oldConfig.frequencyBins != config.frequencyBins || oldConfig.polyChannel != config.polyChannel ||
+        oldConfig.sampleRate != config.sampleRate || oldConfig.generation != config.generation;
     activeKernel = kernels[static_cast<size_t>(fftIndex)].get();
     if (analysisChanged) {
-        activeKernel->reset(config.sampleRate, config.fftOverlap);
+        activeKernel->reset(config.sampleRate, config.fftOverlap, config.frequencyBins);
         processedSamples = 0;
         latestSpectrumSample = 0;
         haveSpectrum = false;

@@ -81,6 +81,7 @@ enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
 enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };
 enum class LiveTraceMode : int { OFF, LINE, LINE_FILL, COUNT };
 enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COMBINED, COUNT };
+enum class FrequencyBinScale : int { LOGARITHMIC, LINEAR, MEL, COUNT };
 enum class FrequencySmoothing : int {
     NONE,
     OCTAVE_1_48,
@@ -144,6 +145,41 @@ inline float displayMaximumFrequency(float sampleRate) {
         std::isfinite(sampleRate) ? std::max(sampleRate, MIN_FREQUENCY_HZ * 2.02f) : 48000.f;
     return std::max(MIN_FREQUENCY_HZ * 1.01f,
                     std::min(safeSampleRate * 0.5f, MAX_DISPLAY_FREQUENCY_HZ));
+}
+
+inline float frequencyCoordinateForHz(float frequency, float maximumFrequency, FrequencyBinScale scale) {
+    const float safeMaximum = std::max(maximumFrequency, MIN_FREQUENCY_HZ * 1.01f);
+    const float safeFrequency = clampValue(frequency, MIN_FREQUENCY_HZ, safeMaximum);
+    switch (scale) {
+        case FrequencyBinScale::LINEAR:
+            return (safeFrequency - MIN_FREQUENCY_HZ) / (safeMaximum - MIN_FREQUENCY_HZ);
+        case FrequencyBinScale::MEL: {
+            const float minimumMel = std::log1p(MIN_FREQUENCY_HZ / 700.f);
+            const float maximumMel = std::log1p(safeMaximum / 700.f);
+            return (std::log1p(safeFrequency / 700.f) - minimumMel) /
+                   std::max(maximumMel - minimumMel, 1e-8f);
+        }
+        default:
+            return std::log(safeFrequency / MIN_FREQUENCY_HZ) /
+                   std::log(safeMaximum / MIN_FREQUENCY_HZ);
+    }
+}
+
+inline float frequencyHzForCoordinate(float coordinate, float maximumFrequency, FrequencyBinScale scale) {
+    const float safeMaximum = std::max(maximumFrequency, MIN_FREQUENCY_HZ * 1.01f);
+    const float normalized = clampValue(coordinate, 0.f, 1.f);
+    switch (scale) {
+        case FrequencyBinScale::LINEAR:
+            return MIN_FREQUENCY_HZ + normalized * (safeMaximum - MIN_FREQUENCY_HZ);
+        case FrequencyBinScale::MEL: {
+            const float minimumMel = std::log1p(MIN_FREQUENCY_HZ / 700.f);
+            const float maximumMel = std::log1p(safeMaximum / 700.f);
+            return 700.f * std::expm1(minimumMel + normalized * (maximumMel - minimumMel));
+        }
+        default:
+            return MIN_FREQUENCY_HZ *
+                   std::pow(safeMaximum / MIN_FREQUENCY_HZ, normalized);
+    }
 }
 
 inline int requestedFftHopSize(int fftSize, FftOverlap overlap) {
@@ -262,6 +298,7 @@ struct WaterfallConfig {
     FftOverlap fftOverlap = FftOverlap::PERCENT_75;
     Quality quality = Quality::NORMAL;
     ChannelMode channelMode = ChannelMode::MONO;
+    FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC;
     int polyChannel = 0;
     float sampleRate = 48000.f;
     uint64_t generation = 1;

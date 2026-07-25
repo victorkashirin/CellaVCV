@@ -19,11 +19,16 @@ float powerToDb(float power) {
 }
 }  // namespace
 
-void FrequencySmoothingKernel::configure(FrequencySmoothing smoothing, float sampleRate) {
+void FrequencySmoothingKernel::configure(FrequencySmoothing smoothing, float sampleRate,
+                                         FrequencyBinScale frequencyBins) {
     const float width = frequencySmoothingOctaves(smoothing);
-    const float cellOctaves =
-        std::log2(displayMaximumFrequency(sampleRate) / MIN_FREQUENCY_HZ) /
-        NUM_FREQUENCY_CELLS;
+    const float maximumFrequency = displayMaximumFrequency(sampleRate);
+    std::array<float, NUM_FREQUENCY_CELLS> centerOctaves;
+    for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+        const float coordinate = (static_cast<float>(cell) + 0.5f) / NUM_FREQUENCY_CELLS;
+        centerOctaves[static_cast<size_t>(cell)] =
+            std::log2(frequencyHzForCoordinate(coordinate, maximumFrequency, frequencyBins));
+    }
     for (int center = 0; center < NUM_FREQUENCY_CELLS; ++center) {
         TapRange& range = ranges[static_cast<size_t>(center)];
         range.weights.clear();
@@ -32,16 +37,29 @@ void FrequencySmoothingKernel::configure(FrequencySmoothing smoothing, float sam
             range.weights.push_back(1.f);
             continue;
         }
-        // Cell centers are uniformly spaced in log-frequency. Treat the
-        // selected fractional octave as the Gaussian FWHM.
-        const float sigmaCells = std::max(width / (2.35482f * cellOctaves), 0.35f);
-        const int radius = std::max(1, static_cast<int>(std::ceil(3.f * sigmaCells)));
-        range.first = std::max(0, center - radius);
-        const int last = std::min(NUM_FREQUENCY_CELLS - 1, center + radius);
+        // Treat the selected fractional octave as the Gaussian FWHM. Weight
+        // in log-frequency even when the stored cells use a linear or Mel axis.
+        const float sigmaOctaves = width / 2.35482f;
+        const float cutoff = 3.f * sigmaOctaves;
+        int first = center;
+        int last = center;
+        while (first > 0 &&
+               centerOctaves[static_cast<size_t>(center)] -
+                       centerOctaves[static_cast<size_t>(first - 1)] <=
+                   cutoff)
+            --first;
+        while (last + 1 < NUM_FREQUENCY_CELLS &&
+               centerOctaves[static_cast<size_t>(last + 1)] -
+                       centerOctaves[static_cast<size_t>(center)] <=
+                   cutoff)
+            ++last;
+        range.first = first;
         float sum = 0.f;
-        for (int cell = range.first; cell <= last; ++cell) {
-            const float distance = static_cast<float>(cell - center);
-            const float weight = std::exp(-0.5f * distance * distance / (sigmaCells * sigmaCells));
+        for (int cell = first; cell <= last; ++cell) {
+            const float distance = centerOctaves[static_cast<size_t>(cell)] -
+                                   centerOctaves[static_cast<size_t>(center)];
+            const float weight =
+                std::exp(-0.5f * distance * distance / (sigmaOctaves * sigmaOctaves));
             range.weights.push_back(weight);
             sum += weight;
         }

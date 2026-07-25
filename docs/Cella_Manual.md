@@ -44,22 +44,23 @@ These interactions remain available while frozen.
   small FFT sizes and high sample rates, the analyzer may reduce the effective overlap to control CPU.
 * **History rate** selects 15, 30, or 60 rows per second. History time is based on processed samples,
   not the GUI frame rate.
-* **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
 * **Polyphonic voice** selects one input channel from 1 to 16.
-* **Rendering** selects exact Precise cells or gap-aware Smooth interpolation. This does not change
-  measured or stored values.
-* **Live trace** selects Off, Line, or Line + Fill independently of the peak trace.
-* **Frequency scale** selects Hz, octave, musical, or combined guides.
-* **Frequency smoothing** selects None through 1/3-octave power-domain smoothing. It is reversible and
-  rebuilt from retained raw rows.
-* **Show markers** hides marker overlays without deleting their timestamps.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.
+* **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
 * **Palette** selects from 47 spectrogram color maps, including perceptually uniform options from
   CMasher and Matplotlib, Seaborn's Mako and Rocket, plus the original Heat map. Every map fades from
   black at the display floor so silence remains visually quiet. The menu groups maps by source, with
   the larger CMasher collection split into short alphabetical ranges.
-* **Peak trace** selects Off, Decay, or Infinite hold.
+* **Rendering** selects exact Precise cells or gap-aware Smooth interpolation. This does not change
+  measured or stored values.
+* **Trace** contains the independent Live (Off, Line, or Line + Fill) and Peak (Off, Decay, or
+  Infinite hold) settings.
+* **Frequency** contains guide Scale, fractional-octave Smoothing, Bins, and frequency-zoom reset.
+  Bins selects logarithmic (default), linear-Hz, or Mel perceptual spacing. Changing Bins starts a
+  fresh history because it changes how FFT energy is assigned across the 512 display cells.
+* **Markers** contains visibility and opacity controls. Hiding markers does not delete their
+  timestamps.
 
 
 # **Frequency Analyzer**

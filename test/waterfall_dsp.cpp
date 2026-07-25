@@ -36,12 +36,14 @@ void requireNear(float actual, float expected, float tolerance, const std::strin
 }
 
 float runTone(WaterfallAnalyzer& analyzer, FftSize fftSize, WindowFunction window, float peakAmplitude,
-              uint64_t generation, int* peakCell = NULL, float sampleRate = 48000.f) {
+              uint64_t generation, int* peakCell = NULL, float sampleRate = 48000.f,
+              FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC) {
     WaterfallConfig config;
     config.fftSize = fftSize;
     config.window = window;
     config.quality = Quality::HIGH;
     config.sampleRate = sampleRate;
+    config.frequencyBins = frequencyBins;
     config.generation = generation;
     analyzer.configure(config);
 
@@ -65,11 +67,12 @@ float runTone(WaterfallAnalyzer& analyzer, FftSize fftSize, WindowFunction windo
     }
     if (peakCell) *peakCell = maximumCell;
 
-    const float expectedCoordinate = std::log(frequency / MIN_FREQUENCY_HZ) /
-                                     std::log(displayMaximumFrequency(config.sampleRate) / MIN_FREQUENCY_HZ);
+    const float expectedCoordinate =
+        frequencyCoordinateForHz(frequency, displayMaximumFrequency(config.sampleRate),
+                                 config.frequencyBins);
     const int expectedCell = static_cast<int>(std::lround(expectedCoordinate * (NUM_FREQUENCY_CELLS - 1)));
     require(std::abs(maximumCell - expectedCell) <= 3,
-            "bin-centred tone maps to its logarithmic frequency cell (actual " +
+            "bin-centred tone maps to its selected frequency cell (actual " +
                 std::to_string(maximumCell) + ", expected " + std::to_string(expectedCell) + ")");
     return maximumDb;
 }
@@ -149,6 +152,19 @@ void testCalibrationAndMapping() {
                 "display is capped at 22 kHz near CD sample rate");
     requireNear(displayMaximumFrequency(88200.f), 22000.f, 1e-6f,
                 "display remains capped at 22 kHz at high sample rates");
+    for (int scale = 0; scale < static_cast<int>(FrequencyBinScale::COUNT); ++scale) {
+        const FrequencyBinScale frequencyBins = static_cast<FrequencyBinScale>(scale);
+        const float frequencies[] = {20.f, 100.f, 1000.f, 10000.f, 22000.f};
+        float previousCoordinate = -1.f;
+        for (float frequency : frequencies) {
+            const float coordinate =
+                frequencyCoordinateForHz(frequency, 22000.f, frequencyBins);
+            require(coordinate >= previousCoordinate, "frequency-bin coordinate is monotonic");
+            requireNear(frequencyHzForCoordinate(coordinate, 22000.f, frequencyBins),
+                        frequency, 0.02f, "frequency-bin coordinate round trip");
+            previousCoordinate = coordinate;
+        }
+    }
 
     WaterfallAnalyzer analyzer;
     uint64_t generation = 10;
@@ -162,6 +178,13 @@ void testCalibrationAndMapping() {
     const float halfScale =
         runTone(analyzer, FftSize::FFT_4096, WindowFunction::HANN, 5.f * VOLTAGE_TO_FULL_SCALE, generation++);
     requireNear(halfScale, -6.0206f, 0.2f, "5 V peak reference is -6.02 dBFS");
+    for (int scale = 0; scale < static_cast<int>(FrequencyBinScale::COUNT); ++scale) {
+        const float measured = runTone(analyzer, FftSize::FFT_4096, WindowFunction::HANN, 1.f,
+                                       generation++, NULL, 48000.f,
+                                       static_cast<FrequencyBinScale>(scale));
+        requireNear(measured, 0.f, 0.25f,
+                    "calibration survives every frequency-bin scale");
+    }
 
     const float sampleRates[] = {44100.f, 48000.f, 96000.f, 192000.f};
     for (size_t index = 0; index < sizeof(sampleRates) / sizeof(sampleRates[0]); ++index) {
@@ -447,14 +470,17 @@ void testMarkersViewportAndTicks() {
 void testFrequencySmoothing() {
     SpectrumRow constant = makeTimelineRow(1600);
     constant.dbTenths.fill(quantizeDb(-48.f));
-    for (int mode = 0; mode < static_cast<int>(FrequencySmoothing::COUNT); ++mode) {
-        FrequencySmoothingKernel kernel;
-        kernel.configure(static_cast<FrequencySmoothing>(mode), 48000.f);
-        SpectrumRow output;
-        kernel.apply(constant, output);
-        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
-            requireNear(dequantizeDb(output.dbTenths[static_cast<size_t>(cell)]), -48.f, 0.11f,
-                        "frequency smoothing preserves constant power");
+    for (int bins = 0; bins < static_cast<int>(FrequencyBinScale::COUNT); ++bins) {
+        for (int mode = 0; mode < static_cast<int>(FrequencySmoothing::COUNT); ++mode) {
+            FrequencySmoothingKernel kernel;
+            kernel.configure(static_cast<FrequencySmoothing>(mode), 48000.f,
+                             static_cast<FrequencyBinScale>(bins));
+            SpectrumRow output;
+            kernel.apply(constant, output);
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
+                requireNear(dequantizeDb(output.dbTenths[static_cast<size_t>(cell)]), -48.f,
+                            0.11f, "frequency smoothing preserves constant power");
+        }
     }
 
     requireNear(interpolateNoOvershoot(-80.f, -20.f, 0.35f), -59.f, 1e-5f,

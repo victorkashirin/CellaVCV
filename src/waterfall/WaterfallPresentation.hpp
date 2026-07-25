@@ -10,7 +10,8 @@ namespace waterfall {
 
 class FrequencySmoothingKernel {
   public:
-    void configure(FrequencySmoothing smoothing, float sampleRate = 48000.f);
+    void configure(FrequencySmoothing smoothing, float sampleRate = 48000.f,
+                   FrequencyBinScale frequencyBins = FrequencyBinScale::LOGARITHMIC);
     void apply(const SpectrumRow& input, SpectrumRow& output) const;
 
   private:
