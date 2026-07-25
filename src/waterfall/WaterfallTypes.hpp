@@ -24,10 +24,7 @@ enum class FftSize : int { FFT_1024, FFT_2048, FFT_4096, FFT_8192, FFT_16384, CO
 enum class WindowFunction : int { HANN, BLACKMAN_HARRIS, FLAT_TOP, COUNT };
 enum class FftOverlap : int { NONE, PERCENT_25, PERCENT_50, PERCENT_75, PERCENT_87_5, PERCENT_93_75, COUNT };
 enum class Quality : int { ECONOMY, NORMAL, HIGH, COUNT };
-// Keep the first three values stable so patches saved by Waterfall Slice 1/2
-// continue to select the same palette.
 enum class Palette : int {
-    HEAT,
     GRAY,
     VIRIDIS,
     AMBER,

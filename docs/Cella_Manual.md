@@ -42,14 +42,14 @@ These interactions remain available while frozen.
 * **FFT overlap** selects None, 25%, 50%, 75%, 87.5%, or 93.75%. Higher overlap improves temporal
   coverage and transient continuity at increased CPU cost; 75% is the default. At combinations of
   small FFT sizes and high sample rates, the analyzer may reduce the effective overlap to control CPU.
-* **History rate** selects 15, 30, or 60 rows per second. History time is based on processed samples,
-  not the GUI frame rate.
+* **Time detail** selects 15, 30, or 60 history rows per second. It controls the temporal detail
+  retained in the display; timing is based on processed samples, not the GUI frame rate.
 * **Polyphonic voice** selects one input channel from 1 to 16.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.
 * **History duration** independently selects 2, 4, 8, 16, or 30 seconds of retained raw history.
-* **Palette** selects from 47 spectrogram color maps, including perceptually uniform options from
-  CMasher and Matplotlib, Seaborn's Mako and Rocket, plus the original Heat map. Every map fades from
+* **Palette** selects from 46 spectrogram color maps, including perceptually uniform options from
+  CMasher and Matplotlib, plus Seaborn's Mako and Rocket. Every map fades from
   black at the display floor so silence remains visually quiet. The menu groups maps by source, with
   the larger CMasher collection split into short alphabetical ranges.
 * **Rendering** selects exact Precise cells or gap-aware Smooth interpolation. This does not change

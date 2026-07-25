@@ -113,14 +113,10 @@ void testFlowTransforms() {
 }
 
 void testPaletteCatalog() {
-    require(static_cast<int>(Palette::HEAT) == 0 && static_cast<int>(Palette::GRAY) == 1 &&
-                static_cast<int>(Palette::VIRIDIS) == 2,
-            "legacy palette indices remain patch-compatible");
-    require(PALETTE_DEFINITIONS.size() == 47, "all requested color maps plus legacy Heat are available");
+    require(PALETTE_DEFINITIONS.size() == 46, "all supported color maps are available");
     const std::vector<std::string> names = paletteNames();
     require(names.size() == PALETTE_DEFINITIONS.size(), "palette menu names match palette definitions");
     std::array<bool, static_cast<int>(Palette::COUNT)> menuSeen = {};
-    menuSeen[static_cast<size_t>(Palette::HEAT)] = true;
     for (const PaletteMenuGroup& group : paletteMenuGroups()) {
         require(!std::string(group.name).empty() && !group.palettes.empty(), "palette menu groups are labeled");
         require(group.palettes.size() <= 14, "palette menu groups fit comfortably on screen");

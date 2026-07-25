@@ -22,12 +22,9 @@ struct PaletteDefinition {
 
 /**
  * Canonical sRGB samples from CMasher, Matplotlib, and Seaborn colormaps.
- * Heat is retained from the original Waterfall shader for patch compatibility.
  * The LUT builder adds a short black silence ramp, matching spectrogram use.
  */
 static const std::array<PaletteDefinition, static_cast<int>(Palette::COUNT)> PALETTE_DEFINITIONS = {{
-    {"Heat", {{0x03020B, 0x20032C, 0x3E054D, 0x5E0861, 0x860E4F, 0xAF143D,
-               0xD71A2B, 0xE54026, 0xF26721, 0xFF8E1C, 0xFFC269, 0xFFF6B8}}},
     {"Gray", {{0x000000, 0x171717, 0x2E2E2E, 0x454545, 0x5D5D5D, 0x747474,
                0x8B8B8B, 0xA2A2A2, 0xBABABA, 0xD1D1D1, 0xE8E8E8, 0xFFFFFF}}},
     {"Viridis", {{0x440154, 0x482173, 0x433E85, 0x38588C, 0x2D708E, 0x25858E,

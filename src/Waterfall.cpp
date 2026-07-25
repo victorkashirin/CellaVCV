@@ -86,7 +86,7 @@ struct Waterfall : Module {
     std::atomic<int> fftOverlapSetting{static_cast<int>(FftOverlap::PERCENT_75)};
     std::atomic<int> qualitySetting{static_cast<int>(Quality::NORMAL)};
     std::atomic<int> polyChannelSetting{0};
-    std::atomic<int> paletteSetting{static_cast<int>(Palette::HEAT)};
+    std::atomic<int> paletteSetting{static_cast<int>(Palette::INFERNO)};
     std::atomic<int> peakHoldSetting{static_cast<int>(PeakHold::DECAY)};
     std::atomic<int> flowSetting{static_cast<int>(FlowDirection::UP)};
     std::atomic<int> renderingStyleSetting{static_cast<int>(RenderingStyle::SMOOTH)};
@@ -256,7 +256,8 @@ struct Waterfall : Module {
                                         static_cast<int>(Quality::NORMAL)));
         polyChannelSetting.store(getJsonInt(root, "polyChannel", 0, 15, 0));
         paletteSetting.store(
-            getJsonInt(root, "palette", 0, static_cast<int>(Palette::COUNT) - 1, static_cast<int>(Palette::HEAT)));
+            getJsonInt(root, "palette", 0, static_cast<int>(Palette::COUNT) - 1,
+                       static_cast<int>(Palette::INFERNO)));
         peakHoldSetting.store(getJsonInt(root, "peakHold", 0, static_cast<int>(PeakHold::COUNT) - 1,
                                          static_cast<int>(PeakHold::DECAY)));
         flowSetting.store(getJsonInt(root, "flow", 0, static_cast<int>(FlowDirection::COUNT) - 1,
@@ -786,7 +787,7 @@ struct WaterfallDisplay : widget::OpenGlWidget {
                 resizeCaches(timeline.capacity());
             uploadDirtyData();
             const int palette =
-                clampValue(module ? module->paletteSetting.load() : static_cast<int>(Palette::HEAT), 0,
+                clampValue(module ? module->paletteSetting.load() : static_cast<int>(Palette::INFERNO), 0,
                            static_cast<int>(Palette::COUNT) - 1);
             renderer.uploadPalette(static_cast<Palette>(palette));
             glUseProgram(renderer.program);
@@ -1285,10 +1286,6 @@ struct WaterfallWidget : ModuleWidget {
             [=]() { return static_cast<size_t>(clampValue(waterfall->fftSizeSetting.load(), 0, 4)); },
             [=](size_t value) { waterfall->fftSizeSetting.store(static_cast<int>(value)); }));
         menu->addChild(createIndexSubmenuItem(
-            "Window", {"Hann", "Blackman-Harris", "Flat-top"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->windowSetting.load(), 0, 2)); },
-            [=](size_t value) { waterfall->windowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
             "FFT overlap", {"None", "25%", "50%", "75%", "87.5%", "93.75%"},
             [=]() {
                 return static_cast<size_t>(
@@ -1296,7 +1293,11 @@ struct WaterfallWidget : ModuleWidget {
             },
             [=](size_t value) { waterfall->fftOverlapSetting.store(static_cast<int>(value)); }));
         menu->addChild(createIndexSubmenuItem(
-            "History rate", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
+            "Window", {"Hann", "Blackman-Harris", "Flat-top"},
+            [=]() { return static_cast<size_t>(clampValue(waterfall->windowSetting.load(), 0, 2)); },
+            [=](size_t value) { waterfall->windowSetting.store(static_cast<int>(value)); }));
+        menu->addChild(createIndexSubmenuItem(
+            "Time detail", {"Economy · 15 rows/s", "Normal · 30 rows/s", "High · 60 rows/s"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->qualitySetting.load(), 0, 2)); },
             [=](size_t value) { waterfall->qualitySetting.store(static_cast<int>(value)); }));
         std::vector<std::string> channels;
@@ -1324,12 +1325,6 @@ struct WaterfallWidget : ModuleWidget {
             clampValue(waterfall->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
         menu->addChild(createSubmenuItem(
             "Palette", paletteDefinition(selectedPalette).name, [=](Menu* paletteMenu) {
-                paletteMenu->addChild(createCheckMenuItem(
-                    paletteDefinition(Palette::HEAT).name, "",
-                    [=]() { return waterfall->paletteSetting.load() == static_cast<int>(Palette::HEAT); },
-                    [=]() { waterfall->paletteSetting.store(static_cast<int>(Palette::HEAT)); },
-                    false, true));
-                paletteMenu->addChild(new MenuSeparator);
                 for (const PaletteMenuGroup& group : paletteMenuGroups()) {
                     const std::vector<Palette> palettes = group.palettes;
                     std::string activeName;
