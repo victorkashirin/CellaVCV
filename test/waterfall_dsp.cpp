@@ -1,6 +1,7 @@
 #include "../src/waterfall/WaterfallAnalyzer.hpp"
 #include "../src/waterfall/HistoryTimeline.hpp"
 #include "../src/waterfall/WaterfallPresentation.hpp"
+#include "../src/waterfall/WaterfallPalettes.hpp"
 #include "../src/waterfall/WaterfallTypes.hpp"
 
 #include <algorithm>
@@ -106,6 +107,39 @@ void testFlowTransforms() {
     requireNear(logicalFromScreen(FlowDirection::DOWN, 0.5f, 1.f).age, 0.f, 1e-6f, "down newest edge");
     requireNear(logicalFromScreen(FlowDirection::LEFT, 1.f, 0.5f).age, 0.f, 1e-6f, "left newest edge");
     requireNear(logicalFromScreen(FlowDirection::RIGHT, 0.f, 0.5f).age, 0.f, 1e-6f, "right newest edge");
+}
+
+void testPaletteCatalog() {
+    require(static_cast<int>(Palette::HEAT) == 0 && static_cast<int>(Palette::GRAY) == 1 &&
+                static_cast<int>(Palette::VIRIDIS) == 2,
+            "legacy palette indices remain patch-compatible");
+    require(PALETTE_DEFINITIONS.size() == 47, "all requested color maps plus legacy Heat are available");
+    const std::vector<std::string> names = paletteNames();
+    require(names.size() == PALETTE_DEFINITIONS.size(), "palette menu names match palette definitions");
+    std::array<bool, static_cast<int>(Palette::COUNT)> menuSeen = {};
+    menuSeen[static_cast<size_t>(Palette::HEAT)] = true;
+    for (const PaletteMenuGroup& group : paletteMenuGroups()) {
+        require(!std::string(group.name).empty() && !group.palettes.empty(), "palette menu groups are labeled");
+        require(group.palettes.size() <= 14, "palette menu groups fit comfortably on screen");
+        for (Palette palette : group.palettes) {
+            const int index = static_cast<int>(palette);
+            require(index >= 0 && index < static_cast<int>(Palette::COUNT) &&
+                        !menuSeen[static_cast<size_t>(index)],
+                    "palette menu contains every map exactly once");
+            menuSeen[static_cast<size_t>(index)] = true;
+        }
+    }
+    for (int palette = 0; palette < static_cast<int>(Palette::COUNT); ++palette) {
+        require(!names[static_cast<size_t>(palette)].empty(), "palette names are non-empty");
+        require(menuSeen[static_cast<size_t>(palette)], "palette menu does not omit a map");
+        const std::array<unsigned char, PALETTE_LUT_SIZE * 4> lut =
+            buildPaletteLut(static_cast<Palette>(palette));
+        require(lut[0] == 0 && lut[1] == 0 && lut[2] == 0 && lut[3] == 255,
+                "every palette begins at a black, opaque silence color");
+        const size_t last = static_cast<size_t>((PALETTE_LUT_SIZE - 1) * 4);
+        require(lut[last] != 0 || lut[last + 1] != 0 || lut[last + 2] != 0,
+                "every palette ends at a visible signal color");
+    }
 }
 
 void testCalibrationAndMapping() {
@@ -419,6 +453,7 @@ void operator delete[](void* pointer) noexcept {
 int main() {
     testChannelMath();
     testFlowTransforms();
+    testPaletteCatalog();
     testCalibrationAndMapping();
     testRowsAndFiniteValues();
     testNoiseCoverageAndTransientAggregation();

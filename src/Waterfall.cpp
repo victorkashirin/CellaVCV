@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "waterfall/HistoryTimeline.hpp"
 #include "waterfall/WaterfallAnalyzer.hpp"
+#include "waterfall/WaterfallPalettes.hpp"
 #include "waterfall/WaterfallPresentation.hpp"
 #include "waterfall/WaterfallTypes.hpp"
 
@@ -281,7 +282,9 @@ struct WaterfallRenderer {
     GLuint historyTexture = 0;
     GLuint traceTexture = 0;
     GLuint lookupTexture = 0;
+    GLuint paletteTexture = 0;
     int allocatedRows = 0;
+    int uploadedPalette = -1;
     GLint historyLocation = -1;
     GLint traceLocation = -1;
     GLint lookupLocation = -1;
@@ -355,6 +358,7 @@ struct WaterfallRenderer {
                 glGenTextures(1, &historyTexture);
                 glGenTextures(1, &traceTexture);
                 glGenTextures(1, &lookupTexture);
+                glGenTextures(1, &paletteTexture);
 
                 glBindTexture(GL_TEXTURE_2D, traceTexture);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -370,6 +374,13 @@ struct WaterfallRenderer {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TIME_LOOKUP_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+                glBindTexture(GL_TEXTURE_2D, paletteTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PALETTE_LUT_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
             } catch (const std::exception& exception) {
                 WARN("Waterfall shader resources could not be loaded: %s", exception.what());
                 return false;
@@ -385,16 +396,29 @@ struct WaterfallRenderer {
                          GL_UNSIGNED_BYTE, NULL);
             allocatedRows = requestedRows;
         }
-        return program && historyTexture && traceTexture && lookupTexture;
+        return program && historyTexture && traceTexture && lookupTexture && paletteTexture;
+    }
+
+    void uploadPalette(Palette palette) {
+        const int index = clampValue(static_cast<int>(palette), 0, static_cast<int>(Palette::COUNT) - 1);
+        if (uploadedPalette == index) return;
+        const std::array<unsigned char, PALETTE_LUT_SIZE * 4> lut =
+            buildPaletteLut(static_cast<Palette>(index));
+        glBindTexture(GL_TEXTURE_2D, paletteTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PALETTE_LUT_SIZE, 1, GL_RGBA, GL_UNSIGNED_BYTE, lut.data());
+        uploadedPalette = index;
     }
 
     void destroy() {
+        if (paletteTexture) glDeleteTextures(1, &paletteTexture);
         if (lookupTexture) glDeleteTextures(1, &lookupTexture);
         if (traceTexture) glDeleteTextures(1, &traceTexture);
         if (historyTexture) glDeleteTextures(1, &historyTexture);
         if (program) glDeleteProgram(program);
-        program = historyTexture = traceTexture = lookupTexture = 0;
+        program = historyTexture = traceTexture = lookupTexture = paletteTexture = 0;
         allocatedRows = 0;
+        uploadedPalette = -1;
         initializationAttempted = false;
     }
 };
@@ -689,7 +713,8 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         else
             seedPreview();
 
-        GLint oldProgram = 0, oldActiveTexture = 0, oldTexture0 = 0, oldTexture1 = 0, oldTexture2 = 0;
+        GLint oldProgram = 0, oldActiveTexture = 0, oldTexture0 = 0, oldTexture1 = 0, oldTexture2 = 0,
+              oldTexture3 = 0;
         GLint oldUnpackAlignment = 4;
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
@@ -700,6 +725,8 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture1);
         glActiveTexture(GL_TEXTURE2);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture2);
+        glActiveTexture(GL_TEXTURE3);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture3);
         glPushAttrib(GL_CURRENT_BIT | GL_ENABLE_BIT | GL_VIEWPORT_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT);
         const math::Vec framebuffer = getFramebufferSize();
         glViewport(0, 0, static_cast<GLsizei>(framebuffer.x), static_cast<GLsizei>(framebuffer.y));
@@ -713,6 +740,10 @@ struct WaterfallDisplay : widget::OpenGlWidget {
             if (renderer.allocatedRows == timeline.capacity() && dirtyRows.size() != static_cast<size_t>(timeline.capacity()))
                 resizeCaches(timeline.capacity());
             uploadDirtyData();
+            const int palette =
+                clampValue(module ? module->paletteSetting.load() : static_cast<int>(Palette::HEAT), 0,
+                           static_cast<int>(Palette::COUNT) - 1);
+            renderer.uploadPalette(static_cast<Palette>(palette));
             glUseProgram(renderer.program);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, renderer.historyTexture);
@@ -723,13 +754,15 @@ struct WaterfallDisplay : widget::OpenGlWidget {
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, renderer.lookupTexture);
             glUniform1i(renderer.lookupLocation, 2);
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, renderer.paletteTexture);
+            glUniform1i(renderer.paletteLocation, 3);
             glUniform1f(renderer.rowsLocation, static_cast<float>(timeline.capacity()));
             glUniform1i(renderer.flowLocation, module ? clampValue(module->flowSetting.load(), 0, 3) : 0);
             glUniform2f(renderer.viewLocation, module ? module->viewMinimum.load() : 0.f,
                         module ? module->viewMaximum.load() : 1.f);
             glUniform2f(renderer.rangeLocation,
                         module ? module->params[Waterfall::RANGE_PARAM].getValue() : RANGE_DEFAULT_DB, 0.f);
-            glUniform1i(renderer.paletteLocation, module ? clampValue(module->paletteSetting.load(), 0, 2) : 0);
             glUniform1i(renderer.peakHoldLocation, module ? clampValue(module->peakHoldSetting.load(), 0, 2) : 1);
             glUniform1i(renderer.liveTraceLocation, module ? clampValue(module->liveTraceSetting.load(), 0, 2) : 1);
             glUniform1i(renderer.styleLocation,
@@ -756,6 +789,8 @@ struct WaterfallDisplay : widget::OpenGlWidget {
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture1));
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture2));
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture3));
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
         glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
     }
@@ -1284,10 +1319,40 @@ struct WaterfallWidget : ModuleWidget {
             "Flow", {"Up", "Down", "Left", "Right"},
             [=]() { return static_cast<size_t>(clampValue(waterfall->flowSetting.load(), 0, 3)); },
             [=](size_t value) { waterfall->flowSetting.store(static_cast<int>(value)); }));
-        menu->addChild(createIndexSubmenuItem(
-            "Palette", {"Heat", "Grayscale", "Viridis (color-blind safe)"},
-            [=]() { return static_cast<size_t>(clampValue(waterfall->paletteSetting.load(), 0, 2)); },
-            [=](size_t value) { waterfall->paletteSetting.store(static_cast<int>(value)); }));
+        const Palette selectedPalette = static_cast<Palette>(
+            clampValue(waterfall->paletteSetting.load(), 0, static_cast<int>(Palette::COUNT) - 1));
+        menu->addChild(createSubmenuItem(
+            "Palette", paletteDefinition(selectedPalette).name, [=](Menu* paletteMenu) {
+                paletteMenu->addChild(createCheckMenuItem(
+                    paletteDefinition(Palette::HEAT).name, "",
+                    [=]() { return waterfall->paletteSetting.load() == static_cast<int>(Palette::HEAT); },
+                    [=]() { waterfall->paletteSetting.store(static_cast<int>(Palette::HEAT)); },
+                    false, true));
+                paletteMenu->addChild(new MenuSeparator);
+                for (const PaletteMenuGroup& group : paletteMenuGroups()) {
+                    const std::vector<Palette> palettes = group.palettes;
+                    std::string activeName;
+                    for (Palette palette : palettes) {
+                        if (palette == static_cast<Palette>(waterfall->paletteSetting.load()))
+                            activeName = paletteDefinition(palette).name;
+                    }
+                    paletteMenu->addChild(createSubmenuItem(
+                        group.name, activeName, [=](Menu* groupMenu) {
+                            for (Palette palette : palettes) {
+                                groupMenu->addChild(createCheckMenuItem(
+                                    paletteDefinition(palette).name, "",
+                                    [=]() {
+                                        return waterfall->paletteSetting.load() ==
+                                               static_cast<int>(palette);
+                                    },
+                                    [=]() {
+                                        waterfall->paletteSetting.store(static_cast<int>(palette));
+                                    },
+                                    false, true));
+                            }
+                        }));
+                }
+            }));
         menu->addChild(createMenuItem("Reset frequency zoom", "", [=]() {
             waterfall->viewMinimum.store(0.f);
             waterfall->viewMaximum.store(1.f);

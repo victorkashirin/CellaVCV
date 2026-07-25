@@ -22,7 +22,58 @@ enum class ChannelMode : int { LEFT, RIGHT, MONO, MID, SIDE, COUNT };
 enum class FftSize : int { FFT_1024, FFT_2048, FFT_4096, FFT_8192, FFT_16384, COUNT };
 enum class WindowFunction : int { HANN, BLACKMAN_HARRIS, FLAT_TOP, COUNT };
 enum class Quality : int { ECONOMY, NORMAL, HIGH, COUNT };
-enum class Palette : int { HEAT, GRAYSCALE, VIRIDIS, COUNT };
+// Keep the first three values stable so patches saved by Waterfall Slice 1/2
+// continue to select the same palette.
+enum class Palette : int {
+    HEAT,
+    GRAY,
+    VIRIDIS,
+    AMBER,
+    AMETHYST,
+    APPLE,
+    ARCTIC,
+    BUBBLEGUM,
+    CHROMA,
+    CIVIDIS,
+    COSMIC,
+    CUBEHELIX,
+    DUSK,
+    ECLIPSE,
+    EMBER,
+    EMERALD,
+    FALL,
+    FLAMINGO,
+    FREEZE,
+    GEM,
+    GHOSTLIGHT,
+    GOTHIC,
+    HORIZON,
+    INFERNO,
+    JUNGLE,
+    LAVENDER,
+    LILAC,
+    MAGMA,
+    MAKO,
+    NEON,
+    NUCLEAR,
+    OCEAN,
+    PEPPER,
+    PLASMA,
+    RAINFOREST,
+    ROCKET,
+    SAPPHIRE,
+    SAVANNA,
+    SEPIA,
+    SUNBURST,
+    SWAMP,
+    TORCH,
+    TOXIC,
+    TREE,
+    TROPICAL,
+    TURBO,
+    VOLTAGE,
+    COUNT
+};
 enum class PeakHold : int { OFF, DECAY, INFINITE, COUNT };
 enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
 enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };

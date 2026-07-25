@@ -53,7 +53,10 @@ These interactions remain available while frozen.
 * **Show markers** hides marker overlays without deleting their timestamps.
 * **Flow** selects Up, Down, Left, or Right. In vertical flows frequency runs left-to-right; in
   horizontal flows it runs bottom-to-top.
-* **Palette** selects Heat, Grayscale, or Viridis.
+* **Palette** selects from 47 spectrogram color maps, including perceptually uniform options from
+  CMasher and Matplotlib, Seaborn's Mako and Rocket, plus the original Heat map. Every map fades from
+  black at the display floor so silence remains visually quiet. The menu groups maps by source, with
+  the larger CMasher collection split into short alphabetical ranges.
 * **Peak trace** selects Off, Decay, or Infinite hold.
 
 
