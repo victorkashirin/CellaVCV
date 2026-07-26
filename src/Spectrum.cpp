@@ -993,9 +993,17 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     void draw(const DrawArgs& args) override {
         if (!module && args.fb) {
             drawPreviewNanoVg(args);
-            return;
         }
-        widget::OpenGlWidget::draw(args);
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        // Rack dims the normal module layer before drawing its light layer.
+        // Composite the OpenGL framebuffer as a light so Spectrum remains
+        // luminous when the rack brightness is reduced.
+        if (layer == 1) {
+            widget::OpenGlWidget::draw(args);
+        }
+        widget::OpenGlWidget::drawLayer(args, layer);
     }
 };
 
@@ -1322,12 +1330,25 @@ struct SpectrumOverlay : TransparentWidget {
         nvgText(args.vg, textX, textY, text.c_str(), NULL);
     }
 
-    void draw(const DrawArgs& args) override {
+    void drawOverlay(const DrawArgs& args) {
         nvgSave(args.vg);
         drawGrid(args);
         drawMarkers(args);
         drawCursor(args);
         nvgRestore(args.vg);
+    }
+
+    void draw(const DrawArgs& args) override {
+        if (!module && args.fb) {
+            drawOverlay(args);
+        }
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1) {
+            drawOverlay(args);
+        }
+        TransparentWidget::drawLayer(args, layer);
     }
 
     void onHover(const event::Hover& event) override {
@@ -1399,7 +1420,7 @@ struct SpectrumOverlay : TransparentWidget {
 };
 
 struct SpectrumBezel : TransparentWidget {
-    void draw(const DrawArgs& args) override {
+    void drawBezel(const DrawArgs& args) {
         const float width = box.size.x;
         const float height = box.size.y;
         nvgSave(args.vg);
@@ -1433,6 +1454,19 @@ struct SpectrumBezel : TransparentWidget {
         nvgStroke(args.vg);
 
         nvgRestore(args.vg);
+    }
+
+    void draw(const DrawArgs& args) override {
+        if (args.fb) {
+            drawBezel(args);
+        }
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1) {
+            drawBezel(args);
+        }
+        TransparentWidget::drawLayer(args, layer);
     }
 };
 
@@ -1574,6 +1608,10 @@ struct SpectrumExpandedOverlay : OpaqueWidget {
         nvgStroke(args.vg);
 
         OpaqueWidget::draw(args);
+        // This view normally receives Rack's light-layer pass through the
+        // module container. Expanded views live directly under the scene, so
+        // issue that pass here after the expanded-view chrome is drawn.
+        Widget::drawLayer(args, 1);
     }
 
     void onButton(const event::Button& event) override {

@@ -461,9 +461,17 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
         // ordinary NanoVG representation for the module-less preview only.
         if (!module && args.fb) {
             drawLibraryPreview(args);
-            return;
         }
-        widget::OpenGlWidget::draw(args);
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        // Rack dims the normal module layer before drawing its light layer.
+        // Composite the OpenGL framebuffer as a light so the analyzer remains
+        // luminous when the rack brightness is reduced.
+        if (layer == 1) {
+            widget::OpenGlWidget::draw(args);
+        }
+        widget::OpenGlWidget::drawLayer(args, layer);
     }
 
     void updateAnimation(float dt, bool receivedFrame) {
@@ -614,7 +622,7 @@ struct FrequencyAnalyzerDisplay : widget::OpenGlWidget {
 // The animated surface stays entirely OpenGL; this sibling only draws the
 // static edge treatment over it with NanoVG.
 struct FrequencyAnalyzerBezel : TransparentWidget {
-    void draw(const DrawArgs& args) override {
+    void drawBezel(const DrawArgs& args) {
         const float width = box.size.x;
         const float height = box.size.y;
 
@@ -660,6 +668,19 @@ struct FrequencyAnalyzerBezel : TransparentWidget {
 
         nvgRestore(args.vg);
     }
+
+    void draw(const DrawArgs& args) override {
+        if (args.fb) {
+            drawBezel(args);
+        }
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1) {
+            drawBezel(args);
+        }
+        TransparentWidget::drawLayer(args, layer);
+    }
 };
 
 struct FrequencyAnalyzerLabels : TransparentWidget {
@@ -680,7 +701,7 @@ struct FrequencyAnalyzerLabels : TransparentWidget {
         return (curvedX * 0.5f + 0.5f) * box.size.x;
     }
 
-    void draw(const DrawArgs& args) override {
+    void drawLabels(const DrawArgs& args) {
         if (!module || !module->showLabels) return;
         nvgFontSize(args.vg, 9.f);
         nvgFillColor(args.vg, nvgRGB(180, 190, 192));
@@ -696,6 +717,19 @@ struct FrequencyAnalyzerLabels : TransparentWidget {
                 std::snprintf(label, sizeof(label), "%.0f", frequency);
             nvgText(args.vg, labelX(horizontalMargin + (band + 0.5f) * bandWidth), box.size.y - 13.f, label, NULL);
         }
+    }
+
+    void draw(const DrawArgs& args) override {
+        if (args.fb) {
+            drawLabels(args);
+        }
+    }
+
+    void drawLayer(const DrawArgs& args, int layer) override {
+        if (layer == 1) {
+            drawLabels(args);
+        }
+        TransparentWidget::drawLayer(args, layer);
     }
 };
 
