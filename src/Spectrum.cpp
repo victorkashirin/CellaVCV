@@ -21,6 +21,9 @@ constexpr float DISPLAY_X = 0.f;
 constexpr float DISPLAY_Y = 26.f;
 constexpr float DISPLAY_WIDTH = 360.f;
 constexpr float DISPLAY_HEIGHT = 280.f;
+constexpr int DEFAULT_PANEL_WIDTH_HP = 24;
+constexpr int MIN_PANEL_WIDTH_HP = 24;
+constexpr int MAX_PANEL_WIDTH_HP = 64;
 constexpr float RANGE_DEFAULT_DB = -100.f;
 constexpr float RANGE_MIN_DB = -140.f;
 constexpr float RANGE_MAX_DB = -40.f;
@@ -126,6 +129,7 @@ struct Spectrum : Module {
     uint64_t configGeneration = 1;
     uint64_t timelineSample = 0;
     uint32_t markerSequence = 0;
+    int panelWidth = DEFAULT_PANEL_WIDTH_HP;
 
     Spectrum() {
         config(NUM_PARAMS, NUM_INPUTS, 0, NUM_LIGHTS);
@@ -276,6 +280,7 @@ struct Spectrum : Module {
         json_object_set_new(root, "markerOpacity", json_real(markerOpacitySetting.load()));
         json_object_set_new(root, "viewMinimum", json_real(viewMinimum.load()));
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
+        json_object_set_new(root, "panelWidth", json_integer(panelWidth));
         return root;
     }
 
@@ -331,6 +336,9 @@ struct Spectrum : Module {
         }
         viewMinimum.store(minimum);
         viewMaximum.store(maximum);
+        panelWidth =
+            getJsonInt(root, "panelWidth", MIN_PANEL_WIDTH_HP, MAX_PANEL_WIDTH_HP,
+                       DEFAULT_PANEL_WIDTH_HP);
         frozen.store(false);
         clearGeneration.fetch_add(1, std::memory_order_release);
     }
@@ -1470,6 +1478,207 @@ struct SpectrumBezel : TransparentWidget {
     }
 };
 
+struct SpectrumPanelArtwork : Widget {
+    std::shared_ptr<window::Svg> lightSvg;
+    std::shared_ptr<window::Svg> darkSvg;
+
+    static void drawShape(NVGcontext* vg, NSVGimage* source,
+                          NSVGshape* sourceShape) {
+        // svgDraw() draws an entire linked list. Shallow-copy the image and
+        // one shape so the source SVG remains immutable and cached.
+        NSVGimage image = *source;
+        NSVGshape shape = *sourceShape;
+        shape.next = NULL;
+        image.shapes = &shape;
+        window::svgDraw(vg, &image);
+    }
+
+    static NVGcolor svgColor(unsigned int color) {
+        return nvgRGBA((color >> 0) & 0xff, (color >> 8) & 0xff,
+                       (color >> 16) & 0xff, (color >> 24) & 0xff);
+    }
+
+    static bool drawSolidBackground(NVGcontext* vg, const NSVGshape* shape,
+                                    const Vec& size) {
+        if (shape->fill.type != NSVG_PAINT_COLOR) return false;
+        nvgBeginPath(vg);
+        nvgRect(vg, 0.f, 0.f, size.x, size.y);
+        nvgFillColor(vg, svgColor(shape->fill.color));
+        nvgFill(vg);
+        return true;
+    }
+
+    static bool drawHorizontalLine(NVGcontext* vg, const NSVGshape* shape,
+                                   float startX, float endX,
+                                   float heightScale) {
+        if (shape->stroke.type != NSVG_PAINT_COLOR) return false;
+        const float y =
+            (shape->bounds[1] + shape->bounds[3]) * 0.5f * heightScale;
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, startX, y);
+        nvgLineTo(vg, endX, y);
+        nvgStrokeColor(vg, svgColor(shape->stroke.color));
+        nvgStrokeWidth(vg, shape->strokeWidth * heightScale);
+        if (shape->strokeLineCap == NSVG_CAP_ROUND)
+            nvgLineCap(vg, NVG_ROUND);
+        else if (shape->strokeLineCap == NSVG_CAP_SQUARE)
+            nvgLineCap(vg, NVG_SQUARE);
+        else
+            nvgLineCap(vg, NVG_BUTT);
+        nvgStroke(vg);
+        return true;
+    }
+
+    static bool isBackground(const NSVGshape* shape, const Vec& svgSize) {
+        return shape->bounds[0] <= 0.f && shape->bounds[1] <= 0.f &&
+               shape->bounds[2] >= svgSize.x &&
+               shape->bounds[3] >= svgSize.y;
+    }
+
+    static bool isHeaderRule(const NSVGshape* shape, const Vec& svgSize) {
+        return shape->bounds[0] <= 0.f &&
+               shape->bounds[2] >= svgSize.x &&
+               std::abs(shape->bounds[3] - shape->bounds[1]) < 0.1f &&
+               shape->bounds[1] < 40.f;
+    }
+
+    void draw(const DrawArgs& args) override {
+        const std::shared_ptr<window::Svg>& svg =
+            settings::preferDarkPanels ? darkSvg : lightSvg;
+        if (!svg || !svg->handle) return;
+        const Vec svgSize = svg->getSize();
+        if (svgSize.x <= 0.f || svgSize.y <= 0.f) return;
+
+        const float centerOffset = (box.size.x - svgSize.x) * 0.5f;
+        const float heightScale = box.size.y / svgSize.y;
+
+        for (NSVGshape* shape = svg->handle->shapes; shape;
+             shape = shape->next) {
+            nvgSave(args.vg);
+
+            if (isBackground(shape, svgSize)) {
+                if (!drawSolidBackground(args.vg, shape, box.size)) {
+                    nvgScale(args.vg, box.size.x / svgSize.x, heightScale);
+                    drawShape(args.vg, svg->handle, shape);
+                }
+                nvgRestore(args.vg);
+                continue;
+            } else if (isHeaderRule(shape, svgSize)) {
+                if (!drawHorizontalLine(args.vg, shape, 0.f, box.size.x,
+                                        heightScale)) {
+                    nvgScale(args.vg, box.size.x / svgSize.x, heightScale);
+                    drawShape(args.vg, svg->handle, shape);
+                }
+                nvgRestore(args.vg);
+                continue;
+            } else {
+                float offsetX = 0.f;
+                const float minY = shape->bounds[1];
+
+                if (minY < 30.f || minY > 360.f) {
+                    // Center the SPECTRUM title and CELLA footer as groups.
+                    offsetX = centerOffset;
+                }
+
+                nvgTranslate(args.vg, offsetX, 0.f);
+                nvgScale(args.vg, 1.f, heightScale);
+            }
+
+            drawShape(args.vg, svg->handle, shape);
+            nvgRestore(args.vg);
+        }
+    }
+};
+
+struct SpectrumPanel : Widget {
+    widget::FramebufferWidget* framebuffer = NULL;
+    SpectrumPanelArtwork* artwork = NULL;
+    PanelBorder* border = NULL;
+    Vec renderedSize;
+    bool renderedDark = false;
+
+    SpectrumPanel() {
+        box.size = Vec(DISPLAY_WIDTH, RACK_GRID_HEIGHT);
+
+        framebuffer = new widget::FramebufferWidget;
+        addChild(framebuffer);
+
+        artwork = new SpectrumPanelArtwork;
+        artwork->lightSvg =
+            window::Svg::load(asset::plugin(pluginInstance, "res/Spectrum.svg"));
+        artwork->darkSvg =
+            window::Svg::load(asset::plugin(pluginInstance, "res/Spectrum-dark.svg"));
+        framebuffer->addChild(artwork);
+
+        border = new PanelBorder;
+        framebuffer->addChild(border);
+    }
+
+    void step() override {
+        framebuffer->oversample = APP->window->pixelRatio < 2.f ? 2.f : 1.f;
+        const bool dark = settings::preferDarkPanels;
+        if (renderedSize != box.size || renderedDark != dark) {
+            renderedSize = box.size;
+            renderedDark = dark;
+            framebuffer->setSize(box.size);
+            artwork->setSize(box.size);
+            border->setSize(box.size);
+            framebuffer->setDirty();
+        }
+        Widget::step();
+    }
+};
+
+struct SpectrumResizeHandle : OpaqueWidget {
+    Spectrum* module = NULL;
+    bool right = false;
+    Vec dragPosition;
+    Rect originalBox;
+
+    SpectrumResizeHandle() {
+        box.size = Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT);
+    }
+
+    void onDragStart(const event::DragStart& event) override {
+        if (event.button != GLFW_MOUSE_BUTTON_LEFT || !module) return;
+        dragPosition = APP->scene->rack->getMousePos();
+        ModuleWidget* moduleWidget = getAncestorOfType<ModuleWidget>();
+        if (moduleWidget) originalBox = moduleWidget->box;
+    }
+
+    void onDragMove(const event::DragMove& event) override {
+        if (!module) return;
+        ModuleWidget* moduleWidget = getAncestorOfType<ModuleWidget>();
+        if (!moduleWidget) return;
+
+        const Vec currentDragPosition = APP->scene->rack->getMousePos();
+        const float deltaX = currentDragPosition.x - dragPosition.x;
+        Rect newBox = originalBox;
+        const Rect oldBox = moduleWidget->box;
+        const float minimumWidth = MIN_PANEL_WIDTH_HP * RACK_GRID_WIDTH;
+        const float maximumWidth = MAX_PANEL_WIDTH_HP * RACK_GRID_WIDTH;
+        if (right) {
+            newBox.size.x =
+                clampValue(newBox.size.x + deltaX, minimumWidth, maximumWidth);
+        } else {
+            newBox.size.x =
+                clampValue(newBox.size.x - deltaX, minimumWidth, maximumWidth);
+        }
+        newBox.size.x =
+            std::round(newBox.size.x / RACK_GRID_WIDTH) * RACK_GRID_WIDTH;
+        if (!right)
+            newBox.pos.x = originalBox.pos.x + originalBox.size.x - newBox.size.x;
+
+        moduleWidget->box = newBox;
+        if (!APP->scene->rack->requestModulePos(moduleWidget, newBox.pos))
+            moduleWidget->box = oldBox;
+        module->panelWidth = clampValue(
+            static_cast<int>(std::lround(moduleWidget->box.size.x / RACK_GRID_WIDTH)),
+            MIN_PANEL_WIDTH_HP, MAX_PANEL_WIDTH_HP);
+    }
+
+};
+
 struct SpectrumView : Widget {
     SpectrumDisplay* display = NULL;
     SpectrumBezel* bezel = NULL;
@@ -1645,35 +1854,122 @@ struct SpectrumExpandedOverlay : OpaqueWidget {
 }  // namespace
 
 struct SpectrumWidget : ModuleWidget {
+    struct BottomItem {
+        Widget* widget = NULL;
+        int slot = 0;
+
+        BottomItem(Widget* widget, int slot) : widget(widget), slot(slot) {}
+    };
+
+    SpectrumPanel* spectrumPanel = NULL;
     SpectrumView* spectrumView = NULL;
+    SpectrumResizeHandle* rightHandle = NULL;
+    std::vector<BottomItem> bottomItems;
     WeakPtr<SpectrumExpandedOverlay> expandedOverlay;
 
     SpectrumWidget(Spectrum* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/Spectrum.svg"),
-                             asset::plugin(pluginInstance, "res/Spectrum-dark.svg")));
+        spectrumPanel = new SpectrumPanel;
+        setPanel(spectrumPanel);
+        if (module)
+            box.size.x = module->panelWidth * RACK_GRID_WIDTH;
+
         spectrumView = new SpectrumView(module);
-        spectrumView->setBox(math::Rect(Vec(DISPLAY_X, DISPLAY_Y), Vec(DISPLAY_WIDTH, DISPLAY_HEIGHT)));
+        spectrumView->setBox(
+            math::Rect(Vec(DISPLAY_X, DISPLAY_Y), Vec(box.size.x, DISPLAY_HEIGHT)));
         addChild(spectrumView);
 
-        constexpr float x = 22.5f;
-        constexpr float step = 45.f;
         constexpr float y = 329.5f;
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 0.f, y), module, Spectrum::LEFT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 1.f, y), module, Spectrum::RIGHT_INPUT));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 2.f, y), module, Spectrum::MARK_INPUT));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 3.f, y), module, Spectrum::RANGE_PARAM));
-        addParam(createParamCentered<RoundSmallBlackKnob>(Vec(x + step * 4.f, y), module,
-                                                           Spectrum::SPEED_PARAM));
-        addInput(createInputCentered<ThemedPJ301MPort>(Vec(x + step * 5.f, y), module, Spectrum::FREEZE_INPUT));
-        addParam(createParamCentered<LEDButton>(Vec(x + step * 6.f, y), module, Spectrum::FREEZE_PARAM));
-        addChild(createLightCentered<MediumLight<YellowLight>>(Vec(x + step * 6.f, y), module,
-                                                               Spectrum::FREEZE_LIGHT));
-        addParam(createParamCentered<VCVButton>(Vec(x + step * 7.f, y), module, Spectrum::CLEAR_PARAM));
+        addBottomInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module,
+                                                  Spectrum::LEFT_INPUT),
+            0);
+        addBottomInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module,
+                                                  Spectrum::RIGHT_INPUT),
+            1);
+        addBottomInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module,
+                                                  Spectrum::MARK_INPUT),
+            2);
+        addBottomParam(
+            createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module,
+                                                     Spectrum::RANGE_PARAM),
+            3);
+        addBottomParam(
+            createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module,
+                                                     Spectrum::SPEED_PARAM),
+            4);
+        addBottomInput(
+            createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module,
+                                                  Spectrum::FREEZE_INPUT),
+            5);
+        addBottomParam(
+            createParamCentered<LEDButton>(Vec(0.f, y), module,
+                                           Spectrum::FREEZE_PARAM),
+            6);
+        addBottomChild(
+            createLightCentered<MediumLight<YellowLight>>(
+                Vec(0.f, y), module, Spectrum::FREEZE_LIGHT),
+            6);
+        addBottomParam(
+            createParamCentered<VCVButton>(Vec(0.f, y), module,
+                                           Spectrum::CLEAR_PARAM),
+            7);
+
+        SpectrumResizeHandle* leftHandle = new SpectrumResizeHandle;
+        leftHandle->module = module;
+        addChild(leftHandle);
+
+        rightHandle = new SpectrumResizeHandle;
+        rightHandle->module = module;
+        rightHandle->right = true;
+        addChild(rightHandle);
+
+        layout();
     }
 
     ~SpectrumWidget() override {
         if (SpectrumExpandedOverlay* expanded = expandedOverlay.get()) expanded->close();
+    }
+
+    void addBottomChild(Widget* widget, int slot) {
+        addChild(widget);
+        bottomItems.push_back({widget, slot});
+    }
+
+    void addBottomInput(PortWidget* widget, int slot) {
+        addInput(widget);
+        bottomItems.push_back({widget, slot});
+    }
+
+    void addBottomParam(ParamWidget* widget, int slot) {
+        addParam(widget);
+        bottomItems.push_back({widget, slot});
+    }
+
+    void layout() {
+        if (spectrumPanel)
+            spectrumPanel->setSize(box.size);
+        if (spectrumView && spectrumView->parent == this)
+            spectrumView->setBox(
+                math::Rect(Vec(DISPLAY_X, DISPLAY_Y),
+                           Vec(box.size.x, DISPLAY_HEIGHT)));
+        for (const BottomItem& item : bottomItems) {
+            if (!item.widget) continue;
+            const float centerX = 22.5f + 45.f * item.slot;
+            item.widget->box.pos.x = centerX - item.widget->box.size.x * 0.5f;
+        }
+        if (rightHandle)
+            rightHandle->box.pos.x = box.size.x - rightHandle->box.size.x;
+    }
+
+    void step() override {
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        if (spectrum)
+            box.size.x = spectrum->panelWidth * RACK_GRID_WIDTH;
+        layout();
+        ModuleWidget::step();
     }
 
     void openExpandedView() {

@@ -1,5 +1,10 @@
 # Cella modules changelog
 
+### 2.11.1 (2026-07-26)
+
+Updates:
+* Spectrum - make the analyser resizable.
+
 ### 2.11.0 (2026-07-25)
 
 New modules:
