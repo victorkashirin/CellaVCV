@@ -4,6 +4,7 @@ uniform sampler2D uHistory;
 uniform sampler2D uTrace;
 uniform sampler2D uTimeLookup;
 uniform sampler2D uPalette;
+uniform sampler2D uPrefilter;
 uniform float uRows;
 uniform int uFlow;
 uniform vec2 uView;
@@ -12,8 +13,14 @@ uniform int uPeakHold;
 uniform int uLiveTrace;
 uniform int uRenderingStyle;
 uniform vec2 uLogicalPixel;
+uniform float uRowsPerTimePixel;
+uniform float uLookupCells;
+uniform float uLivePhase;
+uniform float uOldestPhysical;
+uniform float uPrefilterMix;
 
 const float CELLS = 512.0;
+const int MAX_TIME_TAPS = 32;
 const float INTERNAL_FLOOR = -160.0;
 const float INTERNAL_CEILING = 24.0;
 const float TRACE_DEPTH = 0.105;
@@ -42,17 +49,37 @@ vec3 palette(float value) {
 }
 
 float historyCell(float frequency, float lookupAge, out float valid) {
-    vec4 lookup = texture2D(uTimeLookup, vec2(clamp(lookupAge, 0.0, 1.0), 0.5));
-    valid = step(0.25, lookup.b);
-    float physical = floor(lookup.r * 255.0 + 0.5) * 256.0 + floor(lookup.g * 255.0 + 0.5);
+    if (lookupAge < 0.0 || lookupAge > 1.0) {
+        valid = 0.0;
+        return 0.0;
+    }
+    float lookupUv =
+        (clamp(lookupAge, 0.0, 1.0) *
+             max(uLookupCells - 1.0, 1.0) +
+         0.5) /
+        max(uLookupCells, 1.0);
+    vec4 lookup =
+        texture2D(uTimeLookup, vec2(lookupUv, 0.5));
+    if (lookup.g < 0.75) {
+        valid = 0.0;
+        return 0.0;
+    }
+    valid = 1.0;
+    float ordered = clamp(lookup.r, 0.0, uRows - 1.0);
+    float physical =
+        mod(uOldestPhysical + floor(ordered), uRows);
     float nextPhysical = mod(physical + 1.0, uRows);
+    float timeFraction = fract(ordered);
     float cell = clamp(floor(frequency * CELLS), 0.0, CELLS - 1.0);
     float x = (cell + 0.5) / CELLS;
     float older = texture2D(uHistory, vec2(x, (physical + 0.5) / uRows)).r;
-    if (uRenderingStyle == 0 || lookup.b < 0.75)
-        return lookup.a >= 0.5 ? texture2D(uHistory, vec2(x, (nextPhysical + 0.5) / uRows)).r : older;
+    if ((uRenderingStyle == 0 && uRowsPerTimePixel <= 1.25) ||
+        lookup.b < 0.75)
+        return timeFraction >= 0.5
+                   ? texture2D(uHistory, vec2(x, (nextPhysical + 0.5) / uRows)).r
+                   : older;
     float newer = texture2D(uHistory, vec2(x, (nextPhysical + 0.5) / uRows)).r;
-    return mix(older, newer, lookup.a);
+    return mix(older, newer, timeFraction);
 }
 
 float frequencySample(float frequency, float age, out float valid) {
@@ -70,14 +97,52 @@ float frequencySample(float frequency, float age, out float valid) {
     return mix(left, right, fraction);
 }
 
+float temporalFilter(float frequency, float age, out float valid) {
+    float timePixel =
+        uFlow < 2 ? uLogicalPixel.y : uLogicalPixel.x;
+    if (uRowsPerTimePixel <= 1.25)
+        return frequencySample(frequency, age, valid);
+
+    // Integrate the complete output-pixel footprint. A fixed stratified jitter
+    // prevents source rows and pixels from switching in lockstep.
+    float tapCount =
+        clamp(ceil(uRowsPerTimePixel) + 2.0, 4.0,
+              float(MAX_TIME_TAPS));
+    float value = 0.0;
+    float weight = 0.0;
+    for (int timeTap = 0; timeTap < MAX_TIME_TAPS; ++timeTap) {
+        if (float(timeTap) >= tapCount) continue;
+        float jitter =
+            fract((float(timeTap) + 1.0) * 0.61803398875) - 0.5;
+        float offset =
+            (float(timeTap) + 0.5 + 0.75 * jitter) /
+                tapCount -
+            0.5;
+        float tapAge = age + offset * timePixel;
+        if (tapAge < 0.0 || tapAge > 1.0) continue;
+        float tapValid;
+        float tap = frequencySample(frequency, tapAge, tapValid);
+        value += tap * tapValid;
+        weight += tapValid;
+    }
+    valid = step(0.001, weight);
+    return value / max(weight, 0.001);
+}
+
 float smoothHistory(float frequency, float age, out float valid) {
-    if (uRenderingStyle == 0) return frequencySample(frequency, age, valid);
+    if (uRenderingStyle == 0 || uRowsPerTimePixel > 1.25)
+        return temporalFilter(frequency, age, valid);
+
     float value = 0.0;
     float weight = 0.0;
     valid = 0.0;
     for (int timeTap = -1; timeTap <= 1; ++timeTap) {
         float timeWeight = timeTap == 0 ? 0.6 : 0.2;
-        float tapAge = age + float(timeTap) / 1023.0;
+        float timeStep =
+            max(1.0 / max(uLookupCells - 1.0, 1.0),
+                0.4 * (uFlow < 2 ? uLogicalPixel.y
+                                 : uLogicalPixel.x));
+        float tapAge = age + float(timeTap) * timeStep;
         if (tapAge < 0.0 || tapAge > 1.0) continue;
         for (int frequencyTap = -1; frequencyTap <= 1; ++frequencyTap) {
             float frequencyWeight = frequencyTap == 0 ? 0.6 : 0.2;
@@ -94,11 +159,34 @@ float smoothHistory(float frequency, float age, out float valid) {
     return value / max(weight, 0.001);
 }
 
+float prefilteredHistory(float frequency, float age,
+                         out float valid) {
+    if (age < 0.0 || age > 1.0) {
+        valid = 0.0;
+        return 0.0;
+    }
+    vec2 sample =
+        texture2D(uPrefilter,
+                  vec2(clamp(frequency, 0.0, 1.0), age)).ra;
+    valid = sample.y;
+    return sample.x;
+}
+
 void main() {
     vec2 logical = logicalCoordinates(gl_TexCoord[0].xy);
     float frequency = mix(uView.x, uView.y, logical.x);
-    float valid;
-    float encoded = smoothHistory(frequency, logical.y, valid);
+    float valid = 0.0;
+    float encoded = 0.0;
+    if (uPrefilterMix < 1.0)
+        encoded = smoothHistory(
+            frequency, logical.y - uLivePhase, valid);
+    if (uPrefilterMix > 0.0) {
+        float prefilteredValid;
+        float prefiltered = prefilteredHistory(
+            logical.x, logical.y, prefilteredValid);
+        encoded = mix(encoded, prefiltered, uPrefilterMix);
+        valid = mix(valid, prefilteredValid, uPrefilterMix);
+    }
     float db = decodeDb(encoded);
     float intensity = clamp((db - uRange.x) / max(uRange.y - uRange.x, 1.0), 0.0, 1.0);
     vec3 gapColor = vec3(0.008, 0.011, 0.016);

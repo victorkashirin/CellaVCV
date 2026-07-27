@@ -71,6 +71,14 @@ std::string noteLabel(float frequency) {
 std::string timeLabel(float age, float span) {
     if (age < 0.0005f) return span < 2.f ? "0 ms" : "0 s";
     if (span < 2.f) return rack::string::f("-%d ms", static_cast<int>(std::lround(age * 1000.f)));
+    if (age >= 60.f) {
+        const int totalSeconds = static_cast<int>(std::lround(age));
+        const int minutes = totalSeconds / 60;
+        const int seconds = totalSeconds % 60;
+        return seconds == 0
+                   ? rack::string::f("-%dm", minutes)
+                   : rack::string::f("-%d:%02d", minutes, seconds);
+    }
     return rack::string::f("-%.1f s", age);
 }
 
@@ -123,6 +131,8 @@ struct Spectrum : Module {
     std::atomic<uint64_t> clearGeneration{0};
     std::atomic<uint64_t> rowAcceptanceBoundarySample{0};
     std::atomic<uint64_t> activeConfigGeneration{1};
+    std::atomic<uint64_t> displayClockSample{0};
+    std::atomic<float> displayClockSampleRate{48000.f};
 #ifndef NDEBUG
     std::atomic<uint64_t> droppedRows{0};
     std::atomic<uint64_t> droppedMarkers{0};
@@ -187,6 +197,8 @@ struct Spectrum : Module {
                 ++configGeneration;
                 if (sampleRateChanged) {
                     timelineSample = 0;
+                    displayClockSample.store(0,
+                                             std::memory_order_relaxed);
                     rowAcceptanceBoundarySample.store(0,
                                                       std::memory_order_release);
                 }
@@ -213,9 +225,14 @@ struct Spectrum : Module {
             appliedFrequencyBins = frequencyBins;
             appliedPolyChannel = polyChannel;
             appliedSampleRate = args.sampleRate;
+            displayClockSampleRate.store(args.sampleRate,
+                                         std::memory_order_relaxed);
         }
 
         ++timelineSample;
+        if ((timelineSample & 31u) == 0u)
+            displayClockSample.store(timelineSample,
+                                     std::memory_order_relaxed);
         const bool freezeEvent =
             freezeButtonTrigger.process(params[FREEZE_PARAM].getValue()) ||
             freezeInputTrigger.process(inputs[FREEZE_INPUT].getVoltage()) ||
@@ -258,6 +275,8 @@ struct Spectrum : Module {
             mixInputVoltages(left, right, leftConnected, rightConnected, static_cast<ChannelMode>(channelMode));
         SpectrumRow row;
         if (analyzer.processSample(mixed * VOLTAGE_TO_FULL_SCALE, timelineSample, row)) {
+            displayClockSample.store(timelineSample,
+                                     std::memory_order_relaxed);
             if (!frozen.load(std::memory_order_relaxed) && !displayRows.full())
                 displayRows.push(row);
 #ifndef NDEBUG
@@ -515,7 +534,11 @@ struct SpectrumRenderer {
     GLuint traceTexture = 0;
     GLuint lookupTexture = 0;
     GLuint paletteTexture = 0;
+    GLuint prefilterTexture = 0;
     int allocatedRows = 0;
+    int allocatedLookupCells = 0;
+    int allocatedPrefilterColumns = 0;
+    int allocatedPrefilterRows = 0;
     int uploadedPalette = -1;
     GLint historyLocation = -1;
     GLint traceLocation = -1;
@@ -529,6 +552,12 @@ struct SpectrumRenderer {
     GLint liveTraceLocation = -1;
     GLint styleLocation = -1;
     GLint logicalPixelLocation = -1;
+    GLint rowsPerTimePixelLocation = -1;
+    GLint lookupCellsLocation = -1;
+    GLint livePhaseLocation = -1;
+    GLint oldestPhysicalLocation = -1;
+    GLint prefilterLocation = -1;
+    GLint prefilterMixLocation = -1;
     bool initializationAttempted = false;
 
     static std::string loadResource(const std::string& path) {
@@ -553,7 +582,8 @@ struct SpectrumRenderer {
         return 0;
     }
 
-    bool initialize(int requestedRows) {
+    bool initialize(int requestedRows, int requestedPrefilterColumns,
+                    int requestedPrefilterRows) {
         if (!program) {
             if (initializationAttempted) return false;
             initializationAttempted = true;
@@ -587,10 +617,23 @@ struct SpectrumRenderer {
                 liveTraceLocation = glGetUniformLocation(program, "uLiveTrace");
                 styleLocation = glGetUniformLocation(program, "uRenderingStyle");
                 logicalPixelLocation = glGetUniformLocation(program, "uLogicalPixel");
+                rowsPerTimePixelLocation =
+                    glGetUniformLocation(program, "uRowsPerTimePixel");
+                lookupCellsLocation =
+                    glGetUniformLocation(program, "uLookupCells");
+                livePhaseLocation =
+                    glGetUniformLocation(program, "uLivePhase");
+                oldestPhysicalLocation =
+                    glGetUniformLocation(program, "uOldestPhysical");
+                prefilterLocation =
+                    glGetUniformLocation(program, "uPrefilter");
+                prefilterMixLocation =
+                    glGetUniformLocation(program, "uPrefilterMix");
                 glGenTextures(1, &historyTexture);
                 glGenTextures(1, &traceTexture);
                 glGenTextures(1, &lookupTexture);
                 glGenTextures(1, &paletteTexture);
+                glGenTextures(1, &prefilterTexture);
 
                 glBindTexture(GL_TEXTURE_2D, traceTexture);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -601,11 +644,10 @@ struct SpectrumRenderer {
                              GL_UNSIGNED_SHORT, NULL);
 
                 glBindTexture(GL_TEXTURE_2D, lookupTexture);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TIME_LOOKUP_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
                 glBindTexture(GL_TEXTURE_2D, paletteTexture);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -613,6 +655,16 @@ struct SpectrumRenderer {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PALETTE_LUT_SIZE, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+                glBindTexture(GL_TEXTURE_2D, prefilterTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                                GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                                GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                                GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                                GL_CLAMP_TO_EDGE);
             } catch (const std::exception& exception) {
                 WARN("Spectrum shader resources could not be loaded: %s", exception.what());
                 return false;
@@ -628,7 +680,31 @@ struct SpectrumRenderer {
                          GL_UNSIGNED_BYTE, NULL);
             allocatedRows = requestedRows;
         }
-        return program && historyTexture && traceTexture && lookupTexture && paletteTexture;
+        const int requestedLookupCells =
+            std::max(TIME_LOOKUP_SIZE, requestedRows);
+        if (allocatedLookupCells != requestedLookupCells) {
+            glBindTexture(GL_TEXTURE_2D, lookupTexture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F,
+                         requestedLookupCells, 1, 0, GL_RGBA,
+                         GL_FLOAT, NULL);
+            allocatedLookupCells = requestedLookupCells;
+        }
+        requestedPrefilterColumns =
+            std::max(requestedPrefilterColumns, 1);
+        requestedPrefilterRows = std::max(requestedPrefilterRows, 1);
+        if (allocatedPrefilterColumns != requestedPrefilterColumns ||
+            allocatedPrefilterRows != requestedPrefilterRows) {
+            glBindTexture(GL_TEXTURE_2D, prefilterTexture);
+                glTexImage2D(GL_TEXTURE_2D, 0,
+                             GL_LUMINANCE16_ALPHA16,
+                             requestedPrefilterColumns,
+                             requestedPrefilterRows, 0, GL_LUMINANCE_ALPHA,
+                             GL_UNSIGNED_SHORT, NULL);
+            allocatedPrefilterColumns = requestedPrefilterColumns;
+            allocatedPrefilterRows = requestedPrefilterRows;
+        }
+        return program && historyTexture && traceTexture && lookupTexture &&
+               paletteTexture && prefilterTexture;
     }
 
     void uploadPalette(Palette palette) {
@@ -643,13 +719,18 @@ struct SpectrumRenderer {
     }
 
     void destroy() {
+        if (prefilterTexture) glDeleteTextures(1, &prefilterTexture);
         if (paletteTexture) glDeleteTextures(1, &paletteTexture);
         if (lookupTexture) glDeleteTextures(1, &lookupTexture);
         if (traceTexture) glDeleteTextures(1, &traceTexture);
         if (historyTexture) glDeleteTextures(1, &historyTexture);
         if (program) glDeleteProgram(program);
-        program = historyTexture = traceTexture = lookupTexture = paletteTexture = 0;
+        program = historyTexture = traceTexture = lookupTexture =
+            paletteTexture = prefilterTexture = 0;
         allocatedRows = 0;
+        allocatedLookupCells = 0;
+        allocatedPrefilterColumns = 0;
+        allocatedPrefilterRows = 0;
         uploadedPalette = -1;
         initializationAttempted = false;
     }
@@ -662,6 +743,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     FrequencySmoothingKernel frequencyKernel;
     std::vector<SpectrumRow> derivedRows;
     std::vector<bool> dirtyRows;
+    std::vector<float> derivedPower;
+    std::vector<unsigned short> prefilterTexels;
     std::array<float, NUM_FREQUENCY_CELLS> currentTrace;
     std::array<float, NUM_FREQUENCY_CELLS> peakTrace;
     uint64_t seenClearGeneration = 0;
@@ -687,6 +770,9 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     void resizeCaches(int capacity) {
         derivedRows.resize(static_cast<size_t>(capacity));
         dirtyRows.assign(static_cast<size_t>(capacity), true);
+        derivedPower.assign(
+            static_cast<size_t>(capacity * NUM_FREQUENCY_CELLS),
+            std::pow(10.f, INTERNAL_FLOOR_DB / 10.f));
         appliedCapacity = capacity;
         lookupDirty = true;
     }
@@ -708,6 +794,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         latestMetadata = SpectrumRow();
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
+        std::fill(derivedPower.begin(), derivedPower.end(),
+                  std::pow(10.f, INTERNAL_FLOOR_DB / 10.f));
         for (size_t i = 0; i < derivedRows.size(); ++i) {
             derivedRows[i] = SpectrumRow();
             derivedRows[i].dbTenths.fill(quantizeDb(INTERNAL_FLOOR_DB));
@@ -724,6 +812,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             const int physical = timeline.physicalFromOldest(ordered);
             const SpectrumRow* raw = timeline.physicalRow(physical);
             frequencyKernel.apply(*raw, derivedRows[static_cast<size_t>(physical)]);
+            updateDerivedPower(physical);
             float elapsed = 0.f;
             if (previousRaw && previousRaw->sampleRate == raw->sampleRate &&
                 raw->rowEndSample >= previousRaw->rowEndSample)
@@ -749,15 +838,23 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         GLint maximumTexture = 2048;
         if (renderer.program) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
         desired = std::min(desired, std::max(static_cast<int>(maximumTexture), 4));
+        const bool showingFullRetainedSpan =
+            std::fabs(timeline.visibleSpan() - timeline.retainedDuration()) <
+            1e-4f;
         timeline.setExpectedRowsPerSecond(rowsPerSecond(static_cast<Quality>(quality)));
-        timeline.setRetainedDuration(std::min(retained, (desired - 2.f) / rowsPerSecond(static_cast<Quality>(quality))));
+        const float availableRetained =
+            std::min(retained,
+                     (desired - 2.f) /
+                         rowsPerSecond(static_cast<Quality>(quality)));
+        timeline.setRetainedDuration(availableRetained);
         if (desired != timeline.capacity()) {
             timeline.setCapacity(desired);
             resizeCaches(desired);
             renderer.allocatedRows = 0;
             rebuildDerived();
         }
-        if (historySpeedChanged) timeline.setVisibleSpan(retained);
+        if (historySpeedChanged || showingFullRetainedSpan)
+            timeline.setVisibleSpan(availableRetained);
         const int frequencyMode =
             clampValue(module ? module->frequencySmoothingSetting.load() : 0, 0,
                        static_cast<int>(FrequencySmoothing::COUNT) - 1);
@@ -799,6 +896,20 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         traceDirty = true;
     }
 
+    void updateDerivedPower(int physical) {
+        if (physical < 0 || physical >= timeline.capacity()) return;
+        const SpectrumRow& row =
+            derivedRows[static_cast<size_t>(physical)];
+        const size_t base =
+            static_cast<size_t>(physical * NUM_FREQUENCY_CELLS);
+        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+            const float db = dequantizeDb(
+                row.dbTenths[static_cast<size_t>(cell)]);
+            derivedPower[base + static_cast<size_t>(cell)] =
+                std::pow(10.f, db / 10.f);
+        }
+    }
+
     void addRow(const SpectrumRow& row) {
         if (row.sampleRate != appliedFrequencySampleRate) {
             appliedFrequencySampleRate = row.sampleRate;
@@ -816,6 +927,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         }
         const int physical = timeline.addRow(row);
         frequencyKernel.apply(row, derivedRows[static_cast<size_t>(physical)]);
+        updateDerivedPower(physical);
         updateTraces(derivedRows[static_cast<size_t>(physical)], elapsed);
         latestMetadata = row;
         dirtyRows[static_cast<size_t>(physical)] = true;
@@ -849,6 +961,30 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             const MarkerEvent marker = module->markerEvents.shift();
             if (marker.configGeneration == generation) timeline.addMarker(marker);
         }
+    }
+
+    void syncLivePhase() {
+        if (!module ||
+            module->frozen.load(std::memory_order_relaxed) ||
+            !timeline.followsLive())
+            return;
+        const SpectrumRow* newest = timeline.newestRow();
+        if (!newest || !(newest->sampleRate > 0.f)) return;
+        const float clockRate =
+            module->displayClockSampleRate.load(std::memory_order_relaxed);
+        const uint64_t clockSample =
+            module->displayClockSample.load(std::memory_order_relaxed);
+        if (clockRate != newest->sampleRate ||
+            clockSample < newest->rowEndSample)
+            return;
+        const int rowRate =
+            std::max(static_cast<int>(newest->displayRowsPerSecond), 1);
+        const uint64_t rowPeriod = std::max<uint64_t>(
+            1, static_cast<uint64_t>(
+                   std::llround(newest->sampleRate / rowRate)));
+        const uint64_t lag = clockSample - newest->rowEndSample;
+        timeline.setLivePhase(
+            static_cast<float>(lag % rowPeriod) / newest->sampleRate);
     }
 
     void seedPreview() {
@@ -893,6 +1029,310 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         return true;
     }
 
+    bool orderedCoordinate(float normalizedAge, float& ordered) const {
+        const TimelineSelection selected = timeline.lookup(normalizedAge);
+        if (!selected.valid) return false;
+        ordered =
+            static_cast<float>(std::max(selected.olderOrdered, 0)) +
+            (selected.interpolationValid
+                 ? clampValue(selected.fraction, 0.f, 1.f)
+                 : 0.f);
+        return true;
+    }
+
+    void uploadTemporalPrefilter(int frequencyPixels,
+                                 int timePixels) {
+        frequencyPixels = std::max(frequencyPixels, 1);
+        timePixels = std::max(timePixels, 1);
+        std::vector<float> temporalValues(static_cast<size_t>(
+            timePixels * NUM_FREQUENCY_CELLS), 0.f);
+        std::vector<unsigned short> temporalCoverage(
+            static_cast<size_t>(timePixels), 0);
+        prefilterTexels.assign(
+            static_cast<size_t>(
+                frequencyPixels * timePixels * 2),
+            0);
+        if (timeline.size() < 2) return;
+
+        const float rowsPerPixel =
+            timeline.visibleSpan() *
+            timeline.expectedRowsPerSecond() /
+            static_cast<float>(timePixels);
+        // Gaussian reconstruction has no periodic sidelobes, unlike box,
+        // tent, or finite regularly-spaced tap filters. That makes dense line
+        // spectra stable at every framebuffer scale instead of creating a few
+        // zoom ratios that strongly reinforce the source lattice.
+        constexpr float GAUSSIAN_SIGMA_PIXELS = 0.65f;
+        constexpr float GAUSSIAN_SUPPORT_SIGMAS = 3.5f;
+        const float temporalSigma =
+            std::max(GAUSSIAN_SIGMA_PIXELS * rowsPerPixel,
+                     0.75f);
+        const float inverseTemporalTwoSigmaSquared =
+            0.5f / (temporalSigma * temporalSigma);
+        const int temporalRadius = std::max(
+            2, static_cast<int>(std::ceil(
+                   GAUSSIAN_SUPPORT_SIGMAS * temporalSigma)));
+        for (int pixel = 0; pixel < timePixels; ++pixel) {
+            const float centerAge =
+                (static_cast<float>(pixel) + 0.5f) /
+                static_cast<float>(timePixels);
+            float centerOrdered = 0.f;
+            bool centerValid =
+                orderedCoordinate(centerAge, centerOrdered);
+            if (!centerValid && pixel == 0) {
+                centerOrdered =
+                    static_cast<float>(timeline.size() - 1);
+                centerValid = true;
+            }
+            if (!centerValid && pixel == timePixels - 1) {
+                centerOrdered = 0.f;
+                centerValid = true;
+            }
+            if (!centerValid) continue;
+
+            const int unboundedFirst =
+                static_cast<int>(std::floor(centerOrdered)) -
+                temporalRadius;
+            const int unboundedLast =
+                static_cast<int>(std::ceil(centerOrdered)) +
+                temporalRadius;
+            const int first =
+                std::max(unboundedFirst, 0);
+            const int last =
+                std::min(unboundedLast, timeline.size() - 1);
+            double fullWeight = 0.0;
+            for (int ordered = unboundedFirst;
+                 ordered <= unboundedLast; ++ordered) {
+                const float distance =
+                    static_cast<float>(ordered) - centerOrdered;
+                fullWeight += std::exp(
+                    -distance * distance *
+                    inverseTemporalTwoSigmaSquared);
+            }
+
+            std::vector<float> weights(
+                static_cast<size_t>(last - first + 1), 0.f);
+            double totalWeight = 0.0;
+            for (int ordered = first; ordered <= last;
+                 ++ordered) {
+                const float distance =
+                    static_cast<float>(ordered) - centerOrdered;
+                const float weight = std::exp(
+                    -distance * distance *
+                    inverseTemporalTwoSigmaSquared);
+                weights[static_cast<size_t>(ordered - first)] =
+                    weight;
+                totalWeight += weight;
+            }
+            if (!(totalWeight > 1e-12)) continue;
+            const unsigned short coverage =
+                static_cast<unsigned short>(std::lround(
+                    65535.f *
+                    clampValue(
+                        static_cast<float>(
+                            totalWeight /
+                            std::max(fullWeight, 1e-12)),
+                        0.f, 1.f)));
+            temporalCoverage[static_cast<size_t>(pixel)] =
+                coverage;
+            const size_t temporalOffset = static_cast<size_t>(
+                pixel * NUM_FREQUENCY_CELLS);
+            for (int ordered = first; ordered <= last;
+                 ++ordered) {
+                const int physical =
+                    timeline.physicalFromOldest(ordered);
+                const size_t sourceOffset = static_cast<size_t>(
+                    physical * NUM_FREQUENCY_CELLS);
+                const float weight =
+                    weights[static_cast<size_t>(
+                        ordered - first)];
+                for (int cell = 0;
+                     cell < NUM_FREQUENCY_CELLS; ++cell) {
+                    temporalValues[
+                        temporalOffset +
+                        static_cast<size_t>(cell)] +=
+                        weight *
+                        derivedPower[
+                            sourceOffset +
+                            static_cast<size_t>(cell)];
+                }
+            }
+            const float inverseWeight =
+                static_cast<float>(1.0 / totalWeight);
+            for (int cell = 0; cell < NUM_FREQUENCY_CELLS;
+                 ++cell)
+                temporalValues[
+                    temporalOffset +
+                    static_cast<size_t>(cell)] *=
+                    inverseWeight;
+        }
+
+        const float viewLow =
+            module ? module->viewMinimum.load() : 0.f;
+        const float viewHigh =
+            module ? module->viewMaximum.load() : 1.f;
+        const float viewSpan =
+            std::max(viewHigh - viewLow, 1e-6f);
+        const float cellsPerPixel =
+            viewSpan * NUM_FREQUENCY_CELLS /
+            static_cast<float>(frequencyPixels);
+        const bool smooth =
+            module &&
+            clampValue(module->renderingStyleSetting.load(), 0, 1) ==
+                static_cast<int>(RenderingStyle::SMOOTH);
+        struct FrequencyGaussian {
+            int first = 0;
+            std::vector<float> weights;
+            float inverseWeight = 0.f;
+        };
+        std::vector<FrequencyGaussian> frequencyKernels(
+            static_cast<size_t>(frequencyPixels));
+        if (cellsPerPixel > 1.25f) {
+            const float frequencySigma =
+                std::max(GAUSSIAN_SIGMA_PIXELS *
+                             cellsPerPixel,
+                         0.75f);
+            const float inverseFrequencyTwoSigmaSquared =
+                0.5f /
+                (frequencySigma * frequencySigma);
+            const int frequencyRadius = std::max(
+                2, static_cast<int>(std::ceil(
+                       GAUSSIAN_SUPPORT_SIGMAS *
+                       frequencySigma)));
+            for (int frequencyPixel = 0;
+                 frequencyPixel < frequencyPixels;
+                 ++frequencyPixel) {
+                const float coordinate =
+                    (viewLow +
+                     viewSpan *
+                         (static_cast<float>(frequencyPixel) +
+                          0.5f) /
+                         static_cast<float>(frequencyPixels)) *
+                        NUM_FREQUENCY_CELLS -
+                    0.5f;
+                FrequencyGaussian& kernel =
+                    frequencyKernels[static_cast<size_t>(
+                        frequencyPixel)];
+                kernel.first = std::max(
+                    static_cast<int>(std::floor(coordinate)) -
+                        frequencyRadius,
+                    0);
+                const int last = std::min(
+                    static_cast<int>(std::ceil(coordinate)) +
+                        frequencyRadius,
+                    NUM_FREQUENCY_CELLS - 1);
+                kernel.weights.resize(static_cast<size_t>(
+                    last - kernel.first + 1));
+                float totalWeight = 0.f;
+                for (int cell = kernel.first; cell <= last;
+                     ++cell) {
+                    const float distance =
+                        static_cast<float>(cell) - coordinate;
+                    const float weight = std::exp(
+                        -distance * distance *
+                        inverseFrequencyTwoSigmaSquared);
+                    kernel.weights[static_cast<size_t>(
+                        cell - kernel.first)] = weight;
+                    totalWeight += weight;
+                }
+                kernel.inverseWeight =
+                    totalWeight > 1e-12f
+                        ? 1.f / totalWeight
+                        : 0.f;
+            }
+        }
+        for (int pixel = 0; pixel < timePixels; ++pixel) {
+            const size_t temporalOffset = static_cast<size_t>(
+                pixel * NUM_FREQUENCY_CELLS);
+            const size_t outputRow = static_cast<size_t>(
+                pixel * frequencyPixels * 2);
+            for (int frequencyPixel = 0;
+                 frequencyPixel < frequencyPixels;
+                 ++frequencyPixel) {
+                const float low =
+                    (viewLow +
+                     viewSpan * frequencyPixel /
+                         static_cast<float>(frequencyPixels)) *
+                    NUM_FREQUENCY_CELLS;
+                const float high =
+                    (viewLow +
+                     viewSpan * (frequencyPixel + 1) /
+                         static_cast<float>(frequencyPixels)) *
+                    NUM_FREQUENCY_CELLS;
+                float value = 0.f;
+                if (cellsPerPixel > 1.25f) {
+                    const FrequencyGaussian& kernel =
+                        frequencyKernels[static_cast<size_t>(
+                            frequencyPixel)];
+                    for (size_t tap = 0;
+                         tap < kernel.weights.size(); ++tap) {
+                        value +=
+                            kernel.weights[tap] *
+                            temporalValues[
+                                temporalOffset +
+                                static_cast<size_t>(
+                                    kernel.first +
+                                    static_cast<int>(tap))];
+                    }
+                    value *= kernel.inverseWeight;
+                } else {
+                    const float coordinate =
+                        0.5f * (low + high);
+                    if (!smooth) {
+                        const int cell = clampValue(
+                            static_cast<int>(
+                                std::floor(coordinate)),
+                            0, NUM_FREQUENCY_CELLS - 1);
+                        value = temporalValues[
+                            temporalOffset +
+                            static_cast<size_t>(cell)];
+                    } else {
+                        const float position = coordinate - 0.5f;
+                        const int base = static_cast<int>(
+                            std::floor(position));
+                        const int left = clampValue(
+                            base,
+                            0, NUM_FREQUENCY_CELLS - 1);
+                        const int right = clampValue(
+                            base + 1, 0,
+                            NUM_FREQUENCY_CELLS - 1);
+                        const float fraction =
+                            clampValue(position -
+                                           std::floor(position),
+                                       0.f, 1.f);
+                        value =
+                            temporalValues[
+                                temporalOffset +
+                                static_cast<size_t>(left)] *
+                                (1.f - fraction) +
+                            temporalValues[
+                                temporalOffset +
+                                static_cast<size_t>(right)] *
+                                fraction;
+                    }
+                }
+                const size_t output =
+                    outputRow +
+                    static_cast<size_t>(frequencyPixel * 2);
+                const float db =
+                    value > 0.f && std::isfinite(value)
+                        ? 10.f * std::log10(value)
+                        : INTERNAL_FLOOR_DB;
+                prefilterTexels[output] =
+                    encodeDb16(db);
+                prefilterTexels[output + 1] =
+                    temporalCoverage[static_cast<size_t>(pixel)];
+            }
+        }
+
+        glBindTexture(GL_TEXTURE_2D, renderer.prefilterTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexSubImage2D(
+            GL_TEXTURE_2D, 0, 0, 0, frequencyPixels,
+            timePixels, GL_LUMINANCE_ALPHA, GL_UNSIGNED_SHORT,
+            prefilterTexels.data());
+    }
+
     void uploadDirtyData() {
         std::array<unsigned char, NUM_FREQUENCY_CELLS> rowBytes;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -921,10 +1361,12 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             traceDirty = false;
         }
         if (lookupDirty) {
-            const std::array<unsigned char, TIME_LOOKUP_SIZE * 4> lookup = timeline.buildLookup();
+            const std::vector<float> lookup =
+                timeline.buildLookup(renderer.allocatedLookupCells);
             glBindTexture(GL_TEXTURE_2D, renderer.lookupTexture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TIME_LOOKUP_SIZE, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                            lookup.data());
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                            renderer.allocatedLookupCells, 1, GL_RGBA,
+                            GL_FLOAT, lookup.data());
             lookupDirty = false;
         }
     }
@@ -947,9 +1389,41 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             drainQueues();
         else
             seedPreview();
+        syncLivePhase();
 
-        GLint oldProgram = 0, oldActiveTexture = 0, oldTexture0 = 0, oldTexture1 = 0, oldTexture2 = 0,
-              oldTexture3 = 0;
+        const int flow =
+            module ? clampValue(module->flowSetting.load(), 0, 3)
+                   : static_cast<int>(FlowDirection::LEFT);
+        const int timePixels = std::max(
+            static_cast<int>(std::lround(
+                flow < 2 ? framebuffer.y : framebuffer.x)),
+            1);
+        const int frequencyPixels = std::max(
+            static_cast<int>(std::lround(
+                flow < 2 ? framebuffer.x : framebuffer.y)),
+            1);
+        const float rowsPerTimePixel =
+            timeline.visibleSpan() *
+            timeline.expectedRowsPerSecond() /
+            timePixels;
+        // Minification begins above one source row per physical pixel.
+        // Introduce reconstruction continuously so framebuffer rounding and
+        // zoom never expose a binary rendering-mode transition. The
+        // smootherstep curve has zero slope at both ends.
+        const float prefilterTransition = clampValue(
+            (rowsPerTimePixel - 1.f) / 0.2f, 0.f, 1.f);
+        const float prefilterMix =
+            prefilterTransition * prefilterTransition *
+            prefilterTransition *
+            (prefilterTransition *
+                 (prefilterTransition * 6.f - 15.f) +
+             10.f);
+        const bool useTemporalPrefilter =
+            prefilterMix > 0.f && timeline.size() >= 2;
+
+        GLint oldProgram = 0, oldActiveTexture = 0, oldTexture0 = 0,
+              oldTexture1 = 0, oldTexture2 = 0, oldTexture3 = 0,
+              oldTexture4 = 0;
         GLint oldUnpackAlignment = 4;
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
@@ -962,6 +1436,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture2);
         glActiveTexture(GL_TEXTURE3);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture3);
+        glActiveTexture(GL_TEXTURE4);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture4);
         glPushAttrib(GL_CURRENT_BIT | GL_ENABLE_BIT | GL_VIEWPORT_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT);
         glViewport(0, 0, static_cast<GLsizei>(framebuffer.x), static_cast<GLsizei>(framebuffer.y));
         glDisable(GL_DEPTH_TEST);
@@ -970,10 +1446,13 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
 
-        if (renderer.initialize(timeline.capacity())) {
+        if (renderer.initialize(timeline.capacity(), frequencyPixels,
+                                timePixels)) {
             if (renderer.allocatedRows == timeline.capacity() && dirtyRows.size() != static_cast<size_t>(timeline.capacity()))
                 resizeCaches(timeline.capacity());
             uploadDirtyData();
+            if (useTemporalPrefilter)
+                uploadTemporalPrefilter(frequencyPixels, timePixels);
             const int palette =
                 clampValue(module ? module->paletteSetting.load() : static_cast<int>(Palette::INFERNO), 0,
                            static_cast<int>(Palette::COUNT) - 1);
@@ -991,10 +1470,11 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             glActiveTexture(GL_TEXTURE3);
             glBindTexture(GL_TEXTURE_2D, renderer.paletteTexture);
             glUniform1i(renderer.paletteLocation, 3);
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, renderer.prefilterTexture);
+            glUniform1i(renderer.prefilterLocation, 4);
             glUniform1f(renderer.rowsLocation, static_cast<float>(timeline.capacity()));
-            glUniform1i(renderer.flowLocation,
-                        module ? clampValue(module->flowSetting.load(), 0, 3)
-                               : static_cast<int>(FlowDirection::LEFT));
+            glUniform1i(renderer.flowLocation, flow);
             glUniform2f(renderer.viewLocation, module ? module->viewMinimum.load() : 0.f,
                         module ? module->viewMaximum.load() : 1.f);
             glUniform2f(renderer.rangeLocation,
@@ -1010,6 +1490,24 @@ struct SpectrumDisplay : widget::OpenGlWidget {
                                : static_cast<int>(RenderingStyle::PRECISE));
             glUniform2f(renderer.logicalPixelLocation, 1.f / std::max(framebuffer.x, 1.f),
                         1.f / std::max(framebuffer.y, 1.f));
+            glUniform1f(
+                renderer.rowsPerTimePixelLocation,
+                rowsPerTimePixel);
+            glUniform1f(renderer.lookupCellsLocation,
+                        static_cast<float>(renderer.allocatedLookupCells));
+            glUniform1f(
+                renderer.livePhaseLocation,
+                timeline.followsLive()
+                    ? timeline.livePhase() /
+                          std::max(timeline.visibleSpan(), 1e-6f)
+                    : 0.f);
+            glUniform1f(
+                renderer.oldestPhysicalLocation,
+                static_cast<float>(
+                    std::max(timeline.physicalFromOldest(0), 0)));
+            glUniform1f(
+                renderer.prefilterMixLocation,
+                useTemporalPrefilter ? prefilterMix : 0.f);
             drawQuad();
         } else {
             glUseProgram(0);
@@ -1032,6 +1530,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture2));
         glActiveTexture(GL_TEXTURE3);
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture3));
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(oldTexture4));
         glActiveTexture(static_cast<GLenum>(oldActiveTexture));
         glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
     }

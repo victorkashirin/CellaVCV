@@ -12,6 +12,8 @@ namespace spectrum {
 struct TimelineSelection {
     int olderPhysical = -1;
     int newerPhysical = -1;
+    int olderOrdered = -1;
+    int newerOrdered = -1;
     float fraction = 0.f;
     bool valid = false;
     bool interpolationValid = false;
@@ -55,11 +57,13 @@ class HistoryTimeline {
     void pan(float deltaSeconds);
     void zoom(float factor, float anchorNormalizedAge);
     float minimumVisibleSpan() const;
+    void setLivePhase(float seconds);
+    float livePhase() const { return livePhaseSeconds; }
 
     TimelineSelection lookup(float normalizedAge) const;
     double ageForSample(uint64_t sample, float sampleRate) const;
     float normalizedAgeForSample(uint64_t sample, float sampleRate) const;
-    std::array<unsigned char, TIME_LOOKUP_SIZE * 4> buildLookup() const;
+    std::vector<float> buildLookup(int lookupSize) const;
     std::vector<TimeTick> makeTicks(float minimumPixelSpacing, float axisPixels) const;
 
     void addMarker(const MarkerEvent& marker);
@@ -75,10 +79,12 @@ class HistoryTimeline {
     float retainedSeconds = 8.f;
     float spanSeconds = 8.f;
     float nearAgeSeconds = 0.f;
+    float livePhaseSeconds = 0.f;
     bool followLive = true;
     std::vector<MarkerEvent> retainedMarkers;
 
     double sampleDeltaSeconds(const SpectrumRow& newer, const SpectrumRow& older) const;
+    TimelineSelection lookupAgeFromNewest(double requestedAge) const;
     float maximumNearAge() const;
     void clampViewport();
 };

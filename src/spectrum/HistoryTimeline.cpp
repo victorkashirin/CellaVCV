@@ -15,6 +15,7 @@ void HistoryTimeline::clear() {
     head = -1;
     count = 0;
     nearAgeSeconds = 0.f;
+    livePhaseSeconds = 0.f;
     followLive = true;
     clearMarkers();
 }
@@ -113,6 +114,14 @@ float HistoryTimeline::minimumVisibleSpan() const {
     return std::max(0.250f, 4.f / static_cast<float>(std::max(expectedRate, 1)));
 }
 
+void HistoryTimeline::setLivePhase(float seconds) {
+    const float maximum =
+        static_cast<float>(1.25 * expectedIntervalSeconds());
+    livePhaseSeconds =
+        clampValue(std::isfinite(seconds) ? seconds : 0.f, 0.f, maximum);
+    clampViewport();
+}
+
 double HistoryTimeline::sampleDeltaSeconds(const SpectrumRow& newer, const SpectrumRow& older) const {
     if (!(newer.sampleRate > 0.f) || newer.sampleRate != older.sampleRate ||
         newer.rowEndSample < older.rowEndSample)
@@ -125,7 +134,9 @@ float HistoryTimeline::maximumNearAge() const {
     const SpectrumRow* newest = newestRow();
     const SpectrumRow* oldest = oldestRow();
     const double available = sampleDeltaSeconds(*newest, *oldest);
-    return std::max(0.f, static_cast<float>(available) - spanSeconds);
+    const float livePhase = followLive ? livePhaseSeconds : 0.f;
+    return std::max(
+        0.f, static_cast<float>(available) + livePhase - spanSeconds);
 }
 
 void HistoryTimeline::clampViewport() {
@@ -138,12 +149,21 @@ void HistoryTimeline::clampViewport() {
 }
 
 TimelineSelection HistoryTimeline::lookup(float normalizedAge) const {
+    const double requestedAge =
+        nearAgeSeconds +
+        clampValue(normalizedAge, 0.f, 1.f) *
+            static_cast<double>(spanSeconds) -
+        (followLive ? livePhaseSeconds : 0.f);
+    return lookupAgeFromNewest(requestedAge);
+}
+
+TimelineSelection HistoryTimeline::lookupAgeFromNewest(
+    double requestedAge) const {
     TimelineSelection result;
     if (count <= 0) return result;
     const SpectrumRow* newest = newestRow();
     if (!newest || !(newest->sampleRate > 0.f)) return result;
-    const double requestedAge =
-        nearAgeSeconds + clampValue(normalizedAge, 0.f, 1.f) * static_cast<double>(spanSeconds);
+    if (requestedAge < 0.0) return result;
     const double requested =
         static_cast<double>(newest->rowEndSample) - requestedAge * static_cast<double>(newest->sampleRate);
     if (requested < 0.0) return result;
@@ -165,6 +185,7 @@ TimelineSelection HistoryTimeline::lookup(float normalizedAge) const {
         const double distance = std::fabs(static_cast<double>(row->rowEndSample) - requested) / row->sampleRate;
         if (distance <= 1.25 * expectedIntervalSeconds()) {
             result.olderPhysical = result.newerPhysical = physicalFromOldest(0);
+            result.olderOrdered = result.newerOrdered = 0;
             result.valid = true;
         }
         return result;
@@ -174,6 +195,7 @@ TimelineSelection HistoryTimeline::lookup(float normalizedAge) const {
         const double distance = std::fabs(static_cast<double>(row->rowEndSample) - requested) / row->sampleRate;
         if (distance <= 1.25 * expectedIntervalSeconds()) {
             result.olderPhysical = result.newerPhysical = head;
+            result.olderOrdered = result.newerOrdered = count - 1;
             result.valid = true;
         }
         return result;
@@ -189,6 +211,8 @@ TimelineSelection HistoryTimeline::lookup(float normalizedAge) const {
     if (!(interval > 0.0) || interval > 2.5 * expectedIntervalSeconds()) return result;
     result.olderPhysical = olderPhysical;
     result.newerPhysical = newerPhysical;
+    result.olderOrdered = low - 1;
+    result.newerOrdered = low;
     result.fraction = clampValue(static_cast<float>(
                                      (requested - static_cast<double>(older->rowEndSample)) /
                                      (static_cast<double>(newerRowValue->rowEndSample - older->rowEndSample))),
@@ -202,7 +226,9 @@ double HistoryTimeline::ageForSample(uint64_t sample, float sampleRate) const {
     const SpectrumRow* newest = newestRow();
     if (!newest || !(sampleRate > 0.f) || newest->sampleRate != sampleRate || newest->rowEndSample < sample)
         return -1.0;
-    return static_cast<double>(newest->rowEndSample - sample) / sampleRate;
+    return static_cast<double>(newest->rowEndSample - sample) /
+               sampleRate +
+           (followLive ? livePhaseSeconds : 0.f);
 }
 
 float HistoryTimeline::normalizedAgeForSample(uint64_t sample, float sampleRate) const {
@@ -211,27 +237,37 @@ float HistoryTimeline::normalizedAgeForSample(uint64_t sample, float sampleRate)
     return static_cast<float>((age - nearAgeSeconds) / spanSeconds);
 }
 
-std::array<unsigned char, TIME_LOOKUP_SIZE * 4> HistoryTimeline::buildLookup() const {
-    std::array<unsigned char, TIME_LOOKUP_SIZE * 4> bytes = {};
-    for (int i = 0; i < TIME_LOOKUP_SIZE; ++i) {
-        const TimelineSelection selected = lookup(static_cast<float>(i) / (TIME_LOOKUP_SIZE - 1));
+std::vector<float> HistoryTimeline::buildLookup(int requestedLookupSize) const {
+    const int lookupSize = std::max(requestedLookupSize, 2);
+    std::vector<float> values(static_cast<size_t>(lookupSize * 4), 0.f);
+    for (int i = 0; i < lookupSize; ++i) {
+        const TimelineSelection selected =
+            lookupAgeFromNewest(
+                nearAgeSeconds +
+                static_cast<double>(i) /
+                    static_cast<double>(lookupSize - 1) *
+                    static_cast<double>(spanSeconds));
         const size_t offset = static_cast<size_t>(i * 4);
         if (!selected.valid) continue;
-        const unsigned int physical = static_cast<unsigned int>(std::max(selected.olderPhysical, 0));
-        bytes[offset] = static_cast<unsigned char>((physical >> 8) & 0xffu);
-        bytes[offset + 1] = static_cast<unsigned char>(physical & 0xffu);
-        bytes[offset + 2] = selected.interpolationValid ? 255 : 127;
-        bytes[offset + 3] =
-            static_cast<unsigned char>(std::lround(clampValue(selected.fraction, 0.f, 1.f) * 255.f));
+        values[offset] =
+            static_cast<float>(std::max(selected.olderOrdered, 0)) +
+            (selected.interpolationValid
+                 ? clampValue(selected.fraction, 0.f, 1.f)
+                 : 0.f);
+        values[offset + 1] = 1.f;
+        values[offset + 2] =
+            selected.interpolationValid ? 1.f : 0.f;
+        values[offset + 3] = 1.f;
     }
-    return bytes;
+    return values;
 }
 
 std::vector<TimeTick> HistoryTimeline::makeTicks(float minimumPixelSpacing, float axisPixels) const {
     std::vector<TimeTick> result;
     if (!(spanSeconds > 0.f) || !(axisPixels > 0.f)) return result;
-    static const float choices[] = {0.01f, 0.02f, 0.05f, 0.1f, 0.2f, 0.5f,
-                                    1.f,    2.f,    5.f,    10.f};
+    static const float choices[] = {
+        0.01f, 0.02f, 0.05f, 0.1f, 0.2f, 0.5f, 1.f,
+        2.f,    5.f,    10.f,   20.f, 30.f, 60.f};
     float spacing = choices[sizeof(choices) / sizeof(choices[0]) - 1];
     for (size_t i = 0; i < sizeof(choices) / sizeof(choices[0]); ++i) {
         if (choices[i] / spanSeconds * axisPixels >= minimumPixelSpacing) {
