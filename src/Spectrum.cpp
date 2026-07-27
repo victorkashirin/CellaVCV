@@ -1039,6 +1039,7 @@ struct SpectrumOverlay : TransparentWidget {
     bool hovered = false;
     bool draggingTime = false;
     bool layoutTogglePressed = false;
+    bool recessedBezel = false;
     math::Vec cursor;
     std::vector<LabelBounds> frequencyLabelBounds;
 
@@ -1054,9 +1055,20 @@ struct SpectrumOverlay : TransparentWidget {
         const float heightScale = box.size.y / DISPLAY_HEIGHT;
         return clampValue(std::min(widthScale, heightScale), 1.f, 2.5f);
     }
+    float frequencyAxisPixels() const {
+        if (isVerticalFlow(flow())) return std::max(box.size.x, 1.f);
+        const float bezelInset = recessedBezel ? GRID_BOTTOM_INSET : 0.f;
+        return std::max(box.size.y - bezelInset, 1.f);
+    }
     LogicalPoint logicalAt(math::Vec position) const {
-        return logicalFromScreen(flow(), position.x / std::max(box.size.x, 1.f),
-                                 1.f - position.y / std::max(box.size.y, 1.f));
+        const float normalizedX =
+            position.x / std::max(box.size.x, 1.f);
+        const float normalizedBottomY =
+            1.f - position.y /
+                      (isVerticalFlow(flow())
+                           ? std::max(box.size.y, 1.f)
+                           : frequencyAxisPixels());
+        return logicalFromScreen(flow(), normalizedX, normalizedBottomY);
     }
     float fullFrequencyCoordinate(const LogicalPoint& logical) const {
         return viewLow() + logical.frequency * (viewHigh() - viewLow());
@@ -1112,21 +1124,26 @@ struct SpectrumOverlay : TransparentWidget {
             frequencyCoordinateForHz(frequency, maximumFrequency(), frequencyBins());
         const float visible = (full - viewLow()) / (viewHigh() - viewLow());
         if (visible < 0.f || visible > 1.f) return;
-        const float position = visible * (isVerticalFlow(flow()) ? box.size.x : box.size.y);
+        const float axisPixels = frequencyAxisPixels();
+        const float position = visible * axisPixels;
         const float gridOpacity =
             clampValue(module ? module->frequencyGridOpacitySetting.load() : 1.f, 0.f, 1.f);
         const int gridAlpha =
             static_cast<int>(std::lround((secondary ? 36.f : 64.f) * gridOpacity));
         nvgStrokeColor(args.vg, secondary ? nvgRGBA(155, 184, 194, gridAlpha)
                                          : nvgRGBA(190, 205, 210, gridAlpha));
-        nvgStrokeWidth(args.vg, secondary ? 0.45f : 0.7f);
+        const float strokeWidth = secondary ? 0.45f : 0.7f;
+        nvgStrokeWidth(args.vg, strokeWidth);
         nvgBeginPath(args.vg);
         if (isVerticalFlow(flow())) {
             nvgMoveTo(args.vg, position, GRID_TOP_INSET);
             nvgLineTo(args.vg, position, box.size.y - GRID_BOTTOM_INSET);
         } else {
+            const float halfStroke = strokeWidth * 0.5f;
+            const float bottom = axisPixels;
             const float y =
-                clampValue(box.size.y - position, GRID_TOP_INSET, box.size.y - GRID_BOTTOM_INSET);
+                clampValue(bottom - position, halfStroke,
+                           recessedBezel ? bottom : bottom - halfStroke);
             nvgMoveTo(args.vg, 0.f, y);
             nvgLineTo(args.vg, box.size.x, y);
         }
@@ -1155,7 +1172,8 @@ struct SpectrumOverlay : TransparentWidget {
             nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
         } else {
             float labelY =
-                clampValue(box.size.y - position, GRID_TOP_INSET, box.size.y - GRID_BOTTOM_INSET);
+                clampValue(axisPixels - position, GRID_TOP_INSET,
+                           box.size.y - GRID_BOTTOM_INSET);
             const bool labelsAtLeft = flow() == FlowDirection::LEFT;
             const int horizontalAlignment = labelsAtLeft ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
             int alignment = horizontalAlignment | NVG_ALIGN_MIDDLE;
@@ -1194,14 +1212,13 @@ struct SpectrumOverlay : TransparentWidget {
                     drawFrequencyGuide(args, octaveGuides[i], frequencyLabel(octaveGuides[i]), false, last);
             }
             if (scale == FrequencyScaleMode::MUSICAL) {
-                const float frequencyAxisPixels =
-                    isVerticalFlow(flow()) ? box.size.x : box.size.y;
+                const float frequencyAxisLength = frequencyAxisPixels();
                 const float lowFrequency = frequencyFromFullCoordinate(viewLow());
                 const float highFrequency = frequencyFromFullCoordinate(viewHigh());
                 const float visibleSemitones =
                     12.f * std::log2(std::max(highFrequency / lowFrequency, 1.0001f));
                 const float semitonePixels =
-                    frequencyAxisPixels / std::max(visibleSemitones, 1.f);
+                    frequencyAxisLength / std::max(visibleSemitones, 1.f);
                 for (int midi = 12; midi <= 132; ++midi) {
                     if (midi % 12 != 0 && semitonePixels < 18.f) continue;
                     const float frequency = 440.f * std::pow(2.f, (midi - 69) / 12.f);
@@ -1472,7 +1489,8 @@ struct SpectrumOverlay : TransparentWidget {
         } else {
             const float low = module->viewMinimum.load(), high = module->viewMaximum.load(), span = high - low;
             const float axisDelta = isVerticalFlow(flow()) ? event.mouseDelta.x / (zoom * box.size.x)
-                                                           : -event.mouseDelta.y / (zoom * box.size.y);
+                                                           : -event.mouseDelta.y /
+                                                                 (zoom * frequencyAxisPixels());
             float nextLow = clampValue(low - axisDelta * span, 0.f, 1.f - span);
             module->viewMinimum.store(nextLow);
             module->viewMaximum.store(nextLow + span);
@@ -2142,6 +2160,8 @@ struct SpectrumWidget : ModuleWidget {
             if (spectrumView->parent == this) {
                 if (spectrumView->bezel)
                     spectrumView->bezel->setVisible(!displayOnly);
+                if (spectrumView->overlay)
+                    spectrumView->overlay->recessedBezel = !displayOnly;
                 if (displayOnly) {
                     spectrumView->setBox(math::Rect(
                         Vec(DISPLAY_ONLY_PORT_RAIL_WIDTH,
@@ -2200,6 +2220,8 @@ struct SpectrumWidget : ModuleWidget {
         floating->view = spectrumView;
         if (spectrumView->bezel)
             spectrumView->bezel->setVisible(false);
+        if (spectrumView->overlay)
+            spectrumView->overlay->recessedBezel = false;
 
         spectrumView->parent->removeChild(spectrumView);
         floating->addChild(spectrumView);
