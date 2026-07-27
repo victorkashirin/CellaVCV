@@ -312,8 +312,7 @@ void HistoryTimeline::purgeMarkers() {
     if (!oldest || !newest) return;
     retainedMarkers.erase(
         std::remove_if(retainedMarkers.begin(), retainedMarkers.end(), [&](const MarkerEvent& marker) {
-            if (marker.sampleRate != newest->sampleRate || marker.configGeneration != newest->configGeneration)
-                return true;
+            if (marker.sampleRate != newest->sampleRate) return true;
             return marker.timelineSample < oldest->rowEndSample;
         }),
         retainedMarkers.end());

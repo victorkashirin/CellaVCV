@@ -130,6 +130,7 @@ struct Spectrum : Module {
     std::atomic<uint64_t> clearGeneration{0};
     std::atomic<uint64_t> rowAcceptanceBoundarySample{0};
     std::atomic<uint64_t> activeConfigGeneration{1};
+    std::atomic<uint64_t> historyResetGeneration{1};
     std::atomic<uint64_t> displayClockSample{0};
     std::atomic<float> displayClockSampleRate{48000.f};
 #ifndef NDEBUG
@@ -197,8 +198,15 @@ struct Spectrum : Module {
                                      channelMode != appliedChannelMode || frequencyBins != appliedFrequencyBins ||
                                      polyChannel != appliedPolyChannel || sampleRateChanged;
         const bool qualityChanged = quality != appliedQuality;
+        // Keep comparable rows when changing the analysis algorithm or channel
+        // mode. Cadence, frequency coordinates, polyphonic source, and sample
+        // rate changes start a new history.
+        const bool historyShouldReset =
+            appliedSampleRate != 0.f &&
+            (qualityChanged || frequencyBins != appliedFrequencyBins ||
+             polyChannel != appliedPolyChannel || sampleRateChanged);
         if (analysisChanged || qualityChanged || appliedSampleRate == 0.f) {
-            if (analysisChanged) {
+            if (analysisChanged || qualityChanged) {
                 ++configGeneration;
                 if (sampleRateChanged) {
                     timelineSample = 0;
@@ -219,6 +227,8 @@ struct Spectrum : Module {
             next.generation = configGeneration;
             analyzer.configure(next);
             activeConfigGeneration.store(configGeneration, std::memory_order_release);
+            if (historyShouldReset)
+                historyResetGeneration.fetch_add(1, std::memory_order_release);
             appliedFftSize = fftSize;
             appliedWindow = window;
             appliedFftOverlap = fftOverlap;
@@ -726,7 +736,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     std::array<float, NUM_FREQUENCY_CELLS> currentTrace;
     std::array<float, NUM_FREQUENCY_CELLS> peakTrace;
     uint64_t seenClearGeneration = 0;
-    uint64_t seenModuleConfigGeneration = 0;
+    uint64_t seenHistoryResetGeneration = 0;
     int appliedCapacity = 0;
     int appliedFrequencySmoothing = -1;
     int appliedFrequencyBins = -1;
@@ -940,9 +950,11 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             while (!module->markerEvents.empty()) module->markerEvents.shift();
             return;
         }
+        const uint64_t historyReset = module->historyResetGeneration.load(std::memory_order_acquire);
+        if (seenHistoryResetGeneration != 0 && historyReset != seenHistoryResetGeneration)
+            clearHistory();
+        seenHistoryResetGeneration = historyReset;
         const uint64_t generation = module->activeConfigGeneration.load(std::memory_order_acquire);
-        if (seenModuleConfigGeneration != 0 && generation != seenModuleConfigGeneration) clearHistory();
-        seenModuleConfigGeneration = generation;
         const bool frozen = module->frozen.load(std::memory_order_relaxed);
         const uint64_t acceptanceBoundary = module->rowAcceptanceBoundarySample.load(std::memory_order_acquire);
         while (!module->displayRows.empty()) {
