@@ -112,6 +112,8 @@ struct SpectrumNativeWindow::Impl {
         if (!entered) {
             native->cursorValid = false;
             native->events.handleLeave();
+            if (!native->events.getDraggedWidget())
+                native->events.setHoveredWidget(NULL);
         }
     }
 
