@@ -1039,7 +1039,6 @@ struct SpectrumOverlay : TransparentWidget {
     bool hovered = false;
     bool draggingTime = false;
     bool layoutTogglePressed = false;
-    bool recessedBezel = false;
     math::Vec cursor;
     std::vector<LabelBounds> frequencyLabelBounds;
 
@@ -1056,9 +1055,8 @@ struct SpectrumOverlay : TransparentWidget {
         return clampValue(std::min(widthScale, heightScale), 1.f, 2.5f);
     }
     float frequencyAxisPixels() const {
-        if (isVerticalFlow(flow())) return std::max(box.size.x, 1.f);
-        const float bezelInset = recessedBezel ? GRID_BOTTOM_INSET : 0.f;
-        return std::max(box.size.y - bezelInset, 1.f);
+        return isVerticalFlow(flow()) ? std::max(box.size.x, 1.f)
+                                      : std::max(box.size.y, 1.f);
     }
     LogicalPoint logicalAt(math::Vec position) const {
         const float normalizedX =
@@ -1143,7 +1141,7 @@ struct SpectrumOverlay : TransparentWidget {
             const float bottom = axisPixels;
             const float y =
                 clampValue(bottom - position, halfStroke,
-                           recessedBezel ? bottom : bottom - halfStroke);
+                           bottom - halfStroke);
             nvgMoveTo(args.vg, 0.f, y);
             nvgLineTo(args.vg, box.size.x, y);
         }
@@ -1546,20 +1544,6 @@ struct SpectrumBezel : TransparentWidget {
         nvgMoveTo(args.vg, 0.f, height + 0.5f);
         nvgLineTo(args.vg, width, height + 0.5f);
         nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.25f));
-        nvgStrokeWidth(args.vg, 1.f);
-        nvgStroke(args.vg);
-
-        nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, 0.f, height - 1.f);
-        nvgLineTo(args.vg, width, height - 1.f);
-        nvgStrokeColor(args.vg, nvgRGB(0x12, 0x12, 0x12));
-        nvgStrokeWidth(args.vg, 2.f);
-        nvgStroke(args.vg);
-
-        nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, 0.f, height - 2.5f);
-        nvgLineTo(args.vg, width, height - 2.5f);
-        nvgStrokeColor(args.vg, nvgRGBAf(1.f, 1.f, 1.f, 0.20f));
         nvgStrokeWidth(args.vg, 1.f);
         nvgStroke(args.vg);
 
@@ -2160,8 +2144,6 @@ struct SpectrumWidget : ModuleWidget {
             if (spectrumView->parent == this) {
                 if (spectrumView->bezel)
                     spectrumView->bezel->setVisible(!displayOnly);
-                if (spectrumView->overlay)
-                    spectrumView->overlay->recessedBezel = !displayOnly;
                 if (displayOnly) {
                     spectrumView->setBox(math::Rect(
                         Vec(DISPLAY_ONLY_PORT_RAIL_WIDTH,
@@ -2220,8 +2202,6 @@ struct SpectrumWidget : ModuleWidget {
         floating->view = spectrumView;
         if (spectrumView->bezel)
             spectrumView->bezel->setVisible(false);
-        if (spectrumView->overlay)
-            spectrumView->overlay->recessedBezel = false;
 
         spectrumView->parent->removeChild(spectrumView);
         floating->addChild(spectrumView);
