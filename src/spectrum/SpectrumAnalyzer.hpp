@@ -29,8 +29,8 @@ class SpectrumAnalyzer {
     bool processSample(float normalizedSample, uint64_t timelineSample, SpectrumRow& outputRow);
 
     /**
-     * Discards delayed Advanced rows at a Clear or Freeze boundary. Future
-     * reassigned contributions at or before the boundary are rejected.
+     * Discards delayed Advanced rows at a Clear boundary. Future reassigned
+     * contributions at or before the boundary are rejected.
      */
     void discardPending(uint64_t timelineSample);
 

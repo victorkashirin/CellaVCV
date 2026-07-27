@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -249,8 +250,6 @@ struct Spectrum : Module {
         if (freezeEvent) {
             const bool nowFrozen = !frozen.load(std::memory_order_relaxed);
             frozen.store(nowFrozen, std::memory_order_relaxed);
-            if (!nowFrozen) rowAcceptanceBoundarySample.store(timelineSample, std::memory_order_release);
-            analyzer.discardPending(timelineSample);
         }
         const bool clearEvent = clearButtonTrigger.process(params[CLEAR_PARAM].getValue());
         if (clearEvent) {
@@ -281,9 +280,9 @@ struct Spectrum : Module {
         SpectrumRow row;
         if (analyzer.processSample(mixed * VOLTAGE_TO_FULL_SCALE, timelineSample, row)) {
             displayClockSample.store(timelineSample, std::memory_order_relaxed);
-            if (!frozen.load(std::memory_order_relaxed) && !displayRows.full()) displayRows.push(row);
+            if (!displayRows.full()) displayRows.push(row);
 #ifndef NDEBUG
-            else if (!frozen.load(std::memory_order_relaxed))
+            else
                 droppedRows.fetch_add(1, std::memory_order_relaxed);
 #endif
         }
@@ -766,6 +765,8 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     uint64_t prefilterNewestSample = 0;
     uint64_t prefilterRevision = 1;
     uint64_t cachedPrefilterRevision = 0;
+    std::deque<SpectrumRow> frozenRows;
+    bool displayFrozen = false;
 
     SpectrumDisplay() {
         currentTrace.fill(INTERNAL_FLOOR_DB);
@@ -939,6 +940,24 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         lookupDirty = true;
     }
 
+    void retainFrozenRow(const SpectrumRow& row) {
+        const size_t capacity = static_cast<size_t>(std::max(timeline.capacity(), 1));
+        while (frozenRows.size() >= capacity) frozenRows.pop_front();
+        frozenRows.push_back(row);
+    }
+
+    void clearFrozenRows() {
+        std::deque<SpectrumRow>().swap(frozenRows);
+    }
+
+    void applyFrozenRows() {
+        const size_t capacity = static_cast<size_t>(std::max(timeline.capacity(), 1));
+        while (frozenRows.size() > capacity) frozenRows.pop_front();
+        for (std::deque<SpectrumRow>::const_iterator row = frozenRows.begin(); row != frozenRows.end(); ++row)
+            addRow(*row);
+        clearFrozenRows();
+    }
+
     void drainQueues() {
         if (!module) return;
         syncSettings();
@@ -946,20 +965,35 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         if (clear != seenClearGeneration) {
             seenClearGeneration = clear;
             clearHistory();
+            clearFrozenRows();
             while (!module->displayRows.empty()) module->displayRows.shift();
             while (!module->markerEvents.empty()) module->markerEvents.shift();
             return;
         }
         const uint64_t historyReset = module->historyResetGeneration.load(std::memory_order_acquire);
-        if (seenHistoryResetGeneration != 0 && historyReset != seenHistoryResetGeneration)
+        if (seenHistoryResetGeneration != 0 && historyReset != seenHistoryResetGeneration) {
             clearHistory();
+            clearFrozenRows();
+        }
         seenHistoryResetGeneration = historyReset;
         const uint64_t generation = module->activeConfigGeneration.load(std::memory_order_acquire);
         const bool frozen = module->frozen.load(std::memory_order_relaxed);
         const uint64_t acceptanceBoundary = module->rowAcceptanceBoundarySample.load(std::memory_order_acquire);
+        if (frozen && !displayFrozen) {
+            displayFrozen = true;
+            clearFrozenRows();
+        }
         while (!module->displayRows.empty()) {
             const SpectrumRow row = module->displayRows.shift();
-            if (!frozen && row.configGeneration == generation && row.rowEndSample > acceptanceBoundary) addRow(row);
+            if (row.configGeneration != generation || row.rowEndSample <= acceptanceBoundary) continue;
+            if (displayFrozen)
+                retainFrozenRow(row);
+            else
+                addRow(row);
+        }
+        if (!frozen && displayFrozen) {
+            displayFrozen = false;
+            applyFrozenRows();
         }
         while (!module->markerEvents.empty()) {
             const MarkerEvent marker = module->markerEvents.shift();

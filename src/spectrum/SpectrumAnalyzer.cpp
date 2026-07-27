@@ -148,8 +148,12 @@ struct SpectrumAnalyzer::Kernel {
     }
 
     void reset(float sampleRate, FftOverlap overlap, FrequencyBinScale frequencyBins,
-               uint64_t rowPeriod) {
-        std::fill(capture.begin(), capture.end(), 0.f);
+               uint64_t rowPeriod, bool preserveCapture = false) {
+        if (!preserveCapture) {
+            std::fill(capture.begin(), capture.end(), 0.f);
+            writePosition = 0;
+            filled = 0;
+        }
         std::fill(work.begin(), work.end(), 0.f);
         std::fill(fftOutput.begin(), fftOutput.end(), 0.f);
         std::fill(timeFftOutput.begin(), timeFftOutput.end(), 0.f);
@@ -157,8 +161,6 @@ struct SpectrumAnalyzer::Kernel {
         std::fill(magnitudes.begin(), magnitudes.end(), 0.f);
         std::fill(advancedBins.begin(), advancedBins.end(), AdvancedBin());
         spectrum.fill(INTERNAL_FLOOR_DB);
-        writePosition = 0;
-        filled = 0;
         samplesSinceAnalysis = 0;
         analyzed = false;
         hopSize = effectiveFftHopSize(size, sampleRate, overlap);
@@ -388,8 +390,13 @@ void SpectrumAnalyzer::configure(const SpectrumConfig& newConfig) {
     const bool qualityChanged = wasConfigured && oldConfig.quality != config.quality;
     activeKernel = kernels[static_cast<size_t>(fftIndex)].get();
     if (analysisChanged) {
+        const bool captureCompatible =
+            wasConfigured && oldConfig.fftSize == config.fftSize &&
+            oldConfig.channelMode == config.channelMode &&
+            oldConfig.polyChannel == config.polyChannel &&
+            oldConfig.sampleRate == config.sampleRate;
         activeKernel->reset(config.sampleRate, config.fftOverlap, config.frequencyBins,
-                            rowPeriodSamples);
+                            rowPeriodSamples, captureCompatible);
         processedSamples = 0;
         latestSpectrumSample = 0;
         haveSpectrum = false;
