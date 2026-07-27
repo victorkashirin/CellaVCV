@@ -7,10 +7,30 @@ namespace cella {
 namespace spectrum {
 namespace {
 
-constexpr int DEFAULT_WIDTH = 900;
-constexpr int DEFAULT_HEIGHT = 560;
 constexpr int MINIMUM_WIDTH = 420;
 constexpr int MINIMUM_HEIGHT = 280;
+
+bool isVisibleOnAnyMonitor(int x, int y, int width, int height) {
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    for (int i = 0; monitors && i < monitorCount; ++i) {
+        int monitorX = 0;
+        int monitorY = 0;
+        int monitorWidth = 0;
+        int monitorHeight = 0;
+        glfwGetMonitorWorkarea(monitors[i], &monitorX, &monitorY,
+                               &monitorWidth, &monitorHeight);
+        const int overlapWidth =
+            std::min(x + width, monitorX + monitorWidth) -
+            std::max(x, monitorX);
+        const int overlapHeight =
+            std::min(y + height, monitorY + monitorHeight) -
+            std::max(y, monitorY);
+        if (overlapWidth >= 64 && overlapHeight >= 32)
+            return true;
+    }
+    return false;
+}
 
 GLFWwindow* rackWindow() {
     return APP && APP->window ? APP->window->win : NULL;
@@ -141,12 +161,16 @@ struct SpectrumNativeWindow::Impl {
         return mods;
     }
 
-    bool open() {
+    bool open(const SpectrumNativeWindowGeometry& geometry) {
         view = client.nativeWindowWidget();
         GLFWwindow* mainWindow = rackWindow();
         if (window || !view || !view->parent || !mainWindow)
             return false;
 
+        const int requestedWidth =
+            std::max(geometry.width, MINIMUM_WIDTH);
+        const int requestedHeight =
+            std::max(geometry.height, MINIMUM_HEIGHT);
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
@@ -156,7 +180,7 @@ struct SpectrumNativeWindow::Impl {
 #if defined ARCH_MAC
         glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
 #endif
-        window = glfwCreateWindow(DEFAULT_WIDTH, DEFAULT_HEIGHT,
+        window = glfwCreateWindow(requestedWidth, requestedHeight,
                                   "Cella Spectrum", NULL, mainWindow);
         glfwDefaultWindowHints();
         if (!window)
@@ -195,9 +219,16 @@ struct SpectrumNativeWindow::Impl {
         int rackHeight = 0;
         glfwGetWindowPos(mainWindow, &rackX, &rackY);
         glfwGetWindowSize(mainWindow, &rackWidth, &rackHeight);
-        glfwSetWindowPos(
-            window, rackX + std::max(24, (rackWidth - DEFAULT_WIDTH) / 2),
-            rackY + std::max(24, (rackHeight - DEFAULT_HEIGHT) / 2));
+        if (geometry.positionValid &&
+            isVisibleOnAnyMonitor(geometry.x, geometry.y, requestedWidth,
+                                  requestedHeight)) {
+            glfwSetWindowPos(window, geometry.x, geometry.y);
+        } else {
+            glfwSetWindowPos(
+                window,
+                rackX + std::max(24, (rackWidth - requestedWidth) / 2),
+                rackY + std::max(24, (rackHeight - requestedHeight) / 2));
+        }
 
         originalParent = view->parent;
         originalBox = view->box;
@@ -207,9 +238,18 @@ struct SpectrumNativeWindow::Impl {
         events.rootWidget = root;
         client.onNativeWindowAttached();
         attached = true;
-        resizeView(rack::math::Vec(DEFAULT_WIDTH, DEFAULT_HEIGHT));
+        resizeView(rack::math::Vec(requestedWidth, requestedHeight));
         glfwShowWindow(window);
         return true;
+    }
+
+    bool getGeometry(SpectrumNativeWindowGeometry& geometry) const {
+        if (!window)
+            return false;
+        glfwGetWindowPos(window, &geometry.x, &geometry.y);
+        glfwGetWindowSize(window, &geometry.width, &geometry.height);
+        geometry.positionValid = true;
+        return geometry.width > 0 && geometry.height > 0;
     }
 
     void resetEventState() {
@@ -326,12 +366,18 @@ SpectrumNativeWindow::SpectrumNativeWindow(
 
 SpectrumNativeWindow::~SpectrumNativeWindow() = default;
 
-bool SpectrumNativeWindow::open() {
-    return impl->open();
+bool SpectrumNativeWindow::open(
+    const SpectrumNativeWindowGeometry& geometry) {
+    return impl->open(geometry);
 }
 
 bool SpectrumNativeWindow::step() {
     return impl->step();
+}
+
+bool SpectrumNativeWindow::getGeometry(
+    SpectrumNativeWindowGeometry& geometry) const {
+    return impl->getGeometry(geometry);
 }
 
 }  // namespace spectrum

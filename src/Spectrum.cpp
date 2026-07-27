@@ -112,6 +112,12 @@ struct Spectrum : Module {
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
     std::atomic<bool> displayOnlyModeSetting{false};
+    std::atomic<bool> nativeWindowOpenSetting{false};
+    std::atomic<bool> nativeWindowPositionValidSetting{false};
+    std::atomic<int> nativeWindowXSetting{0};
+    std::atomic<int> nativeWindowYSetting{0};
+    std::atomic<int> nativeWindowWidthSetting{900};
+    std::atomic<int> nativeWindowHeightSetting{560};
     std::atomic<bool> frozen{false};
     std::atomic<bool> freezeToggleRequested{false};
     std::atomic<uint64_t> clearGeneration{0};
@@ -287,6 +293,19 @@ struct Spectrum : Module {
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
         json_object_set_new(root, "displayOnlyMode",
                             json_boolean(displayOnlyModeSetting.load()));
+        json_object_set_new(root, "nativeWindowOpen",
+                            json_boolean(nativeWindowOpenSetting.load()));
+        json_object_set_new(
+            root, "nativeWindowPositionValid",
+            json_boolean(nativeWindowPositionValidSetting.load()));
+        json_object_set_new(root, "nativeWindowX",
+                            json_integer(nativeWindowXSetting.load()));
+        json_object_set_new(root, "nativeWindowY",
+                            json_integer(nativeWindowYSetting.load()));
+        json_object_set_new(root, "nativeWindowWidth",
+                            json_integer(nativeWindowWidthSetting.load()));
+        json_object_set_new(root, "nativeWindowHeight",
+                            json_integer(nativeWindowHeightSetting.load()));
         json_object_set_new(root, "panelWidth", json_integer(panelWidth));
         return root;
     }
@@ -346,6 +365,24 @@ struct Spectrum : Module {
         json_t* displayOnlyMode = json_object_get(root, "displayOnlyMode");
         displayOnlyModeSetting.store(
             json_is_boolean(displayOnlyMode) && json_is_true(displayOnlyMode));
+        json_t* nativeWindowOpen =
+            json_object_get(root, "nativeWindowOpen");
+        nativeWindowOpenSetting.store(
+            json_is_boolean(nativeWindowOpen) &&
+            json_is_true(nativeWindowOpen));
+        json_t* nativeWindowPositionValid =
+            json_object_get(root, "nativeWindowPositionValid");
+        nativeWindowPositionValidSetting.store(
+            json_is_boolean(nativeWindowPositionValid) &&
+            json_is_true(nativeWindowPositionValid));
+        nativeWindowXSetting.store(getJsonInt(
+            root, "nativeWindowX", -65536, 65536, 0));
+        nativeWindowYSetting.store(getJsonInt(
+            root, "nativeWindowY", -65536, 65536, 0));
+        nativeWindowWidthSetting.store(getJsonInt(
+            root, "nativeWindowWidth", 420, 32768, 900));
+        nativeWindowHeightSetting.store(getJsonInt(
+            root, "nativeWindowHeight", 280, 32768, 560));
         panelWidth =
             getJsonInt(root, "panelWidth", MIN_PANEL_WIDTH_HP, MAX_PANEL_WIDTH_HP,
                        DEFAULT_PANEL_WIDTH_HP);
@@ -2158,10 +2195,12 @@ struct SpectrumWidget : ModuleWidget {
     }
 
     ~SpectrumWidget() override {
+        saveNativeWindowGeometry();
         nativeWindow.reset();
     }
 
     void onContextDestroy(const ContextDestroyEvent& event) override {
+        saveNativeWindowGeometry();
         nativeWindow.reset();
         ModuleWidget::onContextDestroy(event);
     }
@@ -2237,25 +2276,60 @@ struct SpectrumWidget : ModuleWidget {
             box.size.x = spectrum->panelWidth * RACK_GRID_WIDTH;
         layout();
         ModuleWidget::step();
+        if (spectrum && spectrum->nativeWindowOpenSetting.load() &&
+            !nativeWindow && !nativeWindowRequested)
+            nativeWindowRequested = true;
         if (nativeWindowRequested) {
             nativeWindowRequested = false;
             openNativeWindow();
         }
-        if (nativeWindow && !nativeWindow->step())
-            nativeWindow.reset();
+        if (nativeWindow) {
+            saveNativeWindowGeometry();
+            if (!nativeWindow->step()) {
+                nativeWindow.reset();
+                if (spectrum)
+                    spectrum->nativeWindowOpenSetting.store(false);
+            }
+        }
+    }
+
+    void saveNativeWindowGeometry() {
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        if (!spectrum || !nativeWindow)
+            return;
+        SpectrumNativeWindowGeometry geometry;
+        if (!nativeWindow->getGeometry(geometry))
+            return;
+        spectrum->nativeWindowXSetting.store(geometry.x);
+        spectrum->nativeWindowYSetting.store(geometry.y);
+        spectrum->nativeWindowWidthSetting.store(geometry.width);
+        spectrum->nativeWindowHeightSetting.store(geometry.height);
+        spectrum->nativeWindowPositionValidSetting.store(
+            geometry.positionValid);
     }
 
     void openNativeWindow() {
-        if (!module || !spectrumView || nativeWindow || !APP || !APP->scene ||
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        if (!spectrum || !spectrumView || nativeWindow || !APP || !APP->scene ||
             !spectrumView->parent)
             return;
+        SpectrumNativeWindowGeometry geometry;
+        geometry.x = spectrum->nativeWindowXSetting.load();
+        geometry.y = spectrum->nativeWindowYSetting.load();
+        geometry.width = spectrum->nativeWindowWidthSetting.load();
+        geometry.height = spectrum->nativeWindowHeightSetting.load();
+        geometry.positionValid =
+            spectrum->nativeWindowPositionValidSetting.load();
         std::unique_ptr<SpectrumNativeWindow> candidate(
             new SpectrumNativeWindow(*spectrumView));
-        if (!candidate->open()) {
+        if (!candidate->open(geometry)) {
             WARN("Spectrum could not create its display window");
+            spectrum->nativeWindowOpenSetting.store(false);
             return;
         }
         nativeWindow = std::move(candidate);
+        spectrum->nativeWindowOpenSetting.store(true);
+        saveNativeWindowGeometry();
     }
 
     void appendContextMenu(Menu* menu) override {

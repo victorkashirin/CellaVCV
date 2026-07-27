@@ -7,6 +7,14 @@
 namespace cella {
 namespace spectrum {
 
+struct SpectrumNativeWindowGeometry {
+    int x = 0;
+    int y = 0;
+    int width = 900;
+    int height = 560;
+    bool positionValid = false;
+};
+
 class SpectrumNativeWindowClient {
   public:
     virtual ~SpectrumNativeWindowClient() = default;
@@ -31,8 +39,10 @@ class SpectrumNativeWindow {
     SpectrumNativeWindow(const SpectrumNativeWindow&) = delete;
     SpectrumNativeWindow& operator=(const SpectrumNativeWindow&) = delete;
 
-    bool open();
+    bool open(const SpectrumNativeWindowGeometry& geometry =
+                  SpectrumNativeWindowGeometry());
     bool step();
+    bool getGeometry(SpectrumNativeWindowGeometry& geometry) const;
 
   private:
     struct Impl;
