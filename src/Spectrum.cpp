@@ -107,6 +107,7 @@ struct Spectrum : Module {
     std::atomic<float> markerOpacitySetting{0.82f};
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
+    std::atomic<bool> displayOnlyModeSetting{false};
     std::atomic<bool> frozen{false};
     std::atomic<bool> freezeToggleRequested{false};
     std::atomic<uint64_t> clearGeneration{0};
@@ -280,6 +281,8 @@ struct Spectrum : Module {
         json_object_set_new(root, "markerOpacity", json_real(markerOpacitySetting.load()));
         json_object_set_new(root, "viewMinimum", json_real(viewMinimum.load()));
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
+        json_object_set_new(root, "displayOnlyMode",
+                            json_boolean(displayOnlyModeSetting.load()));
         json_object_set_new(root, "panelWidth", json_integer(panelWidth));
         return root;
     }
@@ -336,6 +339,9 @@ struct Spectrum : Module {
         }
         viewMinimum.store(minimum);
         viewMaximum.store(maximum);
+        json_t* displayOnlyMode = json_object_get(root, "displayOnlyMode");
+        displayOnlyModeSetting.store(
+            json_is_boolean(displayOnlyMode) && json_is_true(displayOnlyMode));
         panelWidth =
             getJsonInt(root, "panelWidth", MIN_PANEL_WIDTH_HP, MAX_PANEL_WIDTH_HP,
                        DEFAULT_PANEL_WIDTH_HP);
@@ -1030,6 +1036,7 @@ struct SpectrumOverlay : TransparentWidget {
     SpectrumDisplay* display = NULL;
     bool hovered = false;
     bool draggingTime = false;
+    bool layoutTogglePressed = false;
     math::Vec cursor;
     std::vector<LabelBounds> frequencyLabelBounds;
 
@@ -1069,6 +1076,19 @@ struct SpectrumOverlay : TransparentWidget {
         const float scale = presentationScale();
         return isVerticalFlow(flow()) ? position.x < VERTICAL_TIME_GUTTER * scale
                                       : position.y > box.size.y - HORIZONTAL_TIME_GUTTER * scale;
+    }
+    float layoutControlScale() const {
+        return clampValue(presentationScale(), 1.f, 1.5f);
+    }
+    math::Rect layoutControlBox() const {
+        const float scale = layoutControlScale();
+        const float size = 26.f * scale;
+        const float horizontalMargin = 18.f * scale;
+        const float verticalMargin = 5.f * scale;
+        return math::Rect(
+            Vec(std::max(0.f, box.size.x - size - horizontalMargin),
+                verticalMargin),
+            Vec(size, size));
     }
 
     LabelBounds textBounds(const DrawArgs& args, float x, float y, const std::string& label) const {
@@ -1338,11 +1358,70 @@ struct SpectrumOverlay : TransparentWidget {
         nvgText(args.vg, textX, textY, text.c_str(), NULL);
     }
 
+    void drawLayoutControl(const DrawArgs& args) {
+        if (!hovered || !module) return;
+        const math::Rect control = layoutControlBox();
+        const float scale = layoutControlScale();
+        const bool overControl = control.contains(cursor);
+        const bool displayOnly = module->displayOnlyModeSetting.load();
+
+        nvgBeginPath(args.vg);
+        nvgRoundedRect(args.vg, control.pos.x, control.pos.y,
+                       control.size.x, control.size.y, 3.f * scale);
+        nvgFillColor(args.vg,
+                     nvgRGBA(0, 0, 0, overControl ? 190 : 125));
+        nvgFill(args.vg);
+
+        nvgStrokeColor(
+            args.vg,
+            displayOnly ? nvgRGBA(105, 225, 255, overControl ? 255 : 210)
+                        : nvgRGBA(235, 241, 243, overControl ? 245 : 190));
+        nvgStrokeWidth(args.vg, 1.35f * scale);
+        nvgLineCap(args.vg, NVG_SQUARE);
+
+        const float outerInset = 6.f * scale;
+        const float arm = 5.f * scale;
+        const float left = control.pos.x + outerInset;
+        const float top = control.pos.y + outerInset;
+        const float right = control.pos.x + control.size.x - outerInset;
+        const float bottom = control.pos.y + control.size.y - outerInset;
+        nvgBeginPath(args.vg);
+        if (!displayOnly) {
+            nvgMoveTo(args.vg, left + arm, top);
+            nvgLineTo(args.vg, left, top);
+            nvgLineTo(args.vg, left, top + arm);
+            nvgMoveTo(args.vg, right - arm, top);
+            nvgLineTo(args.vg, right, top);
+            nvgLineTo(args.vg, right, top + arm);
+            nvgMoveTo(args.vg, left + arm, bottom);
+            nvgLineTo(args.vg, left, bottom);
+            nvgLineTo(args.vg, left, bottom - arm);
+            nvgMoveTo(args.vg, right - arm, bottom);
+            nvgLineTo(args.vg, right, bottom);
+            nvgLineTo(args.vg, right, bottom - arm);
+        } else {
+            nvgMoveTo(args.vg, left, top + arm);
+            nvgLineTo(args.vg, left + arm, top + arm);
+            nvgLineTo(args.vg, left + arm, top);
+            nvgMoveTo(args.vg, right, top + arm);
+            nvgLineTo(args.vg, right - arm, top + arm);
+            nvgLineTo(args.vg, right - arm, top);
+            nvgMoveTo(args.vg, left, bottom - arm);
+            nvgLineTo(args.vg, left + arm, bottom - arm);
+            nvgLineTo(args.vg, left + arm, bottom);
+            nvgMoveTo(args.vg, right, bottom - arm);
+            nvgLineTo(args.vg, right - arm, bottom - arm);
+            nvgLineTo(args.vg, right - arm, bottom);
+        }
+        nvgStroke(args.vg);
+    }
+
     void drawOverlay(const DrawArgs& args) {
         nvgSave(args.vg);
         drawGrid(args);
         drawMarkers(args);
         drawCursor(args);
+        drawLayoutControl(args);
         nvgRestore(args.vg);
     }
 
@@ -1371,11 +1450,20 @@ struct SpectrumOverlay : TransparentWidget {
     void onButton(const event::Button& event) override {
         if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT) {
             cursor = event.pos;
+            if (module && layoutControlBox().contains(event.pos)) {
+                layoutTogglePressed = true;
+                draggingTime = false;
+                module->displayOnlyModeSetting.store(
+                    !module->displayOnlyModeSetting.load());
+                event.consume(this);
+                return;
+            }
             draggingTime = inTimeGutter(event.pos) || (event.mods & GLFW_MOD_SHIFT);
             event.consume(this);
         }
     }
     void onDragMove(const event::DragMove& event) override {
+        if (layoutTogglePressed) return;
         if (!module || !display) return;
         const float zoom = std::max(getAbsoluteZoom(), 1e-6f);
         cursor += event.mouseDelta.div(zoom);
@@ -1396,6 +1484,7 @@ struct SpectrumOverlay : TransparentWidget {
         }
     }
     void onDragEnd(const event::DragEnd& event) override {
+        layoutTogglePressed = false;
         draggingTime = false;
         TransparentWidget::onDragEnd(event);
     }
@@ -1481,6 +1570,7 @@ struct SpectrumBezel : TransparentWidget {
 struct SpectrumPanelArtwork : Widget {
     std::shared_ptr<window::Svg> lightSvg;
     std::shared_ptr<window::Svg> darkSvg;
+    bool displayOnly = false;
 
     static void drawShape(NVGcontext* vg, NSVGimage* source,
                           NSVGshape* sourceShape) {
@@ -1563,7 +1653,12 @@ struct SpectrumPanelArtwork : Widget {
                 }
                 nvgRestore(args.vg);
                 continue;
-            } else if (isHeaderRule(shape, svgSize)) {
+            }
+            if (displayOnly) {
+                nvgRestore(args.vg);
+                continue;
+            }
+            if (isHeaderRule(shape, svgSize)) {
                 if (!drawHorizontalLine(args.vg, shape, 0.f, box.size.x,
                                         heightScale)) {
                     nvgScale(args.vg, box.size.x / svgSize.x, heightScale);
@@ -1596,6 +1691,8 @@ struct SpectrumPanel : Widget {
     PanelBorder* border = NULL;
     Vec renderedSize;
     bool renderedDark = false;
+    bool displayOnly = false;
+    bool renderedDisplayOnly = false;
 
     SpectrumPanel() {
         box.size = Vec(DISPLAY_WIDTH, RACK_GRID_HEIGHT);
@@ -1617,11 +1714,14 @@ struct SpectrumPanel : Widget {
     void step() override {
         framebuffer->oversample = APP->window->pixelRatio < 2.f ? 2.f : 1.f;
         const bool dark = settings::preferDarkPanels;
-        if (renderedSize != box.size || renderedDark != dark) {
+        if (renderedSize != box.size || renderedDark != dark ||
+            renderedDisplayOnly != displayOnly) {
             renderedSize = box.size;
             renderedDark = dark;
+            renderedDisplayOnly = displayOnly;
             framebuffer->setSize(box.size);
             artwork->setSize(box.size);
+            artwork->displayOnly = displayOnly;
             border->setSize(box.size);
             framebuffer->setDirty();
         }
@@ -1721,30 +1821,49 @@ struct SpectrumView : Widget {
     }
 };
 
-struct SpectrumExpandedOverlay : OpaqueWidget {
-    static constexpr float MARGIN = 16.f;
-    static constexpr float HEADER_HEIGHT = 34.f;
-    static constexpr float CLOSE_SIZE = 24.f;
+struct SpectrumFloatingWindow : OpaqueWidget {
+    static constexpr float MARGIN = 8.f;
+    static constexpr float HEADER_HEIGHT = 32.f;
+    static constexpr float CLOSE_SIZE = 22.f;
+    static constexpr float RESIZE_SIZE = 18.f;
+    static constexpr float MINIMUM_WIDTH = 420.f;
+    static constexpr float MINIMUM_HEIGHT = 280.f;
+
+    enum class Interaction { NONE, MOVE, RESIZE };
 
     WeakPtr<Widget> originalParent;
     math::Rect originalBox;
     Spectrum* module = NULL;
     SpectrumView* view = NULL;
+    Interaction interaction = Interaction::NONE;
     bool closing = false;
 
-    ~SpectrumExpandedOverlay() override {
+    ~SpectrumFloatingWindow() override {
         restoreView();
     }
 
     math::Rect closeBox() const {
-        return math::Rect(Vec(std::max(MARGIN, box.size.x - MARGIN - CLOSE_SIZE), 5.f),
-                          Vec(CLOSE_SIZE, CLOSE_SIZE));
+        return math::Rect(
+            Vec(std::max(MARGIN, box.size.x - MARGIN - CLOSE_SIZE), 5.f),
+            Vec(CLOSE_SIZE, CLOSE_SIZE));
+    }
+
+    math::Rect resizeBox() const {
+        return math::Rect(
+            Vec(std::max(0.f, box.size.x - RESIZE_SIZE),
+                std::max(0.f, box.size.y - RESIZE_SIZE)),
+            Vec(RESIZE_SIZE, RESIZE_SIZE));
+    }
+
+    math::Rect headerBox() const {
+        return math::Rect(Vec(), Vec(box.size.x, HEADER_HEIGHT));
     }
 
     void layout() {
         if (!view) return;
         const float width = std::max(1.f, box.size.x - 2.f * MARGIN);
-        const float height = std::max(1.f, box.size.y - HEADER_HEIGHT - MARGIN);
+        const float height =
+            std::max(1.f, box.size.y - HEADER_HEIGHT - MARGIN);
         view->setPosition(Vec(MARGIN, HEADER_HEIGHT));
         view->setSize(Vec(width, height));
     }
@@ -1766,12 +1885,25 @@ struct SpectrumExpandedOverlay : OpaqueWidget {
         requestDelete();
     }
 
+    void clampToScene() {
+        if (!APP || !APP->scene) return;
+        const Vec sceneSize = APP->scene->box.size;
+        const Vec minimumSize(
+            std::min(MINIMUM_WIDTH, std::max(sceneSize.x, 1.f)),
+            std::min(MINIMUM_HEIGHT, std::max(sceneSize.y, 1.f)));
+        const Vec maximumSize(std::max(sceneSize.x, minimumSize.x),
+                              std::max(sceneSize.y, minimumSize.y));
+        Vec size(clampValue(box.size.x, minimumSize.x, maximumSize.x),
+                 clampValue(box.size.y, minimumSize.y, maximumSize.y));
+        Vec position(
+            clampValue(box.pos.x, 0.f, std::max(0.f, sceneSize.x - size.x)),
+            clampValue(box.pos.y, 0.f, std::max(0.f, sceneSize.y - size.y)));
+        setSize(size);
+        setPosition(position);
+    }
+
     void step() override {
-        if (APP && APP->scene) {
-            const Vec sceneSize = APP->scene->box.size;
-            if (box.pos != Vec()) setPosition(Vec());
-            if (box.size != sceneSize) setSize(sceneSize);
-        }
+        clampToScene();
         OpaqueWidget::step();
     }
 
@@ -1782,12 +1914,13 @@ struct SpectrumExpandedOverlay : OpaqueWidget {
 
     void draw(const DrawArgs& args) override {
         nvgBeginPath(args.vg);
-        nvgRect(args.vg, 0.f, 0.f, box.size.x, box.size.y);
-        nvgFillColor(args.vg, nvgRGBA(3, 5, 8, 247));
+        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 5.f);
+        nvgFillColor(args.vg, nvgRGBA(3, 5, 8, 250));
         nvgFill(args.vg);
 
         nvgBeginPath(args.vg);
-        nvgRect(args.vg, MARGIN, HEADER_HEIGHT, std::max(0.f, box.size.x - 2.f * MARGIN),
+        nvgRect(args.vg, MARGIN, HEADER_HEIGHT,
+                std::max(0.f, box.size.x - 2.f * MARGIN),
                 std::max(0.f, box.size.y - HEADER_HEIGHT - MARGIN));
         nvgStrokeColor(args.vg, nvgRGBA(190, 205, 210, 90));
         nvgStrokeWidth(args.vg, 1.f);
@@ -1797,47 +1930,91 @@ struct SpectrumExpandedOverlay : OpaqueWidget {
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
         nvgFillColor(args.vg, nvgRGBA(225, 232, 235, 220));
         nvgText(args.vg, MARGIN, HEADER_HEIGHT * 0.5f, "SPECTRUM", NULL);
-        nvgFontSize(args.vg, 10.f);
+        nvgFontSize(args.vg, 9.f);
         nvgFillColor(args.vg, nvgRGBA(180, 194, 200, 150));
         nvgText(args.vg, MARGIN + 82.f, HEADER_HEIGHT * 0.5f,
-                "EXPANDED VIEW  ·  SPACE FREEZE/RESUME  ·  ESC OR CLICK OUTSIDE TO CLOSE", NULL);
+                "FLOATING VIEW  ·  DRAG TITLE TO MOVE  ·  SPACE TO FREEZE",
+                NULL);
 
         const math::Rect close = closeBox();
         nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, close.pos.x, close.pos.y, close.size.x, close.size.y, 3.f);
+        nvgRoundedRect(args.vg, close.pos.x, close.pos.y, close.size.x,
+                       close.size.y, 3.f);
         nvgFillColor(args.vg, nvgRGBA(255, 255, 255, 18));
         nvgFill(args.vg);
         nvgStrokeColor(args.vg, nvgRGBA(225, 232, 235, 175));
         nvgStrokeWidth(args.vg, 1.2f);
         nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, close.pos.x + 7.f, close.pos.y + 7.f);
-        nvgLineTo(args.vg, close.pos.x + close.size.x - 7.f, close.pos.y + close.size.y - 7.f);
-        nvgMoveTo(args.vg, close.pos.x + close.size.x - 7.f, close.pos.y + 7.f);
-        nvgLineTo(args.vg, close.pos.x + 7.f, close.pos.y + close.size.y - 7.f);
+        nvgMoveTo(args.vg, close.pos.x + 6.f, close.pos.y + 6.f);
+        nvgLineTo(args.vg, close.pos.x + close.size.x - 6.f,
+                  close.pos.y + close.size.y - 6.f);
+        nvgMoveTo(args.vg, close.pos.x + close.size.x - 6.f,
+                  close.pos.y + 6.f);
+        nvgLineTo(args.vg, close.pos.x + 6.f,
+                  close.pos.y + close.size.y - 6.f);
         nvgStroke(args.vg);
 
+        nvgStrokeColor(args.vg, nvgRGBA(225, 232, 235, 90));
+        nvgStrokeWidth(args.vg, 1.f);
+        for (int line = 0; line < 3; ++line) {
+            const float offset = 5.f + line * 4.f;
+            nvgBeginPath(args.vg);
+            nvgMoveTo(args.vg, box.size.x - offset, box.size.y - 2.f);
+            nvgLineTo(args.vg, box.size.x - 2.f, box.size.y - offset);
+            nvgStroke(args.vg);
+        }
+
         OpaqueWidget::draw(args);
-        // This view normally receives Rack's light-layer pass through the
-        // module container. Expanded views live directly under the scene, so
-        // issue that pass here after the expanded-view chrome is drawn.
+        // The view normally receives Rack's light-layer pass through its
+        // module container. This floating scene child must issue it itself.
         Widget::drawLayer(args, 1);
     }
 
     void onButton(const event::Button& event) override {
-        const bool outsideView = !view || !view->box.contains(event.pos);
-        if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT &&
-            (outsideView || closeBox().contains(event.pos))) {
-            close();
-            event.consume(this);
-            return;
+        if (event.action == GLFW_PRESS &&
+            event.button == GLFW_MOUSE_BUTTON_LEFT) {
+            if (closeBox().contains(event.pos)) {
+                close();
+                event.consume(this);
+                return;
+            }
+            if (resizeBox().contains(event.pos)) {
+                interaction = Interaction::RESIZE;
+                event.consume(this);
+                return;
+            }
+            if (headerBox().contains(event.pos)) {
+                interaction = Interaction::MOVE;
+                event.consume(this);
+                return;
+            }
         }
         OpaqueWidget::onButton(event);
+    }
+
+    void onDragMove(const event::DragMove& event) override {
+        if (event.button != GLFW_MOUSE_BUTTON_LEFT ||
+            interaction == Interaction::NONE)
+            return;
+        const float zoom = std::max(getAbsoluteZoom(), 1e-6f);
+        const Vec delta = event.mouseDelta.div(zoom);
+        if (interaction == Interaction::MOVE)
+            setPosition(box.pos.plus(delta));
+        else
+            setSize(box.size.plus(delta));
+        clampToScene();
+    }
+
+    void onDragEnd(const event::DragEnd& event) override {
+        interaction = Interaction::NONE;
+        OpaqueWidget::onDragEnd(event);
     }
 
     void onHoverKey(const event::HoverKey& event) override {
         if (event.action == GLFW_PRESS) {
             if (event.key == GLFW_KEY_SPACE && module) {
-                module->freezeToggleRequested.store(true, std::memory_order_release);
+                module->freezeToggleRequested.store(true,
+                                                    std::memory_order_release);
                 event.consume(this);
                 return;
             }
@@ -1857,15 +2034,17 @@ struct SpectrumWidget : ModuleWidget {
     struct BottomItem {
         Widget* widget = NULL;
         int slot = 0;
+        bool port = false;
 
-        BottomItem(Widget* widget, int slot) : widget(widget), slot(slot) {}
+        BottomItem(Widget* widget, int slot, bool port)
+            : widget(widget), slot(slot), port(port) {}
     };
 
     SpectrumPanel* spectrumPanel = NULL;
     SpectrumView* spectrumView = NULL;
     SpectrumResizeHandle* rightHandle = NULL;
     std::vector<BottomItem> bottomItems;
-    WeakPtr<SpectrumExpandedOverlay> expandedOverlay;
+    WeakPtr<SpectrumFloatingWindow> floatingWindow;
 
     SpectrumWidget(Spectrum* module) {
         setModule(module);
@@ -1930,35 +2109,62 @@ struct SpectrumWidget : ModuleWidget {
     }
 
     ~SpectrumWidget() override {
-        if (SpectrumExpandedOverlay* expanded = expandedOverlay.get()) expanded->close();
+        if (SpectrumFloatingWindow* floating = floatingWindow.get()) floating->close();
     }
 
     void addBottomChild(Widget* widget, int slot) {
         addChild(widget);
-        bottomItems.push_back({widget, slot});
+        bottomItems.push_back({widget, slot, false});
     }
 
     void addBottomInput(PortWidget* widget, int slot) {
         addInput(widget);
-        bottomItems.push_back({widget, slot});
+        bottomItems.push_back({widget, slot, true});
     }
 
     void addBottomParam(ParamWidget* widget, int slot) {
         addParam(widget);
-        bottomItems.push_back({widget, slot});
+        bottomItems.push_back({widget, slot, false});
     }
 
     void layout() {
-        if (spectrumPanel)
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        const bool displayOnly =
+            spectrum && spectrum->displayOnlyModeSetting.load();
+        if (spectrumPanel) {
+            spectrumPanel->displayOnly = displayOnly;
             spectrumPanel->setSize(box.size);
-        if (spectrumView && spectrumView->parent == this)
-            spectrumView->setBox(
-                math::Rect(Vec(DISPLAY_X, DISPLAY_Y),
-                           Vec(box.size.x, DISPLAY_HEIGHT)));
+        }
+        if (spectrumView) {
+            if (spectrumView->bezel)
+                spectrumView->bezel->setVisible(!displayOnly);
+            if (spectrumView->parent == this) {
+                if (displayOnly) {
+                    constexpr float portRailWidth = 45.f;
+                    spectrumView->setBox(math::Rect(
+                        Vec(portRailWidth, 1.f),
+                        Vec(std::max(1.f, box.size.x - portRailWidth - 1.f),
+                            RACK_GRID_HEIGHT - 2.f)));
+                } else {
+                    spectrumView->setBox(
+                        math::Rect(Vec(DISPLAY_X, DISPLAY_Y),
+                                   Vec(box.size.x, DISPLAY_HEIGHT)));
+                }
+            }
+        }
+        int portIndex = 0;
         for (const BottomItem& item : bottomItems) {
             if (!item.widget) continue;
-            const float centerX = 22.5f + 45.f * item.slot;
+            item.widget->setVisible(!displayOnly || item.port);
+            float centerX = 22.5f + 45.f * item.slot;
+            float centerY = 329.5f;
+            if (displayOnly && item.port) {
+                centerX = 22.5f;
+                centerY = 67.f + 82.f * portIndex;
+                ++portIndex;
+            }
             item.widget->box.pos.x = centerX - item.widget->box.size.x * 0.5f;
+            item.widget->box.pos.y = centerY - item.widget->box.size.y * 0.5f;
         }
         if (rightHandle)
             rightHandle->box.pos.x = box.size.x - rightHandle->box.size.x;
@@ -1972,29 +2178,50 @@ struct SpectrumWidget : ModuleWidget {
         ModuleWidget::step();
     }
 
-    void openExpandedView() {
-        if (!spectrumView || expandedOverlay || !APP || !APP->scene || !spectrumView->parent) return;
+    void openFloatingWindow() {
+        if (!spectrumView || floatingWindow || !APP || !APP->scene ||
+            !spectrumView->parent)
+            return;
 
-        SpectrumExpandedOverlay* expanded = new SpectrumExpandedOverlay;
-        expanded->originalParent = spectrumView->parent;
-        expanded->originalBox = spectrumView->box;
-        expanded->module = dynamic_cast<Spectrum*>(module);
-        expanded->view = spectrumView;
+        SpectrumFloatingWindow* floating = new SpectrumFloatingWindow;
+        floating->originalParent = spectrumView->parent;
+        floating->originalBox = spectrumView->box;
+        floating->module = dynamic_cast<Spectrum*>(module);
+        floating->view = spectrumView;
 
         spectrumView->parent->removeChild(spectrumView);
-        expanded->addChild(spectrumView);
-        expanded->setBox(math::Rect(Vec(), APP->scene->box.size));
-        APP->scene->addChild(expanded);
-        expandedOverlay = expanded;
+        floating->addChild(spectrumView);
+
+        const Vec sceneSize = APP->scene->box.size;
+        const Vec size(
+            clampValue(sceneSize.x * 0.62f, SpectrumFloatingWindow::MINIMUM_WIDTH,
+                       std::max(SpectrumFloatingWindow::MINIMUM_WIDTH,
+                                sceneSize.x - 32.f)),
+            clampValue(sceneSize.y * 0.62f,
+                       SpectrumFloatingWindow::MINIMUM_HEIGHT,
+                       std::max(SpectrumFloatingWindow::MINIMUM_HEIGHT,
+                                sceneSize.y - 32.f)));
+        floating->setBox(math::Rect(
+            Vec(std::max(0.f, (sceneSize.x - size.x) * 0.5f),
+                std::max(0.f, (sceneSize.y - size.y) * 0.5f)),
+            size));
+        APP->scene->addChild(floating);
+        floatingWindow = floating;
     }
 
     void appendContextMenu(Menu* menu) override {
         Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
         if (!spectrum) return;
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuItem("Open expanded view", "", [this]() {
-            openExpandedView();
+        menu->addChild(createMenuItem("Open floating window", "", [this]() {
+            openFloatingWindow();
         }));
+        menu->addChild(createNonClosingBoolMenuItem(
+            "Display only",
+            [=]() { return spectrum->displayOnlyModeSetting.load(); },
+            [=](bool value) {
+                spectrum->displayOnlyModeSetting.store(value);
+            }));
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
         menu->addChild(createNonClosingIndexSubmenuItem(
