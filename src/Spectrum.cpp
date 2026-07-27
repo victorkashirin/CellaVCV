@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "spectrum/HistoryTimeline.hpp"
 #include "spectrum/SpectrumAnalyzer.hpp"
+#include "spectrum/SpectrumNativeWindow.hpp"
 #include "spectrum/SpectrumPalettes.hpp"
 #include "spectrum/SpectrumPresentation.hpp"
 #include "spectrum/SpectrumTypes.hpp"
@@ -1975,12 +1976,13 @@ struct SpectrumResizeHandle : OpaqueWidget {
 
 };
 
-struct SpectrumView : Widget {
+struct SpectrumView : Widget, SpectrumNativeWindowClient {
+    Spectrum* module = NULL;
     SpectrumDisplay* display = NULL;
     SpectrumBezel* bezel = NULL;
     SpectrumOverlay* overlay = NULL;
 
-    explicit SpectrumView(Spectrum* module) {
+    explicit SpectrumView(Spectrum* module) : module(module) {
         display = new SpectrumDisplay;
         display->module = module;
         addChild(display);
@@ -2015,333 +2017,61 @@ struct SpectrumView : Widget {
         layout();
         Widget::onResize(event);
     }
-};
 
-struct SpectrumNativeWindow {
-    static constexpr int DEFAULT_WIDTH = 900;
-    static constexpr int DEFAULT_HEIGHT = 560;
-    static constexpr int MINIMUM_WIDTH = 420;
-    static constexpr int MINIMUM_HEIGHT = 280;
-
-    GLFWwindow* window = NULL;
-    NVGcontext* vg = NULL;
-    int fontHandle = -1;
-    WeakPtr<Widget> originalParent;
-    math::Rect originalBox;
-    Spectrum* module = NULL;
-    SpectrumView* view = NULL;
-    Widget* root = NULL;
-    widget::EventState events;
-    Vec cursor;
-    bool cursorValid = false;
-    bool restored = false;
-
-    SpectrumNativeWindow(Spectrum* module, SpectrumView* view)
-        : module(module), view(view) {}
-
-    ~SpectrumNativeWindow() {
-        close();
+    Widget* nativeWindowWidget() override {
+        return this;
     }
 
-    static SpectrumNativeWindow* from(GLFWwindow* window) {
-        return static_cast<SpectrumNativeWindow*>(
-            glfwGetWindowUserPointer(window));
+    void onNativeWindowAttached() override {
+        if (bezel)
+            bezel->setVisible(false);
+        resetExternalInput(true);
     }
 
-    static void mouseButtonCallback(GLFWwindow* window, int button, int action,
-                                    int mods) {
-        SpectrumNativeWindow* native = from(window);
-        if (!native) return;
-        native->updateExternalMods(mods);
-        native->events.handleButton(native->cursor, button, action, mods);
+    void onNativeWindowRestored() override {
+        resetExternalInput(false);
+        if (bezel)
+            bezel->setVisible(
+                !module || !module->displayOnlyModeSetting.load());
+        if (display)
+            display->setDirty();
     }
 
-    static void cursorPositionCallback(GLFWwindow* window, double x,
-                                       double y) {
-        SpectrumNativeWindow* native = from(window);
-        if (!native) return;
-        const Vec next(static_cast<float>(x), static_cast<float>(y));
-        const Vec delta = native->cursorValid ? next.minus(native->cursor)
-                                              : Vec();
-        native->cursor = next;
-        native->cursorValid = true;
-        native->updateExternalMods(native->queryMods());
-        native->events.handleHover(next, delta);
+    void setNativeWindowModifiers(int mods) override {
+        if (overlay)
+            overlay->externalMods = mods;
     }
 
-    static void cursorEnterCallback(GLFWwindow* window, int entered) {
-        SpectrumNativeWindow* native = from(window);
-        if (!native) return;
-        if (!entered) {
-            native->cursorValid = false;
-            native->events.handleLeave();
-        }
+    void requestFreezeToggle() override {
+        if (module)
+            module->freezeToggleRequested.store(true,
+                                                std::memory_order_release);
     }
 
-    static void scrollCallback(GLFWwindow* window, double x, double y) {
-        SpectrumNativeWindow* native = from(window);
-        if (!native) return;
-        native->updateExternalMods(native->queryMods());
-        Vec delta(static_cast<float>(x), static_cast<float>(y));
-#if defined ARCH_MAC
-        delta = delta.mult(10.f);
-#else
-        delta = delta.mult(50.f);
-#endif
-        native->events.handleScroll(native->cursor, delta);
+    void drainDisplayQueues() override {
+        if (display)
+            display->drainQueues();
     }
 
-    static void characterCallback(GLFWwindow* window, unsigned int codepoint) {
-        SpectrumNativeWindow* native = from(window);
-        if (native)
-            native->events.handleText(native->cursor, codepoint);
+    void renderDisplayToCurrentFramebuffer(
+        const Vec& framebufferSize) override {
+        if (display)
+            display->renderToCurrentFramebuffer(framebufferSize);
     }
 
-    static void keyCallback(GLFWwindow* window, int key, int scancode,
-                            int action, int mods) {
-        SpectrumNativeWindow* native = from(window);
-        if (!native) return;
-        native->updateExternalMods(mods);
-        if (action == GLFW_PRESS && key == GLFW_KEY_SPACE && native->module) {
-            native->module->freezeToggleRequested.store(
-                true, std::memory_order_release);
-            return;
-        }
-        if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
-            glfwSetWindowShouldClose(window, GLFW_TRUE);
-            return;
-        }
-        native->events.handleKey(native->cursor, key, scancode, action, mods);
+    void drawNativeWindowOverlay(
+        const Widget::DrawArgs& args) override {
+        if (overlay)
+            overlay->drawOverlay(args);
     }
 
-    int queryMods() const {
-        if (!window) return 0;
-        int mods = 0;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-            glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
-            mods |= GLFW_MOD_SHIFT;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-            glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
-            mods |= GLFW_MOD_CONTROL;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
-            glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS)
-            mods |= GLFW_MOD_ALT;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
-            glfwGetKey(window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS)
-            mods |= GLFW_MOD_SUPER;
-        return mods;
-    }
-
-    void updateExternalMods(int mods) {
-        if (view && view->overlay)
-            view->overlay->externalMods = mods;
-    }
-
-    bool open() {
-        if (window || !module || !view || !view->parent || !APP ||
-            !APP->window || !APP->window->win)
-            return false;
-
-        GLFWwindow* previousContext = glfwGetCurrentContext();
-        GLFWwindow* restoreContext =
-            previousContext ? previousContext : APP->window->win;
-        glfwDefaultWindowHints();
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-        glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-#if defined ARCH_MAC
-        glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
-#endif
-        window = glfwCreateWindow(DEFAULT_WIDTH, DEFAULT_HEIGHT,
-                                  "Cella Spectrum", NULL,
-                                  APP->window->win);
-        glfwDefaultWindowHints();
-        if (!window) {
-            if (restoreContext)
-                glfwMakeContextCurrent(restoreContext);
-            return false;
-        }
-
-        glfwSetWindowUserPointer(window, this);
-        glfwSetWindowSizeLimits(window, MINIMUM_WIDTH, MINIMUM_HEIGHT,
-                                GLFW_DONT_CARE, GLFW_DONT_CARE);
-        glfwSetMouseButtonCallback(window, mouseButtonCallback);
-        glfwSetCursorPosCallback(window, cursorPositionCallback);
-        glfwSetCursorEnterCallback(window, cursorEnterCallback);
-        glfwSetScrollCallback(window, scrollCallback);
-        glfwSetCharCallback(window, characterCallback);
-        glfwSetKeyCallback(window, keyCallback);
-
-        glfwMakeContextCurrent(window);
-        glfwSwapInterval(0);
-        vg = nvgCreateGL2(NVG_ANTIALIAS);
-        if (vg) {
-            const std::string fontPath =
-                asset::system("res/fonts/DejaVuSans.ttf");
-            fontHandle =
-                nvgCreateFont(vg, "spectrum-ui", fontPath.c_str());
-        }
-        if (restoreContext)
-            glfwMakeContextCurrent(restoreContext);
-
-        if (!vg) {
-            glfwDestroyWindow(window);
-            window = NULL;
-            return false;
-        }
-
-        int rackX = 0;
-        int rackY = 0;
-        int rackWidth = 0;
-        int rackHeight = 0;
-        glfwGetWindowPos(APP->window->win, &rackX, &rackY);
-        glfwGetWindowSize(APP->window->win, &rackWidth, &rackHeight);
-        glfwSetWindowPos(
-            window, rackX + std::max(24, (rackWidth - DEFAULT_WIDTH) / 2),
-            rackY + std::max(24, (rackHeight - DEFAULT_HEIGHT) / 2));
-
-        originalParent = view->parent;
-        originalBox = view->box;
-        if (APP->event)
-            APP->event->finalizeWidget(view);
-        view->parent->removeChild(view);
-        root = new Widget;
-        root->addChild(view);
-        events.rootWidget = root;
-        if (view->bezel)
-            view->bezel->setVisible(false);
-        if (view->overlay) {
-            view->overlay->externalInput = true;
-            view->overlay->externalMods = 0;
-            view->overlay->hovered = false;
-            view->overlay->draggingTime = false;
-            view->overlay->layoutTogglePressed = false;
-        }
-        resizeView(Vec(DEFAULT_WIDTH, DEFAULT_HEIGHT));
-        glfwShowWindow(window);
-        return true;
-    }
-
-    void resizeView(const Vec& size) {
-        if (!root || !view) return;
-        root->setSize(size);
-        view->setBox(math::Rect(Vec(), size));
-    }
-
-    void restoreView() {
-        if (restored) return;
-        restored = true;
-        events.handleLeave();
-        if (root)
-            events.finalizeWidget(root);
-        events.rootWidget = NULL;
-        if (view && view->overlay) {
-            view->overlay->externalInput = false;
-            view->overlay->externalMods = 0;
-            view->overlay->hovered = false;
-            view->overlay->draggingTime = false;
-            view->overlay->layoutTogglePressed = false;
-        }
-        if (view && root && view->parent == root)
-            root->removeChild(view);
-        Widget* parent = originalParent.get();
-        if (view && parent) {
-            parent->addChild(view);
-            view->setBox(originalBox);
-            if (view->bezel)
-                view->bezel->setVisible(
-                    !module || !module->displayOnlyModeSetting.load());
-            if (view->display)
-                view->display->setDirty();
-        }
-        view = NULL;
-        delete root;
-        root = NULL;
-    }
-
-    void close() {
-        restoreView();
-        if (!window) return;
-        GLFWwindow* previousContext = glfwGetCurrentContext();
-        GLFWwindow* restoreContext =
-            previousContext ? previousContext
-                            : (APP && APP->window ? APP->window->win : NULL);
-        glfwMakeContextCurrent(window);
-        if (vg) {
-            nvgDeleteGL2(vg);
-            vg = NULL;
-        }
-        if (restoreContext == window)
-            restoreContext = APP && APP->window ? APP->window->win : NULL;
-        glfwDestroyWindow(window);
-        window = NULL;
-        if (restoreContext)
-            glfwMakeContextCurrent(restoreContext);
-    }
-
-    bool step() {
-        if (!window || glfwWindowShouldClose(window)) {
-            close();
-            return false;
-        }
-        if (!glfwGetWindowAttrib(window, GLFW_VISIBLE) ||
-            glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            if (view && view->display)
-                view->display->drainQueues();
-            return true;
-        }
-
-        int windowWidth = 0;
-        int windowHeight = 0;
-        int framebufferWidth = 0;
-        int framebufferHeight = 0;
-        glfwGetWindowSize(window, &windowWidth, &windowHeight);
-        glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
-        if (windowWidth <= 0 || windowHeight <= 0 ||
-            framebufferWidth <= 0 || framebufferHeight <= 0)
-            return true;
-
-        const float pixelRatio =
-            static_cast<float>(framebufferWidth) /
-            static_cast<float>(windowWidth);
-        const Vec logicalSize(
-            framebufferWidth / std::max(pixelRatio, 1e-6f),
-            framebufferHeight / std::max(pixelRatio, 1e-6f));
-        resizeView(logicalSize);
-        root->step();
-
-        GLFWwindow* previousContext = glfwGetCurrentContext();
-        GLFWwindow* restoreContext =
-            previousContext ? previousContext
-                            : (APP && APP->window ? APP->window->win : NULL);
-        glfwMakeContextCurrent(window);
-        glViewport(0, 0, framebufferWidth, framebufferHeight);
-        glClearColor(0.003f, 0.005f, 0.008f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
-                GL_STENCIL_BUFFER_BIT);
-
-        if (view && view->display)
-            view->display->renderToCurrentFramebuffer(
-                Vec(framebufferWidth, framebufferHeight));
-
-        nvgReset(vg);
-        nvgBeginFrame(vg, framebufferWidth, framebufferHeight, pixelRatio);
-        nvgScale(vg, pixelRatio, pixelRatio);
-        if (fontHandle >= 0)
-            nvgFontFaceId(vg, fontHandle);
-        if (view && view->overlay) {
-            Widget::DrawArgs args;
-            args.vg = vg;
-            args.clipBox = math::Rect(Vec(), logicalSize);
-            view->overlay->drawOverlay(args);
-        }
-        nvgEndFrame(vg);
-        glfwSwapBuffers(window);
-        if (restoreContext)
-            glfwMakeContextCurrent(restoreContext);
-        return true;
+    void resetExternalInput(bool enabled) {
+        if (!overlay) return;
+        overlay->externalInput = enabled;
+        overlay->externalMods = 0;
+        overlay->hovered = false;
+        overlay->draggingTime = false;
+        overlay->layoutTogglePressed = false;
     }
 };
 
@@ -2516,12 +2246,11 @@ struct SpectrumWidget : ModuleWidget {
     }
 
     void openNativeWindow() {
-        if (!spectrumView || nativeWindow || !APP || !APP->scene ||
+        if (!module || !spectrumView || nativeWindow || !APP || !APP->scene ||
             !spectrumView->parent)
             return;
         std::unique_ptr<SpectrumNativeWindow> candidate(
-            new SpectrumNativeWindow(dynamic_cast<Spectrum*>(module),
-                                     spectrumView));
+            new SpectrumNativeWindow(*spectrumView));
         if (!candidate->open()) {
             WARN("Spectrum could not create its display window");
             return;

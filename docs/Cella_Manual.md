@@ -1,6 +1,6 @@
 # Cella – User Manual
 
-# Version 2.11.0
+# Version 2.11.1
 
 # **LICENSE**
 
@@ -29,11 +29,16 @@ All graphics are copyright 2024-2026 Victor Kashirin and licensed under CC BY-SA
 Hover the display to inspect frequency, note, and level. Shift-wheel zooms the frequency range; drag to
 pan it and double-click to reset it.
 
+Drag either side of the module to resize it from 24 to 64 HP. The selected width is saved with the
+patch.
+
 ### **Context menu**
 
-* **Open expanded view** enlarges the live display to fill the Rack window without clearing its
-  history. Press Space to freeze or resume the flow. Press Escape, click the close button, or click
-  outside the display to return to the module.
+* **Open display window** moves the live display into a separate resizable window without clearing
+  its history. Press Space to freeze or resume the flow, and Escape or the window close button to
+  return it to the module.
+* **Display only** expands the display across the module while retaining the audio and trigger
+  inputs. It can also be toggled with the button at the top right of the display.
 
 The **Analysis** section contains:
 
@@ -53,7 +58,8 @@ The **Presentation** section contains:
 * **Palette** and **Rendering:** select the colors and Precise or Smooth drawing.
 * **Trace:** configures the optional Live and Peak traces.
 * **Ticks:** shows or hides frequency and time guides and sets their opacity.
-* **Frequency:** configures labels, smoothing, Log/Linear/Mel bins, and zoom reset.
+* **Frequency:** selects Hz, Octaves, Musical, or Piano roll scales and configures smoothing,
+  Log/Linear/Mel bins, and zoom reset.
 * **Markers:** controls marker visibility and opacity.
 
 ### **Classic and time-frequency reassigned analysis**
