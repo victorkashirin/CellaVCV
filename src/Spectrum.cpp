@@ -765,6 +765,10 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     uint64_t prefilterNewestSample = 0;
     uint64_t prefilterRevision = 1;
     uint64_t cachedPrefilterRevision = 0;
+    bool livePresentationValid = false;
+    uint64_t livePresentationClockSample = 0;
+    float livePresentationSampleRate = 0.f;
+    double livePresentationSample = 0.0;
     std::deque<SpectrumRow> frozenRows;
     bool displayFrozen = false;
 
@@ -806,6 +810,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
 
     void clearHistory() {
         timeline.clear();
+        livePresentationValid = false;
         latestMetadata = SpectrumRow();
         currentTrace.fill(INTERNAL_FLOOR_DB);
         peakTrace.fill(INTERNAL_FLOOR_DB);
@@ -1002,17 +1007,62 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     }
 
     void syncLivePhase() {
-        if (!module || module->frozen.load(std::memory_order_relaxed) || !timeline.followsLive()) return;
+        if (!module || module->frozen.load(std::memory_order_relaxed) || !timeline.followsLive()) {
+            livePresentationValid = false;
+            return;
+        }
         const SpectrumRow* newest = timeline.newestRow();
-        if (!newest || !(newest->sampleRate > 0.f)) return;
+        if (!newest || !(newest->sampleRate > 0.f)) {
+            livePresentationValid = false;
+            return;
+        }
         const float clockRate = module->displayClockSampleRate.load(std::memory_order_relaxed);
         const uint64_t clockSample = module->displayClockSample.load(std::memory_order_relaxed);
-        if (clockRate != newest->sampleRate || clockSample < newest->rowEndSample) return;
+        if (clockRate != newest->sampleRate || clockSample < newest->rowEndSample) {
+            livePresentationValid = false;
+            timeline.setLivePhase(0.f);
+            return;
+        }
         const int rowRate = std::max(static_cast<int>(newest->displayRowsPerSecond), 1);
         const uint64_t rowPeriod =
             std::max<uint64_t>(1, static_cast<uint64_t>(std::llround(newest->sampleRate / rowRate)));
-        const uint64_t lag = clockSample - newest->rowEndSample;
-        timeline.setLivePhase(static_cast<float>(lag % rowPeriod) / newest->sampleRate);
+        const double maximumPresentationSample =
+            static_cast<double>(newest->rowEndSample) + static_cast<double>(rowPeriod);
+        const bool clockReset = livePresentationValid &&
+                                (livePresentationSampleRate != clockRate ||
+                                 clockSample < livePresentationClockSample);
+        if (!livePresentationValid || clockReset) {
+            const uint64_t lag = clockSample - newest->rowEndSample;
+            livePresentationSample =
+                static_cast<double>(newest->rowEndSample) +
+                static_cast<double>(std::min(lag, rowPeriod));
+        } else {
+            // Advance from the last position shown, rather than taking the
+            // audio-clock lag modulo the row period. The producer and UI
+            // threads can straddle a row boundary: in that case the old
+            // modulo phase moved backward before the new row was drained.
+            livePresentationSample +=
+                static_cast<double>(clockSample - livePresentationClockSample);
+            livePresentationSample =
+                std::min(livePresentationSample, maximumPresentationSample);
+        }
+        // A queue overrun or discontinuous producer reset can make the newest
+        // row jump beyond the cursor. Rebase once instead of leaving the view
+        // pinned until the cursor slowly catches up.
+        livePresentationSample =
+            clampValue(livePresentationSample,
+                       static_cast<double>(newest->rowEndSample),
+                       maximumPresentationSample);
+        livePresentationClockSample = clockSample;
+        livePresentationSampleRate = clockRate;
+        livePresentationValid = true;
+
+        const double phaseSamples =
+            clampValue(livePresentationSample -
+                           static_cast<double>(newest->rowEndSample),
+                       0.0, static_cast<double>(rowPeriod));
+        timeline.setLivePhase(
+            static_cast<float>(phaseSamples / newest->sampleRate));
     }
 
     void seedPreview() {
