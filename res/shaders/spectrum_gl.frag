@@ -18,6 +18,9 @@ uniform float uLookupCells;
 uniform float uLivePhase;
 uniform float uOldestPhysical;
 uniform float uPrefilterMix;
+uniform float uPrefilterRows;
+uniform float uPrefilterTimeOrigin;
+uniform float uPrefilterTimePhase;
 
 const float CELLS = 512.0;
 const int MAX_TIME_TAPS = 32;
@@ -28,6 +31,18 @@ const float TRACE_EDGE_INSET = 0.008;
 
 float decodeDb(float encoded) {
     return mix(INTERNAL_FLOOR, INTERNAL_CEILING, encoded);
+}
+
+float encodedPower(float encoded) {
+    return exp2(decodeDb(encoded) * 0.3321928095);
+}
+
+float encodePower(float power) {
+    float db = 3.0102999566 * log2(max(power, 1e-16));
+    return clamp(
+        (db - INTERNAL_FLOOR) /
+            (INTERNAL_CEILING - INTERNAL_FLOOR),
+        0.0, 1.0);
 }
 
 float traceAge(float db) {
@@ -165,11 +180,38 @@ float prefilteredHistory(float frequency, float age,
         valid = 0.0;
         return 0.0;
     }
-    vec2 sample =
+    float logicalRow =
+        clamp(age * uPrefilterRows - 0.5 -
+                  uPrefilterTimePhase,
+              0.0, max(uPrefilterRows - 1.0, 0.0));
+    float lowerRow = floor(logicalRow);
+    float upperRow =
+        min(lowerRow + 1.0, uPrefilterRows - 1.0);
+    float fraction = logicalRow - lowerRow;
+    float lowerPhysical =
+        mod(uPrefilterTimeOrigin + lowerRow,
+            uPrefilterRows);
+    float upperPhysical =
+        mod(uPrefilterTimeOrigin + upperRow,
+            uPrefilterRows);
+    vec2 lowerSample =
         texture2D(uPrefilter,
-                  vec2(clamp(frequency, 0.0, 1.0), age)).ra;
-    valid = sample.y;
-    return sample.x;
+                  vec2(clamp(frequency, 0.0, 1.0),
+                       (lowerPhysical + 0.5) /
+                           uPrefilterRows)).ra;
+    vec2 upperSample =
+        texture2D(uPrefilter,
+                  vec2(clamp(frequency, 0.0, 1.0),
+                       (upperPhysical + 0.5) /
+                           uPrefilterRows)).ra;
+    valid = mix(lowerSample.y, upperSample.y, fraction);
+    float weightedPower =
+        mix(encodedPower(lowerSample.x) * lowerSample.y,
+            encodedPower(upperSample.x) * upperSample.y,
+            fraction);
+    float power =
+        valid > 1e-6 ? weightedPower / valid : 1e-16;
+    return encodePower(power);
 }
 
 void main() {

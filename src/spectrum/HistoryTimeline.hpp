@@ -61,6 +61,7 @@ class HistoryTimeline {
     float livePhase() const { return livePhaseSeconds; }
 
     TimelineSelection lookup(float normalizedAge) const;
+    TimelineSelection lookupWithoutLivePhase(float normalizedAge) const;
     double ageForSample(uint64_t sample, float sampleRate) const;
     float normalizedAgeForSample(uint64_t sample, float sampleRate) const;
     std::vector<float> buildLookup(int lookupSize) const;

@@ -157,6 +157,15 @@ TimelineSelection HistoryTimeline::lookup(float normalizedAge) const {
     return lookupAgeFromNewest(requestedAge);
 }
 
+TimelineSelection HistoryTimeline::lookupWithoutLivePhase(
+    float normalizedAge) const {
+    const double requestedAge =
+        nearAgeSeconds +
+        clampValue(normalizedAge, 0.f, 1.f) *
+            static_cast<double>(spanSeconds);
+    return lookupAgeFromNewest(requestedAge);
+}
+
 TimelineSelection HistoryTimeline::lookupAgeFromNewest(
     double requestedAge) const {
     TimelineSelection result;
