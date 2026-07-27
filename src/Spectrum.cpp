@@ -2240,6 +2240,9 @@ struct SpectrumNativeWindow {
         if (view && view->overlay) {
             view->overlay->externalInput = false;
             view->overlay->externalMods = 0;
+            view->overlay->hovered = false;
+            view->overlay->draggingTime = false;
+            view->overlay->layoutTogglePressed = false;
         }
         if (view && root && view->parent == root)
             root->removeChild(view);
@@ -2282,6 +2285,12 @@ struct SpectrumNativeWindow {
         if (!window || glfwWindowShouldClose(window)) {
             close();
             return false;
+        }
+        if (!glfwGetWindowAttrib(window, GLFW_VISIBLE) ||
+            glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            if (view && view->display)
+                view->display->drainQueues();
+            return true;
         }
 
         int windowWidth = 0;
