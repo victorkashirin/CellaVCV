@@ -1189,6 +1189,176 @@ struct SpectrumOverlay : TransparentWidget {
         }
     }
 
+    static bool isBlackPianoKey(int midi) {
+        int pitchClass = midi % 12;
+        if (pitchClass < 0) pitchClass += 12;
+        return pitchClass == 1 || pitchClass == 3 || pitchClass == 6 ||
+               pitchClass == 8 || pitchClass == 10;
+    }
+
+    float frequencyPosition(float frequency) const {
+        const float full =
+            frequencyCoordinateForHz(frequency, maximumFrequency(), frequencyBins());
+        return (full - viewLow()) / (viewHigh() - viewLow()) *
+               frequencyAxisPixels();
+    }
+
+    void drawPianoRoll(const DrawArgs& args) {
+        const float lowFrequency = frequencyFromFullCoordinate(viewLow());
+        const float highFrequency = frequencyFromFullCoordinate(viewHigh());
+        if (!(highFrequency > lowFrequency)) return;
+
+        const float scale = presentationScale();
+        const float axisPixels = frequencyAxisPixels();
+        const float visibleSemitones =
+            12.f * std::log2(std::max(highFrequency / lowFrequency, 1.0001f));
+        const float semitonePixels =
+            axisPixels / std::max(visibleSemitones, 1.f);
+        const int firstMidi = static_cast<int>(std::floor(
+                                  69.f + 12.f * std::log2(lowFrequency / 440.f))) -
+                              2;
+        const int lastMidi = static_cast<int>(std::ceil(
+                                 69.f + 12.f * std::log2(highFrequency / 440.f))) +
+                             2;
+
+        float unusedLabelPosition = -1000.f;
+        for (int midi = firstMidi; midi <= lastMidi; ++midi) {
+            const float frequency =
+                440.f * std::pow(2.f, (midi - 69.f) / 12.f);
+            const bool octave = midi % 12 == 0;
+            if (!octave && semitonePixels < 4.f * scale) continue;
+            drawFrequencyGuide(args, frequency, "", !octave,
+                               unusedLabelPosition);
+        }
+
+        const bool verticalAxis = isVerticalFlow(flow());
+        const bool axisAtStart =
+            flow() == FlowDirection::UP || flow() == FlowDirection::LEFT;
+        const float depth = (16.f * 2.f / 3.f) * scale;
+        const float blackDepth = (11.5f * 2.f / 3.f) * scale;
+
+        nvgSave(args.vg);
+        nvgScissor(args.vg, 0.f, 0.f, box.size.x, box.size.y);
+        nvgBeginPath(args.vg);
+        if (verticalAxis) {
+            nvgRect(args.vg, 0.f, axisAtStart ? 0.f : box.size.y - depth,
+                    box.size.x, depth);
+        } else {
+            nvgRect(args.vg, axisAtStart ? 0.f : box.size.x - depth, 0.f,
+                    depth, box.size.y);
+        }
+        nvgFillColor(args.vg, nvgRGBA(218, 226, 229, 82));
+        nvgFill(args.vg);
+
+        const auto drawKeyBoundary = [&](float position) {
+            nvgBeginPath(args.vg);
+            if (verticalAxis) {
+                nvgMoveTo(args.vg, position,
+                          axisAtStart ? 0.f : box.size.y - depth);
+                nvgLineTo(args.vg, position,
+                          axisAtStart ? depth : box.size.y);
+            } else {
+                const float y = axisPixels - position;
+                nvgMoveTo(args.vg,
+                          axisAtStart ? 0.f : box.size.x - depth, y);
+                nvgLineTo(args.vg, axisAtStart ? depth : box.size.x, y);
+            }
+            nvgStrokeColor(args.vg, nvgRGBA(10, 14, 16, 105));
+            nvgStrokeWidth(args.vg, 0.55f);
+            nvgStroke(args.vg);
+        };
+
+        for (int midi = firstMidi; midi <= lastMidi; ++midi) {
+            const float lowerFrequency =
+                440.f * std::pow(2.f, (midi - 69.5f) / 12.f);
+            const float upperFrequency =
+                440.f * std::pow(2.f, (midi - 68.5f) / 12.f);
+            float lowPosition = frequencyPosition(lowerFrequency);
+            float highPosition = frequencyPosition(upperFrequency);
+            if (highPosition < 0.f || lowPosition > axisPixels) continue;
+            lowPosition = clampValue(lowPosition, 0.f, axisPixels);
+            highPosition = clampValue(highPosition, 0.f, axisPixels);
+            if (!(highPosition > lowPosition)) continue;
+
+            if (isBlackPianoKey(midi)) {
+                const float centerFrequency =
+                    440.f * std::pow(2.f, (midi - 69.f) / 12.f);
+                const float centerPosition =
+                    clampValue(frequencyPosition(centerFrequency), 0.f,
+                               axisPixels);
+                if (semitonePixels >= 2.f * scale)
+                    drawKeyBoundary(centerPosition);
+
+                // A black key straddles the boundary between its neighboring
+                // white keys. Keep its center on the exact note frequency, but
+                // make it narrower than the full semitone pitch cell.
+                constexpr float BLACK_KEY_WIDTH = 0.75f;
+                lowPosition =
+                    centerPosition +
+                    (lowPosition - centerPosition) * BLACK_KEY_WIDTH;
+                highPosition =
+                    centerPosition +
+                    (highPosition - centerPosition) * BLACK_KEY_WIDTH;
+                nvgBeginPath(args.vg);
+                if (verticalAxis) {
+                    nvgRect(args.vg, lowPosition,
+                            axisAtStart ? 0.f : box.size.y - blackDepth,
+                            highPosition - lowPosition, blackDepth);
+                } else {
+                    const float top = axisPixels - highPosition;
+                    nvgRect(args.vg,
+                            axisAtStart ? 0.f : box.size.x - blackDepth, top,
+                            blackDepth, highPosition - lowPosition);
+                }
+                nvgFillColor(args.vg, nvgRGBA(5, 8, 10, 210));
+                nvgFill(args.vg);
+            } else if (!isBlackPianoKey(midi - 1) &&
+                       semitonePixels >= 2.f * scale) {
+                // E/F and B/C are adjacent white keys, so their boundary lies
+                // halfway between the two note centers.
+                drawKeyBoundary(lowPosition);
+            }
+        }
+
+        nvgFontSize(args.vg, 6.5f * scale);
+        float lastOctavePosition = -1000.f;
+        for (int midi = firstMidi; midi <= lastMidi; ++midi) {
+            if (midi % 12 != 0) continue;
+            const float frequency =
+                440.f * std::pow(2.f, (midi - 69.f) / 12.f);
+            const float position = frequencyPosition(frequency);
+            if (position < 0.f || position > axisPixels ||
+                std::fabs(position - lastOctavePosition) < 18.f * scale)
+                continue;
+            lastOctavePosition = position;
+            const std::string label = rack::string::f("C%d", midi / 12 - 1);
+
+            float labelX = 0.f;
+            float labelY = 0.f;
+            if (verticalAxis) {
+                labelX = position;
+                labelY = axisAtStart ? depth + 2.f * scale
+                                     : box.size.y - depth - 2.f * scale;
+                nvgTextAlign(args.vg, NVG_ALIGN_CENTER |
+                                          (axisAtStart ? NVG_ALIGN_TOP
+                                                       : NVG_ALIGN_BOTTOM));
+            } else {
+                labelX = axisAtStart ? depth + 2.f * scale
+                                     : box.size.x - depth - 2.f * scale;
+                labelY = axisPixels - position;
+                nvgTextAlign(args.vg,
+                             (axisAtStart ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT) |
+                                 NVG_ALIGN_MIDDLE);
+            }
+            nvgFillColor(args.vg, nvgRGBA(190, 205, 210, 135));
+            frequencyLabelBounds.push_back(
+                textBounds(args, labelX, labelY, label));
+            nvgText(args.vg, labelX, labelY, label.c_str(), NULL);
+        }
+        nvgResetScissor(args.vg);
+        nvgRestore(args.vg);
+    }
+
     void drawGrid(const DrawArgs& args) {
         frequencyLabelBounds.clear();
         if ((!module || module->showFrequencyTicksSetting.load()) &&
@@ -1225,6 +1395,8 @@ struct SpectrumOverlay : TransparentWidget {
                     drawFrequencyGuide(args, frequency, label, midi % 12 != 0, last);
                 }
             }
+            if (scale == FrequencyScaleMode::PIANO_ROLL)
+                drawPianoRoll(args);
         }
         if (!module || module->showTimeTicksSetting.load()) drawTimeRuler(args);
     }
@@ -2358,7 +2530,7 @@ struct SpectrumWidget : ModuleWidget {
         }));
         menu->addChild(createSubmenuItem("Frequency", "", [=](Menu* frequencyMenu) {
             frequencyMenu->addChild(createNonClosingIndexSubmenuItem(
-                "Scale", {"Hz", "Octaves", "Musical"},
+                "Scale", {"Hz", "Octaves", "Musical", "Piano roll"},
                 [=]() {
                     return static_cast<size_t>(
                         clampValue(spectrum->frequencyScaleSetting.load(), 0,

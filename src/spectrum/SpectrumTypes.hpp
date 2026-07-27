@@ -78,7 +78,7 @@ enum class FlowDirection : int { UP, DOWN, LEFT, RIGHT, COUNT };
 enum class AnalysisMode : int { CLASSIC, ADVANCED, COUNT };
 enum class RenderingStyle : int { PRECISE, SMOOTH, COUNT };
 enum class LiveTraceMode : int { OFF, LINE, LINE_FILL, COUNT };
-enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, COUNT };
+enum class FrequencyScaleMode : int { HZ, OCTAVES, MUSICAL, PIANO_ROLL, COUNT };
 enum class FrequencyBinScale : int { LOGARITHMIC, LINEAR, MEL, COUNT };
 enum class FrequencySmoothing : int {
     NONE,
