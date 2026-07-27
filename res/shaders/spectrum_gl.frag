@@ -6,6 +6,8 @@ uniform sampler2D uTimeLookup;
 uniform sampler2D uPalette;
 uniform sampler2D uPrefilter;
 uniform float uRows;
+uniform vec2 uHistorySize;
+uniform float uHistoryTileColumns;
 uniform int uFlow;
 uniform vec2 uView;
 uniform vec2 uRange;
@@ -63,6 +65,26 @@ vec3 palette(float value) {
     return texture2D(uPalette, vec2(clamp(value, 0.0, 1.0), 0.5)).rgb;
 }
 
+float packedHistoryCell(float cell, float physical) {
+    float packedGroup = floor(physical * 0.125);
+    float tileX = mod(packedGroup, uHistoryTileColumns);
+    float tileY = floor(packedGroup / uHistoryTileColumns);
+    vec2 uv = vec2(
+        (tileX * CELLS + cell + 0.5) / uHistorySize.x,
+        (tileY + 0.5) / uHistorySize.y);
+    vec4 values = texture2D(uHistory, uv);
+    float lane = mod(physical, 8.0);
+    float word = lane < 2.0 ? values.r
+               : lane < 4.0 ? values.g
+               : lane < 6.0 ? values.b
+                            : values.a;
+    word = floor(word * 65535.0 + 0.5);
+    float encoded = mod(lane, 2.0) < 0.5
+                        ? mod(word, 256.0)
+                        : floor(word / 256.0);
+    return encoded / 255.0;
+}
+
 float historyCell(float frequency, float lookupAge, out float valid) {
     if (lookupAge < 0.0 || lookupAge > 1.0) {
         valid = 0.0;
@@ -86,14 +108,13 @@ float historyCell(float frequency, float lookupAge, out float valid) {
     float nextPhysical = mod(physical + 1.0, uRows);
     float timeFraction = fract(ordered);
     float cell = clamp(floor(frequency * CELLS), 0.0, CELLS - 1.0);
-    float x = (cell + 0.5) / CELLS;
-    float older = texture2D(uHistory, vec2(x, (physical + 0.5) / uRows)).r;
+    float older = packedHistoryCell(cell, physical);
     if ((uRenderingStyle == 0 && uRowsPerTimePixel <= 1.25) ||
         lookup.b < 0.75)
         return timeFraction >= 0.5
-                   ? texture2D(uHistory, vec2(x, (nextPhysical + 0.5) / uRows)).r
+                   ? packedHistoryCell(cell, nextPhysical)
                    : older;
-    float newer = texture2D(uHistory, vec2(x, (nextPhysical + 0.5) / uRows)).r;
+    float newer = packedHistoryCell(cell, nextPhysical);
     return mix(older, newer, timeFraction);
 }
 

@@ -39,6 +39,8 @@ patch.
   return it to the module.
 * **Display only** expands the display across the module while retaining the audio and trigger
   inputs. It can also be toggled with the button at the top right of the display.
+* **Long buffer** extends the slow end of the **SPEED** control, increasing the maximum retained
+  spectrum history from two minutes to ten minutes.
 
 The **Analysis** section contains:
 

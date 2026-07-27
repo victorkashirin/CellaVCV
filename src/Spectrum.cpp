@@ -117,6 +117,7 @@ struct Spectrum : Module {
     std::atomic<float> markerOpacitySetting{0.82f};
     std::atomic<float> viewMinimum{0.f};
     std::atomic<float> viewMaximum{1.f};
+    std::atomic<bool> longBufferSetting{false};
     std::atomic<bool> displayOnlyModeSetting{false};
     std::atomic<bool> nativeWindowOpenSetting{false};
     std::atomic<bool> nativeWindowPositionValidSetting{false};
@@ -163,6 +164,15 @@ struct Spectrum : Module {
         configInput(RIGHT_INPUT, "Right");
         configInput(FREEZE_INPUT, "Freeze trigger");
         configInput(MARK_INPUT, "Marker trigger");
+    }
+
+    void setLongBufferEnabled(bool enabled) {
+        longBufferSetting.store(enabled);
+        ParamQuantity* quantity = getParamQuantity(SPEED_PARAM);
+        if (!quantity) return;
+        quantity->minValue = std::log2(enabled ? LONG_MIN_HISTORY_SPEED : MIN_HISTORY_SPEED);
+        if (!enabled && params[SPEED_PARAM].getValue() < quantity->minValue)
+            quantity->setValue(quantity->minValue);
     }
 
     void process(const ProcessArgs& args) override {
@@ -293,6 +303,8 @@ struct Spectrum : Module {
         json_object_set_new(root, "markerOpacity", json_real(markerOpacitySetting.load()));
         json_object_set_new(root, "viewMinimum", json_real(viewMinimum.load()));
         json_object_set_new(root, "viewMaximum", json_real(viewMaximum.load()));
+        json_object_set_new(root, "longBuffer", json_boolean(longBufferSetting.load()));
+        json_object_set_new(root, "historySpeed", json_real(params[SPEED_PARAM].getValue()));
         json_object_set_new(root, "displayOnlyMode", json_boolean(displayOnlyModeSetting.load()));
         json_object_set_new(root, "nativeWindowOpen", json_boolean(nativeWindowOpenSetting.load()));
         json_object_set_new(root, "nativeWindowPositionValid", json_boolean(nativeWindowPositionValidSetting.load()));
@@ -351,6 +363,15 @@ struct Spectrum : Module {
         }
         viewMinimum.store(minimum);
         viewMaximum.store(maximum);
+        json_t* longBuffer = json_object_get(root, "longBuffer");
+        setLongBufferEnabled(json_is_boolean(longBuffer) && json_is_true(longBuffer));
+        // Rack restores params before module data, so persist this value here
+        // as well to restore values below the normal two-minute range.
+        json_t* historySpeed = json_object_get(root, "historySpeed");
+        if (json_is_number(historySpeed)) {
+            ParamQuantity* quantity = getParamQuantity(SPEED_PARAM);
+            if (quantity) quantity->setValue(static_cast<float>(json_number_value(historySpeed)));
+        }
         json_t* displayOnlyMode = json_object_get(root, "displayOnlyMode");
         displayOnlyModeSetting.store(json_is_boolean(displayOnlyMode) && json_is_true(displayOnlyMode));
         json_t* nativeWindowOpen = json_object_get(root, "nativeWindowOpen");
@@ -485,11 +506,16 @@ struct SpectrumRenderer {
     GLuint paletteTexture = 0;
     GLuint prefilterTexture = 0;
     int allocatedRows = 0;
+    int historyTextureWidth = 0;
+    int historyTextureHeight = 0;
+    int historyTileColumns = 0;
     int allocatedLookupCells = 0;
     int allocatedPrefilterColumns = 0;
     int allocatedPrefilterRows = 0;
     int uploadedPalette = -1;
     GLint historyLocation = -1;
+    GLint historySizeLocation = -1;
+    GLint historyTileColumnsLocation = -1;
     GLint traceLocation = -1;
     GLint lookupLocation = -1;
     GLint rowsLocation = -1;
@@ -556,6 +582,8 @@ struct SpectrumRenderer {
                     return false;
                 }
                 historyLocation = glGetUniformLocation(program, "uHistory");
+                historySizeLocation = glGetUniformLocation(program, "uHistorySize");
+                historyTileColumnsLocation = glGetUniformLocation(program, "uHistoryTileColumns");
                 traceLocation = glGetUniformLocation(program, "uTrace");
                 lookupLocation = glGetUniformLocation(program, "uTimeLookup");
                 rowsLocation = glGetUniformLocation(program, "uRows");
@@ -613,16 +641,25 @@ struct SpectrumRenderer {
             }
         }
         if (allocatedRows != requestedRows) {
+            GLint maximumTexture = 2048;
+            glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
+            maximumTexture = std::max(static_cast<int>(maximumTexture), NUM_FREQUENCY_CELLS);
+            const int packedRows = (requestedRows + 7) / 8;
+            historyTileColumns = std::max(1, (packedRows + maximumTexture - 1) / maximumTexture);
+            const int maximumColumns = std::max(maximumTexture / NUM_FREQUENCY_CELLS, 1);
+            if (historyTileColumns > maximumColumns) return false;
+            historyTextureWidth = historyTileColumns * NUM_FREQUENCY_CELLS;
+            historyTextureHeight = std::max(1, (packedRows + historyTileColumns - 1) / historyTileColumns);
             glBindTexture(GL_TEXTURE_2D, historyTexture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE8, NUM_FREQUENCY_CELLS, requestedRows, 0, GL_LUMINANCE,
-                         GL_UNSIGNED_BYTE, NULL);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, historyTextureWidth, historyTextureHeight, 0, GL_RGBA,
+                         GL_UNSIGNED_SHORT, NULL);
             allocatedRows = requestedRows;
         }
-        const int requestedLookupCells = std::max(TIME_LOOKUP_SIZE, requestedRows);
+        const int requestedLookupCells = TIME_LOOKUP_SIZE;
         if (allocatedLookupCells != requestedLookupCells) {
             glBindTexture(GL_TEXTURE_2D, lookupTexture);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, requestedLookupCells, 1, 0, GL_RGBA, GL_FLOAT, NULL);
@@ -660,6 +697,9 @@ struct SpectrumRenderer {
         if (program) glDeleteProgram(program);
         program = historyTexture = traceTexture = lookupTexture = paletteTexture = prefilterTexture = 0;
         allocatedRows = 0;
+        historyTextureWidth = 0;
+        historyTextureHeight = 0;
+        historyTileColumns = 0;
         allocatedLookupCells = 0;
         allocatedPrefilterColumns = 0;
         allocatedPrefilterRows = 0;
@@ -725,10 +765,11 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     }
 
     void resizeCaches(int capacity) {
-        derivedRows.resize(static_cast<size_t>(capacity));
-        dirtyRows.assign(static_cast<size_t>(capacity), true);
-        derivedPower.assign(static_cast<size_t>(capacity * NUM_FREQUENCY_CELLS),
-                            std::pow(10.f, INTERNAL_FLOOR_DB / 10.f));
+        std::vector<SpectrumRow>(static_cast<size_t>(capacity)).swap(derivedRows);
+        std::vector<bool>(static_cast<size_t>(capacity), true).swap(dirtyRows);
+        std::vector<float>(static_cast<size_t>(capacity * NUM_FREQUENCY_CELLS),
+                           std::pow(10.f, INTERNAL_FLOOR_DB / 10.f))
+            .swap(derivedPower);
         appliedCapacity = capacity;
         lookupDirty = true;
         invalidatePrefilter();
@@ -790,16 +831,23 @@ struct SpectrumDisplay : widget::OpenGlWidget {
 
     void syncSettings() {
         const int quality = clampValue(module ? module->qualitySetting.load() : static_cast<int>(Quality::HIGH), 0, 2);
+        const bool longBuffer = module && module->longBufferSetting.load();
+        const float minimumHistorySpeed = longBuffer ? LONG_MIN_HISTORY_SPEED : MIN_HISTORY_SPEED;
+        const float maximumHistorySeconds = longBuffer ? LONG_MAX_HISTORY_SECONDS : MAX_HISTORY_SECONDS;
         const float historySpeed = module ? clampValue(std::exp2(module->params[Spectrum::SPEED_PARAM].getValue()),
-                                                       MIN_HISTORY_SPEED, MAX_HISTORY_SPEED)
+                                                       minimumHistorySpeed, MAX_HISTORY_SPEED)
                                           : 1.f;
-        const float retained = historyDurationForSpeed(historySpeed);
+        const float retained = historyDurationForSpeed(historySpeed, maximumHistorySeconds);
         const bool historySpeedChanged = std::fabs(historySpeed - appliedHistorySpeed) > 1e-5f;
         appliedHistorySpeed = historySpeed;
         int desired = historyRowCapacity(retained, rowsPerSecond(static_cast<Quality>(quality)));
         GLint maximumTexture = 2048;
         if (renderer.program) glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTexture);
-        desired = std::min(desired, std::max(static_cast<int>(maximumTexture), 4));
+        const int maximumTileColumns =
+            std::max(static_cast<int>(maximumTexture) / NUM_FREQUENCY_CELLS, 1);
+        const int64_t maximumHistoryRows =
+            static_cast<int64_t>(std::max(static_cast<int>(maximumTexture), 1)) * maximumTileColumns * 8;
+        desired = std::min<int64_t>(desired, std::max<int64_t>(maximumHistoryRows, 4));
         const bool showingFullRetainedSpan = std::fabs(timeline.visibleSpan() - timeline.retainedDuration()) < 1e-4f;
         timeline.setExpectedRowsPerSecond(rowsPerSecond(static_cast<Quality>(quality)));
         const float availableRetained =
@@ -1266,17 +1314,67 @@ struct SpectrumDisplay : widget::OpenGlWidget {
     }
 
     void uploadDirtyData() {
-        std::array<unsigned char, NUM_FREQUENCY_CELLS> rowBytes;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glBindTexture(GL_TEXTURE_2D, renderer.historyTexture);
-        for (int row = 0; row < timeline.capacity(); ++row) {
-            if (!dirtyRows[static_cast<size_t>(row)]) continue;
-            for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell)
-                rowBytes[static_cast<size_t>(cell)] =
-                    encodeDb(dequantizeDb(derivedRows[static_cast<size_t>(row)].dbTenths[static_cast<size_t>(cell)]));
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row, NUM_FREQUENCY_CELLS, 1, GL_LUMINANCE, GL_UNSIGNED_BYTE,
-                            rowBytes.data());
-            dirtyRows[static_cast<size_t>(row)] = false;
+        const size_t dirtyCount = static_cast<size_t>(std::count(dirtyRows.begin(), dirtyRows.end(), true));
+        if (dirtyCount > 64 && renderer.historyTextureWidth > 0 && renderer.historyTextureHeight > 0) {
+            const unsigned char floorValue = encodeDb(INTERNAL_FLOOR_DB);
+            const unsigned short packedFloor =
+                static_cast<unsigned short>(floorValue | (static_cast<unsigned short>(floorValue) << 8));
+            std::vector<unsigned short> textureWords(
+                static_cast<size_t>(renderer.historyTextureWidth * renderer.historyTextureHeight * 4), packedFloor);
+            for (int ordered = 0; ordered < timeline.size(); ++ordered) {
+                const int physical = timeline.physicalFromOldest(ordered);
+                const int packed = physical / 8;
+                const int lane = physical % 8;
+                const int channel = lane / 2;
+                const int tileX = packed % renderer.historyTileColumns;
+                const int tileY = packed / renderer.historyTileColumns;
+                const SpectrumRow& row = derivedRows[static_cast<size_t>(physical)];
+                for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+                    const size_t pixel =
+                        static_cast<size_t>(tileY * renderer.historyTextureWidth +
+                                            tileX * NUM_FREQUENCY_CELLS + cell);
+                    unsigned short& word = textureWords[pixel * 4 + static_cast<size_t>(channel)];
+                    const unsigned short encoded =
+                        encodeDb(dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]));
+                    word = lane % 2 == 0 ? static_cast<unsigned short>((word & 0xff00u) | encoded)
+                                         : static_cast<unsigned short>((word & 0x00ffu) | (encoded << 8));
+                }
+            }
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, renderer.historyTextureWidth, renderer.historyTextureHeight,
+                            GL_RGBA, GL_UNSIGNED_SHORT, textureWords.data());
+            std::fill(dirtyRows.begin(), dirtyRows.end(), false);
+        } else {
+            const unsigned char floorValue = encodeDb(INTERNAL_FLOOR_DB);
+            const unsigned short packedFloor =
+                static_cast<unsigned short>(floorValue | (static_cast<unsigned short>(floorValue) << 8));
+            std::array<unsigned short, NUM_FREQUENCY_CELLS * 4> rowWords;
+            for (int physical = 0; physical < timeline.capacity(); ++physical) {
+                if (!dirtyRows[static_cast<size_t>(physical)]) continue;
+                const int packed = physical / 8;
+                const int tileX = packed % renderer.historyTileColumns;
+                const int tileY = packed / renderer.historyTileColumns;
+                rowWords.fill(packedFloor);
+                for (int lane = 0; lane < 8; ++lane) {
+                    const int sourcePhysical = packed * 8 + lane;
+                    if (sourcePhysical >= timeline.capacity()) continue;
+                    if (timeline.size() == timeline.capacity() || sourcePhysical < timeline.size()) {
+                        const SpectrumRow& row = derivedRows[static_cast<size_t>(sourcePhysical)];
+                        const int channel = lane / 2;
+                        for (int cell = 0; cell < NUM_FREQUENCY_CELLS; ++cell) {
+                            unsigned short& word = rowWords[static_cast<size_t>(cell * 4 + channel)];
+                            const unsigned short encoded =
+                                encodeDb(dequantizeDb(row.dbTenths[static_cast<size_t>(cell)]));
+                            word = lane % 2 == 0 ? static_cast<unsigned short>((word & 0xff00u) | encoded)
+                                                 : static_cast<unsigned short>((word & 0x00ffu) | (encoded << 8));
+                        }
+                    }
+                    dirtyRows[static_cast<size_t>(sourcePhysical)] = false;
+                }
+                glTexSubImage2D(GL_TEXTURE_2D, 0, tileX * NUM_FREQUENCY_CELLS, tileY, NUM_FREQUENCY_CELLS, 1,
+                                GL_RGBA, GL_UNSIGNED_SHORT, rowWords.data());
+            }
         }
         if (traceDirty) {
             std::array<unsigned short, NUM_FREQUENCY_CELLS * 4> traceBytes;
@@ -1371,6 +1469,9 @@ struct SpectrumDisplay : widget::OpenGlWidget {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, renderer.historyTexture);
             glUniform1i(renderer.historyLocation, 0);
+            glUniform2f(renderer.historySizeLocation, static_cast<float>(renderer.historyTextureWidth),
+                        static_cast<float>(renderer.historyTextureHeight));
+            glUniform1f(renderer.historyTileColumnsLocation, static_cast<float>(renderer.historyTileColumns));
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, renderer.traceTexture);
             glUniform1i(renderer.traceLocation, 1);
@@ -2403,6 +2504,7 @@ struct SpectrumWidget : ModuleWidget {
 
     SpectrumPanel* spectrumPanel = NULL;
     SpectrumView* spectrumView = NULL;
+    RoundSmallBlackKnob* historySpeedKnob = NULL;
     SpectrumResizeHandle* leftHandle = NULL;
     SpectrumResizeHandle* rightHandle = NULL;
     std::vector<BottomItem> bottomItems;
@@ -2424,7 +2526,9 @@ struct SpectrumWidget : ModuleWidget {
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::RIGHT_INPUT), 1);
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::MARK_INPUT), 2);
         addBottomParam(createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3);
-        addBottomParam(createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module, Spectrum::SPEED_PARAM), 4);
+        historySpeedKnob =
+            createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
+        addBottomParam(historySpeedKnob, 4);
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::FREEZE_INPUT), 5);
         addBottomParam(createParamCentered<LEDButton>(Vec(0.f, y), module, Spectrum::FREEZE_PARAM), 6);
         addBottomChild(createLightCentered<MediumLight<YellowLight>>(Vec(0.f, y), module, Spectrum::FREEZE_LIGHT), 6);
@@ -2706,6 +2810,15 @@ struct SpectrumWidget : ModuleWidget {
                 [=](bool value) { spectrum->showMarkersSetting.store(value); }));
             markersMenu->addChild(new MarkerOpacitySlider(spectrum));
         }));
+        menu->addChild(createBoolMenuItem(
+            "Long buffer", "", [=]() { return spectrum->longBufferSetting.load(); },
+            [=](bool value) {
+                spectrum->setLongBufferEnabled(value);
+                if (historySpeedKnob) {
+                    ChangeEvent event;
+                    historySpeedKnob->onChange(event);
+                }
+            }));
     }
 };
 

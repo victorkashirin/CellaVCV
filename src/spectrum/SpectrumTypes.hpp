@@ -94,8 +94,10 @@ constexpr std::array<int, static_cast<int>(FftOverlap::COUNT)> FFT_HOP_SIXTEENTH
 constexpr std::array<int, static_cast<int>(Quality::COUNT)> ROW_RATES = {{15, 30, 60}};
 constexpr float MIN_HISTORY_SECONDS = 2.f;
 constexpr float MAX_HISTORY_SECONDS = 120.f;
+constexpr float LONG_MAX_HISTORY_SECONDS = 600.f;
 constexpr float DEFAULT_HISTORY_SECONDS = 8.f;
 constexpr float MIN_HISTORY_SPEED = DEFAULT_HISTORY_SECONDS / MAX_HISTORY_SECONDS;
+constexpr float LONG_MIN_HISTORY_SPEED = DEFAULT_HISTORY_SECONDS / LONG_MAX_HISTORY_SECONDS;
 constexpr float MAX_HISTORY_SPEED = DEFAULT_HISTORY_SECONDS / MIN_HISTORY_SECONDS;
 constexpr float MAX_FFT_ANALYSES_PER_SECOND = 240.f;
 
@@ -104,16 +106,17 @@ inline T clampValue(T value, T low, T high) {
     return value < low ? low : (value > high ? high : value);
 }
 
-inline float historyDurationForSpeed(float speed) {
+inline float historyDurationForSpeed(float speed, float maximumSeconds = MAX_HISTORY_SECONDS) {
+    const float minimumSpeed = DEFAULT_HISTORY_SECONDS / std::max(maximumSeconds, MIN_HISTORY_SECONDS);
     const float safeSpeed =
-        clampValue(std::isfinite(speed) ? speed : 1.f, MIN_HISTORY_SPEED, MAX_HISTORY_SPEED);
+        clampValue(std::isfinite(speed) ? speed : 1.f, minimumSpeed, MAX_HISTORY_SPEED);
     return DEFAULT_HISTORY_SECONDS / safeSpeed;
 }
 
-inline float historySpeedForDuration(float seconds) {
+inline float historySpeedForDuration(float seconds, float maximumSeconds = MAX_HISTORY_SECONDS) {
     const float safeDuration =
         clampValue(std::isfinite(seconds) ? seconds : DEFAULT_HISTORY_SECONDS,
-                   MIN_HISTORY_SECONDS, MAX_HISTORY_SECONDS);
+                   MIN_HISTORY_SECONDS, std::max(maximumSeconds, MIN_HISTORY_SECONDS));
     return DEFAULT_HISTORY_SECONDS / safeDuration;
 }
 
