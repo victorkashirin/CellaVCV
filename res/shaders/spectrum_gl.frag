@@ -240,9 +240,16 @@ void main() {
     float frequency = mix(uView.x, uView.y, logical.x);
     float valid = 0.0;
     float encoded = 0.0;
-    if (uPrefilterMix < 1.0)
+    if (uPrefilterMix < 1.0) {
+        // Between analyzer rows the presentation cursor can legitimately
+        // reach the next-row boundary before that row is visible to the UI.
+        // Hold the newest available row there instead of exposing an invalid
+        // negative-age strip. The cached reconstruction already has the same
+        // edge-clamping behavior.
+        float directAge = max(logical.y - uLivePhase, 0.0);
         encoded = smoothHistory(
-            frequency, logical.y - uLivePhase, valid);
+            frequency, directAge, valid);
+    }
     if (uPrefilterMix > 0.0) {
         float prefilteredValid;
         float prefiltered = prefilteredHistory(
