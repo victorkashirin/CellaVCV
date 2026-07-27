@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -903,7 +904,7 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glEnd();
     }
 
-    void drawFramebuffer() override {
+    void renderToCurrentFramebuffer(const math::Vec& framebuffer) {
         if (module)
             drainQueues();
         else
@@ -924,7 +925,6 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glActiveTexture(GL_TEXTURE3);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture3);
         glPushAttrib(GL_CURRENT_BIT | GL_ENABLE_BIT | GL_VIEWPORT_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT);
-        const math::Vec framebuffer = getFramebufferSize();
         glViewport(0, 0, static_cast<GLsizei>(framebuffer.x), static_cast<GLsizei>(framebuffer.y));
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
@@ -998,6 +998,10 @@ struct SpectrumDisplay : widget::OpenGlWidget {
         glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
     }
 
+    void drawFramebuffer() override {
+        renderToCurrentFramebuffer(getFramebufferSize());
+    }
+
     void drawPreviewNanoVg(const DrawArgs& args) {
         nvgBeginPath(args.vg);
         nvgRect(args.vg, 0.f, 0.f, box.size.x, box.size.y);
@@ -1039,6 +1043,8 @@ struct SpectrumOverlay : TransparentWidget {
     bool hovered = false;
     bool draggingTime = false;
     bool layoutTogglePressed = false;
+    bool externalInput = false;
+    int externalMods = 0;
     math::Vec cursor;
     std::vector<LabelBounds> frequencyLabelBounds;
 
@@ -1057,6 +1063,10 @@ struct SpectrumOverlay : TransparentWidget {
     float frequencyAxisPixels() const {
         return isVerticalFlow(flow()) ? std::max(box.size.x, 1.f)
                                       : std::max(box.size.y, 1.f);
+    }
+    int inputMods() const {
+        return externalInput ? externalMods
+                             : (APP && APP->window ? APP->window->getMods() : 0);
     }
     LogicalPoint logicalAt(math::Vec position) const {
         const float normalizedX =
@@ -1542,7 +1552,7 @@ struct SpectrumOverlay : TransparentWidget {
     }
 
     void drawLayoutControl(const DrawArgs& args) {
-        if (!hovered || !module) return;
+        if (!hovered || !module || externalInput) return;
         const math::Rect control = layoutControlBox();
         const bool overControl = control.contains(cursor);
         if (!overControl) return;
@@ -1632,7 +1642,8 @@ struct SpectrumOverlay : TransparentWidget {
     void onButton(const event::Button& event) override {
         if (event.action == GLFW_PRESS && event.button == GLFW_MOUSE_BUTTON_LEFT) {
             cursor = event.pos;
-            if (module && layoutControlBox().contains(event.pos)) {
+            if (!externalInput && module &&
+                layoutControlBox().contains(event.pos)) {
                 layoutTogglePressed = true;
                 draggingTime = false;
                 module->displayOnlyModeSetting.store(
@@ -1672,7 +1683,7 @@ struct SpectrumOverlay : TransparentWidget {
         TransparentWidget::onDragEnd(event);
     }
     void onHoverScroll(const event::HoverScroll& event) override {
-        if (!module || !display || !(APP->window->getMods() & GLFW_MOD_SHIFT)) {
+        if (!module || !display || !(inputMods() & GLFW_MOD_SHIFT)) {
             TransparentWidget::onHoverScroll(event);
             return;
         }
@@ -2006,201 +2017,322 @@ struct SpectrumView : Widget {
     }
 };
 
-struct SpectrumFloatingWindow : OpaqueWidget {
-    static constexpr float MARGIN = 8.f;
-    static constexpr float HEADER_HEIGHT = 32.f;
-    static constexpr float CLOSE_SIZE = 22.f;
-    static constexpr float RESIZE_SIZE = 18.f;
-    static constexpr float MINIMUM_WIDTH = 420.f;
-    static constexpr float MINIMUM_HEIGHT = 280.f;
+struct SpectrumNativeWindow {
+    static constexpr int DEFAULT_WIDTH = 900;
+    static constexpr int DEFAULT_HEIGHT = 560;
+    static constexpr int MINIMUM_WIDTH = 420;
+    static constexpr int MINIMUM_HEIGHT = 280;
 
-    enum class Interaction { NONE, MOVE, RESIZE };
-
+    GLFWwindow* window = NULL;
+    NVGcontext* vg = NULL;
+    int fontHandle = -1;
     WeakPtr<Widget> originalParent;
     math::Rect originalBox;
     Spectrum* module = NULL;
     SpectrumView* view = NULL;
-    Interaction interaction = Interaction::NONE;
-    bool closing = false;
+    Widget* root = NULL;
+    widget::EventState events;
+    Vec cursor;
+    bool cursorValid = false;
+    bool restored = false;
 
-    ~SpectrumFloatingWindow() override {
-        restoreView();
+    SpectrumNativeWindow(Spectrum* module, SpectrumView* view)
+        : module(module), view(view) {}
+
+    ~SpectrumNativeWindow() {
+        close();
     }
 
-    math::Rect closeBox() const {
-        return math::Rect(
-            Vec(std::max(MARGIN, box.size.x - MARGIN - CLOSE_SIZE), 5.f),
-            Vec(CLOSE_SIZE, CLOSE_SIZE));
+    static SpectrumNativeWindow* from(GLFWwindow* window) {
+        return static_cast<SpectrumNativeWindow*>(
+            glfwGetWindowUserPointer(window));
     }
 
-    math::Rect resizeBox() const {
-        return math::Rect(
-            Vec(std::max(0.f, box.size.x - RESIZE_SIZE),
-                std::max(0.f, box.size.y - RESIZE_SIZE)),
-            Vec(RESIZE_SIZE, RESIZE_SIZE));
+    static void mouseButtonCallback(GLFWwindow* window, int button, int action,
+                                    int mods) {
+        SpectrumNativeWindow* native = from(window);
+        if (!native) return;
+        native->updateExternalMods(mods);
+        native->events.handleButton(native->cursor, button, action, mods);
     }
 
-    math::Rect headerBox() const {
-        return math::Rect(Vec(), Vec(box.size.x, HEADER_HEIGHT));
+    static void cursorPositionCallback(GLFWwindow* window, double x,
+                                       double y) {
+        SpectrumNativeWindow* native = from(window);
+        if (!native) return;
+        const Vec next(static_cast<float>(x), static_cast<float>(y));
+        const Vec delta = native->cursorValid ? next.minus(native->cursor)
+                                              : Vec();
+        native->cursor = next;
+        native->cursorValid = true;
+        native->updateExternalMods(native->queryMods());
+        native->events.handleHover(next, delta);
     }
 
-    void layout() {
-        if (!view) return;
-        const float width = std::max(1.f, box.size.x - 2.f * MARGIN);
-        const float height =
-            std::max(1.f, box.size.y - HEADER_HEIGHT - MARGIN);
-        view->setPosition(Vec(MARGIN, HEADER_HEIGHT));
-        view->setSize(Vec(width, height));
+    static void cursorEnterCallback(GLFWwindow* window, int entered) {
+        SpectrumNativeWindow* native = from(window);
+        if (!native) return;
+        if (!entered) {
+            native->cursorValid = false;
+            native->events.handleLeave();
+        }
+    }
+
+    static void scrollCallback(GLFWwindow* window, double x, double y) {
+        SpectrumNativeWindow* native = from(window);
+        if (!native) return;
+        native->updateExternalMods(native->queryMods());
+        Vec delta(static_cast<float>(x), static_cast<float>(y));
+#if defined ARCH_MAC
+        delta = delta.mult(10.f);
+#else
+        delta = delta.mult(50.f);
+#endif
+        native->events.handleScroll(native->cursor, delta);
+    }
+
+    static void characterCallback(GLFWwindow* window, unsigned int codepoint) {
+        SpectrumNativeWindow* native = from(window);
+        if (native)
+            native->events.handleText(native->cursor, codepoint);
+    }
+
+    static void keyCallback(GLFWwindow* window, int key, int scancode,
+                            int action, int mods) {
+        SpectrumNativeWindow* native = from(window);
+        if (!native) return;
+        native->updateExternalMods(mods);
+        if (action == GLFW_PRESS && key == GLFW_KEY_SPACE && native->module) {
+            native->module->freezeToggleRequested.store(
+                true, std::memory_order_release);
+            return;
+        }
+        if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+            return;
+        }
+        native->events.handleKey(native->cursor, key, scancode, action, mods);
+    }
+
+    int queryMods() const {
+        if (!window) return 0;
+        int mods = 0;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+            glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
+            mods |= GLFW_MOD_SHIFT;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+            glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
+            mods |= GLFW_MOD_CONTROL;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+            glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS)
+            mods |= GLFW_MOD_ALT;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
+            glfwGetKey(window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS)
+            mods |= GLFW_MOD_SUPER;
+        return mods;
+    }
+
+    void updateExternalMods(int mods) {
+        if (view && view->overlay)
+            view->overlay->externalMods = mods;
+    }
+
+    bool open() {
+        if (window || !module || !view || !view->parent || !APP ||
+            !APP->window || !APP->window->win)
+            return false;
+
+        GLFWwindow* previousContext = glfwGetCurrentContext();
+        GLFWwindow* restoreContext =
+            previousContext ? previousContext : APP->window->win;
+        glfwDefaultWindowHints();
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+        glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+#if defined ARCH_MAC
+        glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
+#endif
+        window = glfwCreateWindow(DEFAULT_WIDTH, DEFAULT_HEIGHT,
+                                  "Cella Spectrum", NULL,
+                                  APP->window->win);
+        glfwDefaultWindowHints();
+        if (!window) {
+            if (restoreContext)
+                glfwMakeContextCurrent(restoreContext);
+            return false;
+        }
+
+        glfwSetWindowUserPointer(window, this);
+        glfwSetWindowSizeLimits(window, MINIMUM_WIDTH, MINIMUM_HEIGHT,
+                                GLFW_DONT_CARE, GLFW_DONT_CARE);
+        glfwSetMouseButtonCallback(window, mouseButtonCallback);
+        glfwSetCursorPosCallback(window, cursorPositionCallback);
+        glfwSetCursorEnterCallback(window, cursorEnterCallback);
+        glfwSetScrollCallback(window, scrollCallback);
+        glfwSetCharCallback(window, characterCallback);
+        glfwSetKeyCallback(window, keyCallback);
+
+        glfwMakeContextCurrent(window);
+        glfwSwapInterval(0);
+        vg = nvgCreateGL2(NVG_ANTIALIAS);
+        if (vg) {
+            const std::string fontPath =
+                asset::system("res/fonts/DejaVuSans.ttf");
+            fontHandle =
+                nvgCreateFont(vg, "spectrum-ui", fontPath.c_str());
+        }
+        if (restoreContext)
+            glfwMakeContextCurrent(restoreContext);
+
+        if (!vg) {
+            glfwDestroyWindow(window);
+            window = NULL;
+            return false;
+        }
+
+        int rackX = 0;
+        int rackY = 0;
+        int rackWidth = 0;
+        int rackHeight = 0;
+        glfwGetWindowPos(APP->window->win, &rackX, &rackY);
+        glfwGetWindowSize(APP->window->win, &rackWidth, &rackHeight);
+        glfwSetWindowPos(
+            window, rackX + std::max(24, (rackWidth - DEFAULT_WIDTH) / 2),
+            rackY + std::max(24, (rackHeight - DEFAULT_HEIGHT) / 2));
+
+        originalParent = view->parent;
+        originalBox = view->box;
+        if (APP->event)
+            APP->event->finalizeWidget(view);
+        view->parent->removeChild(view);
+        root = new Widget;
+        root->addChild(view);
+        events.rootWidget = root;
+        if (view->bezel)
+            view->bezel->setVisible(false);
+        if (view->overlay) {
+            view->overlay->externalInput = true;
+            view->overlay->externalMods = 0;
+            view->overlay->hovered = false;
+            view->overlay->draggingTime = false;
+            view->overlay->layoutTogglePressed = false;
+        }
+        resizeView(Vec(DEFAULT_WIDTH, DEFAULT_HEIGHT));
+        glfwShowWindow(window);
+        return true;
+    }
+
+    void resizeView(const Vec& size) {
+        if (!root || !view) return;
+        root->setSize(size);
+        view->setBox(math::Rect(Vec(), size));
     }
 
     void restoreView() {
-        if (!view) return;
+        if (restored) return;
+        restored = true;
+        events.handleLeave();
+        if (root)
+            events.finalizeWidget(root);
+        events.rootWidget = NULL;
+        if (view && view->overlay) {
+            view->overlay->externalInput = false;
+            view->overlay->externalMods = 0;
+        }
+        if (view && root && view->parent == root)
+            root->removeChild(view);
         Widget* parent = originalParent.get();
-        if (!parent) return;
-        if (view->parent) view->parent->removeChild(view);
-        parent->addChild(view);
-        view->setBox(originalBox);
+        if (view && parent) {
+            parent->addChild(view);
+            view->setBox(originalBox);
+            if (view->bezel)
+                view->bezel->setVisible(
+                    !module || !module->displayOnlyModeSetting.load());
+            if (view->display)
+                view->display->setDirty();
+        }
         view = NULL;
+        delete root;
+        root = NULL;
     }
 
     void close() {
-        if (closing) return;
-        closing = true;
         restoreView();
-        requestDelete();
+        if (!window) return;
+        GLFWwindow* previousContext = glfwGetCurrentContext();
+        GLFWwindow* restoreContext =
+            previousContext ? previousContext
+                            : (APP && APP->window ? APP->window->win : NULL);
+        glfwMakeContextCurrent(window);
+        if (vg) {
+            nvgDeleteGL2(vg);
+            vg = NULL;
+        }
+        if (restoreContext == window)
+            restoreContext = APP && APP->window ? APP->window->win : NULL;
+        glfwDestroyWindow(window);
+        window = NULL;
+        if (restoreContext)
+            glfwMakeContextCurrent(restoreContext);
     }
 
-    void clampToScene() {
-        if (!APP || !APP->scene) return;
-        const Vec sceneSize = APP->scene->box.size;
-        const Vec minimumSize(
-            std::min(MINIMUM_WIDTH, std::max(sceneSize.x, 1.f)),
-            std::min(MINIMUM_HEIGHT, std::max(sceneSize.y, 1.f)));
-        const Vec maximumSize(std::max(sceneSize.x, minimumSize.x),
-                              std::max(sceneSize.y, minimumSize.y));
-        Vec size(clampValue(box.size.x, minimumSize.x, maximumSize.x),
-                 clampValue(box.size.y, minimumSize.y, maximumSize.y));
-        Vec position(
-            clampValue(box.pos.x, 0.f, std::max(0.f, sceneSize.x - size.x)),
-            clampValue(box.pos.y, 0.f, std::max(0.f, sceneSize.y - size.y)));
-        setSize(size);
-        setPosition(position);
-    }
-
-    void step() override {
-        clampToScene();
-        OpaqueWidget::step();
-    }
-
-    void onResize(const event::Resize& event) override {
-        layout();
-        OpaqueWidget::onResize(event);
-    }
-
-    void draw(const DrawArgs& args) override {
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, 0.f, 0.f, box.size.x, box.size.y, 5.f);
-        nvgFillColor(args.vg, nvgRGBA(3, 5, 8, 250));
-        nvgFill(args.vg);
-
-        nvgFontSize(args.vg, 13.f);
-        nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(args.vg, nvgRGBA(225, 232, 235, 220));
-        nvgText(args.vg, MARGIN, HEADER_HEIGHT * 0.5f, "SPECTRUM", NULL);
-        nvgFontSize(args.vg, 9.f);
-        nvgFillColor(args.vg, nvgRGBA(180, 194, 200, 150));
-        nvgText(args.vg, MARGIN + 82.f, HEADER_HEIGHT * 0.5f,
-                "SPACE TO FREEZE", NULL);
-
-        const math::Rect close = closeBox();
-        nvgBeginPath(args.vg);
-        nvgRoundedRect(args.vg, close.pos.x, close.pos.y, close.size.x,
-                       close.size.y, 3.f);
-        nvgFillColor(args.vg, nvgRGBA(255, 255, 255, 18));
-        nvgFill(args.vg);
-        nvgStrokeColor(args.vg, nvgRGBA(225, 232, 235, 175));
-        nvgStrokeWidth(args.vg, 1.2f);
-        nvgBeginPath(args.vg);
-        nvgMoveTo(args.vg, close.pos.x + 6.f, close.pos.y + 6.f);
-        nvgLineTo(args.vg, close.pos.x + close.size.x - 6.f,
-                  close.pos.y + close.size.y - 6.f);
-        nvgMoveTo(args.vg, close.pos.x + close.size.x - 6.f,
-                  close.pos.y + 6.f);
-        nvgLineTo(args.vg, close.pos.x + 6.f,
-                  close.pos.y + close.size.y - 6.f);
-        nvgStroke(args.vg);
-
-        nvgStrokeColor(args.vg, nvgRGBA(225, 232, 235, 90));
-        nvgStrokeWidth(args.vg, 1.f);
-        for (int line = 0; line < 3; ++line) {
-            const float offset = 5.f + line * 4.f;
-            nvgBeginPath(args.vg);
-            nvgMoveTo(args.vg, box.size.x - offset, box.size.y - 2.f);
-            nvgLineTo(args.vg, box.size.x - 2.f, box.size.y - offset);
-            nvgStroke(args.vg);
+    bool step() {
+        if (!window || glfwWindowShouldClose(window)) {
+            close();
+            return false;
         }
 
-        OpaqueWidget::draw(args);
-        // The view normally receives Rack's light-layer pass through its
-        // module container. This floating scene child must issue it itself.
-        Widget::drawLayer(args, 1);
-    }
+        int windowWidth = 0;
+        int windowHeight = 0;
+        int framebufferWidth = 0;
+        int framebufferHeight = 0;
+        glfwGetWindowSize(window, &windowWidth, &windowHeight);
+        glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+        if (windowWidth <= 0 || windowHeight <= 0 ||
+            framebufferWidth <= 0 || framebufferHeight <= 0)
+            return true;
 
-    void onButton(const event::Button& event) override {
-        if (event.action == GLFW_PRESS &&
-            event.button == GLFW_MOUSE_BUTTON_LEFT) {
-            if (closeBox().contains(event.pos)) {
-                close();
-                event.consume(this);
-                return;
-            }
-            if (resizeBox().contains(event.pos)) {
-                interaction = Interaction::RESIZE;
-                event.consume(this);
-                return;
-            }
-            if (headerBox().contains(event.pos)) {
-                interaction = Interaction::MOVE;
-                event.consume(this);
-                return;
-            }
+        const float pixelRatio =
+            static_cast<float>(framebufferWidth) /
+            static_cast<float>(windowWidth);
+        const Vec logicalSize(
+            framebufferWidth / std::max(pixelRatio, 1e-6f),
+            framebufferHeight / std::max(pixelRatio, 1e-6f));
+        resizeView(logicalSize);
+        root->step();
+
+        GLFWwindow* previousContext = glfwGetCurrentContext();
+        GLFWwindow* restoreContext =
+            previousContext ? previousContext
+                            : (APP && APP->window ? APP->window->win : NULL);
+        glfwMakeContextCurrent(window);
+        glViewport(0, 0, framebufferWidth, framebufferHeight);
+        glClearColor(0.003f, 0.005f, 0.008f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+                GL_STENCIL_BUFFER_BIT);
+
+        if (view && view->display)
+            view->display->renderToCurrentFramebuffer(
+                Vec(framebufferWidth, framebufferHeight));
+
+        nvgReset(vg);
+        nvgBeginFrame(vg, framebufferWidth, framebufferHeight, pixelRatio);
+        nvgScale(vg, pixelRatio, pixelRatio);
+        if (fontHandle >= 0)
+            nvgFontFaceId(vg, fontHandle);
+        if (view && view->overlay) {
+            Widget::DrawArgs args;
+            args.vg = vg;
+            args.clipBox = math::Rect(Vec(), logicalSize);
+            view->overlay->drawOverlay(args);
         }
-        OpaqueWidget::onButton(event);
-    }
-
-    void onDragMove(const event::DragMove& event) override {
-        if (event.button != GLFW_MOUSE_BUTTON_LEFT ||
-            interaction == Interaction::NONE)
-            return;
-        const float zoom = std::max(getAbsoluteZoom(), 1e-6f);
-        const Vec delta = event.mouseDelta.div(zoom);
-        if (interaction == Interaction::MOVE)
-            setPosition(box.pos.plus(delta));
-        else
-            setSize(box.size.plus(delta));
-        clampToScene();
-    }
-
-    void onDragEnd(const event::DragEnd& event) override {
-        interaction = Interaction::NONE;
-        OpaqueWidget::onDragEnd(event);
-    }
-
-    void onHoverKey(const event::HoverKey& event) override {
-        if (event.action == GLFW_PRESS) {
-            if (event.key == GLFW_KEY_SPACE && module) {
-                module->freezeToggleRequested.store(true,
-                                                    std::memory_order_release);
-                event.consume(this);
-                return;
-            }
-            if (event.key == GLFW_KEY_ESCAPE) {
-                close();
-                event.consume(this);
-                return;
-            }
-        }
-        OpaqueWidget::onHoverKey(event);
+        nvgEndFrame(vg);
+        glfwSwapBuffers(window);
+        if (restoreContext)
+            glfwMakeContextCurrent(restoreContext);
+        return true;
     }
 };
 
@@ -2221,7 +2353,8 @@ struct SpectrumWidget : ModuleWidget {
     SpectrumResizeHandle* leftHandle = NULL;
     SpectrumResizeHandle* rightHandle = NULL;
     std::vector<BottomItem> bottomItems;
-    WeakPtr<SpectrumFloatingWindow> floatingWindow;
+    std::unique_ptr<SpectrumNativeWindow> nativeWindow;
+    bool nativeWindowRequested = false;
 
     SpectrumWidget(Spectrum* module) {
         setModule(module);
@@ -2286,7 +2419,12 @@ struct SpectrumWidget : ModuleWidget {
     }
 
     ~SpectrumWidget() override {
-        if (SpectrumFloatingWindow* floating = floatingWindow.get()) floating->close();
+        nativeWindow.reset();
+    }
+
+    void onContextDestroy(const ContextDestroyEvent& event) override {
+        nativeWindow.reset();
+        ModuleWidget::onContextDestroy(event);
     }
 
     void addBottomChild(Widget* widget, int slot) {
@@ -2360,39 +2498,26 @@ struct SpectrumWidget : ModuleWidget {
             box.size.x = spectrum->panelWidth * RACK_GRID_WIDTH;
         layout();
         ModuleWidget::step();
+        if (nativeWindowRequested) {
+            nativeWindowRequested = false;
+            openNativeWindow();
+        }
+        if (nativeWindow && !nativeWindow->step())
+            nativeWindow.reset();
     }
 
-    void openFloatingWindow() {
-        if (!spectrumView || floatingWindow || !APP || !APP->scene ||
+    void openNativeWindow() {
+        if (!spectrumView || nativeWindow || !APP || !APP->scene ||
             !spectrumView->parent)
             return;
-
-        SpectrumFloatingWindow* floating = new SpectrumFloatingWindow;
-        floating->originalParent = spectrumView->parent;
-        floating->originalBox = spectrumView->box;
-        floating->module = dynamic_cast<Spectrum*>(module);
-        floating->view = spectrumView;
-        if (spectrumView->bezel)
-            spectrumView->bezel->setVisible(false);
-
-        spectrumView->parent->removeChild(spectrumView);
-        floating->addChild(spectrumView);
-
-        const Vec sceneSize = APP->scene->box.size;
-        const Vec size(
-            clampValue(sceneSize.x * 0.62f, SpectrumFloatingWindow::MINIMUM_WIDTH,
-                       std::max(SpectrumFloatingWindow::MINIMUM_WIDTH,
-                                sceneSize.x - 32.f)),
-            clampValue(sceneSize.y * 0.62f,
-                       SpectrumFloatingWindow::MINIMUM_HEIGHT,
-                       std::max(SpectrumFloatingWindow::MINIMUM_HEIGHT,
-                                sceneSize.y - 32.f)));
-        floating->setBox(math::Rect(
-            Vec(std::max(0.f, (sceneSize.x - size.x) * 0.5f),
-                std::max(0.f, (sceneSize.y - size.y) * 0.5f)),
-            size));
-        APP->scene->addChild(floating);
-        floatingWindow = floating;
+        std::unique_ptr<SpectrumNativeWindow> candidate(
+            new SpectrumNativeWindow(dynamic_cast<Spectrum*>(module),
+                                     spectrumView));
+        if (!candidate->open()) {
+            WARN("Spectrum could not create its display window");
+            return;
+        }
+        nativeWindow = std::move(candidate);
     }
 
     void appendContextMenu(Menu* menu) override {
@@ -2400,7 +2525,7 @@ struct SpectrumWidget : ModuleWidget {
         if (!spectrum) return;
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuItem("Open display window", "", [this]() {
-            openFloatingWindow();
+            nativeWindowRequested = true;
         }));
         menu->addChild(createNonClosingBoolMenuItem(
             "Display only",
