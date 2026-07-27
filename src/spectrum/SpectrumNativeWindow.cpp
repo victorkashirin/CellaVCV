@@ -121,7 +121,6 @@ struct SpectrumNativeWindow::Impl {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
             return;
         }
-        native->events.handleKey(native->cursor, key, scancode, action, mods);
     }
 
     int queryModifiers() const {
@@ -202,8 +201,6 @@ struct SpectrumNativeWindow::Impl {
 
         originalParent = view->parent;
         originalBox = view->box;
-        if (APP->event)
-            APP->event->finalizeWidget(view);
         view->parent->removeChild(view);
         root = new rack::widget::Widget;
         root->addChild(view);
@@ -213,6 +210,18 @@ struct SpectrumNativeWindow::Impl {
         resizeView(rack::math::Vec(DEFAULT_WIDTH, DEFAULT_HEIGHT));
         glfwShowWindow(window);
         return true;
+    }
+
+    void resetEventState() {
+        events.rootWidget = NULL;
+        events.hoveredWidget = NULL;
+        events.draggedWidget = NULL;
+        events.dragButton = 0;
+        events.dragHoveredWidget = NULL;
+        events.selectedWidget = NULL;
+        events.lastClickTime = -INFINITY;
+        events.lastClickedWidget = NULL;
+        events.heldKeys.clear();
     }
 
     void resizeView(const rack::math::Vec& size) {
@@ -225,9 +234,7 @@ struct SpectrumNativeWindow::Impl {
         if (!attached) return;
         attached = false;
         events.handleLeave();
-        if (root)
-            events.finalizeWidget(root);
-        events.rootWidget = NULL;
+        resetEventState();
         if (view && root && view->parent == root)
             root->removeChild(view);
         rack::widget::Widget* parent = originalParent.get();
