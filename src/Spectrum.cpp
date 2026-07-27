@@ -24,8 +24,10 @@ constexpr float DISPLAY_X = 0.f;
 constexpr float DISPLAY_Y = 26.f;
 constexpr float DISPLAY_WIDTH = 360.f;
 constexpr float DISPLAY_HEIGHT = 280.f;
-constexpr float DISPLAY_ONLY_PORT_RAIL_WIDTH = 30.f;
+constexpr float DISPLAY_ONLY_CONTROL_RAIL_WIDTH = 30.f;
 constexpr float DISPLAY_ONLY_VERTICAL_INSET = 2.f;
+constexpr float DISPLAY_ONLY_CONTROL_TOP = 35.f;
+constexpr int DISPLAY_ONLY_CONTROL_COUNT = 8;
 constexpr int DEFAULT_PANEL_WIDTH_HP = 24;
 constexpr int MIN_PANEL_WIDTH_HP = 24;
 constexpr int MAX_PANEL_WIDTH_HP = 120;
@@ -2389,7 +2391,7 @@ struct SpectrumPanelArtwork : Widget {
             }
             if (displayOnly) {
                 if (isHeaderRule(shape, svgSize)) {
-                    drawVerticalShadowLine(args.vg, DISPLAY_ONLY_PORT_RAIL_WIDTH - 0.5f, box.size.y);
+                    drawVerticalShadowLine(args.vg, DISPLAY_ONLY_CONTROL_RAIL_WIDTH - 0.5f, box.size.y);
                 }
                 nvgRestore(args.vg);
                 continue;
@@ -2593,14 +2595,15 @@ struct SpectrumWidget : ModuleWidget {
     struct BottomItem {
         Widget* widget = NULL;
         int slot = 0;
-        bool port = false;
+        int displayOnlySlot = -1;
 
-        BottomItem(Widget* widget, int slot, bool port) : widget(widget), slot(slot), port(port) {}
+        BottomItem(Widget* widget, int slot, int displayOnlySlot)
+            : widget(widget), slot(slot), displayOnlySlot(displayOnlySlot) {}
     };
 
     SpectrumPanel* spectrumPanel = NULL;
     SpectrumView* spectrumView = NULL;
-    RoundSmallBlackKnob* historySpeedKnob = NULL;
+    Trimpot* historySpeedKnob = NULL;
     SpectrumResizeHandle* leftHandle = NULL;
     SpectrumResizeHandle* rightHandle = NULL;
     std::vector<BottomItem> bottomItems;
@@ -2618,17 +2621,17 @@ struct SpectrumWidget : ModuleWidget {
         addChild(spectrumView);
 
         constexpr float y = 329.5f;
-        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::LEFT_INPUT), 0);
-        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::RIGHT_INPUT), 1);
-        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::MARK_INPUT), 2);
-        addBottomParam(createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3);
-        historySpeedKnob =
-            createParamCentered<RoundSmallBlackKnob>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
-        addBottomParam(historySpeedKnob, 4);
-        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::FREEZE_INPUT), 5);
-        addBottomParam(createParamCentered<LEDButton>(Vec(0.f, y), module, Spectrum::FREEZE_PARAM), 6);
-        addBottomChild(createLightCentered<MediumLight<YellowLight>>(Vec(0.f, y), module, Spectrum::FREEZE_LIGHT), 6);
-        addBottomParam(createParamCentered<VCVButton>(Vec(0.f, y), module, Spectrum::CLEAR_PARAM), 7);
+        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::LEFT_INPUT), 0, 0);
+        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::RIGHT_INPUT), 1, 1);
+        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::MARK_INPUT), 2, 2);
+        addBottomParam(createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3, 3);
+        historySpeedKnob = createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
+        addBottomParam(historySpeedKnob, 4, 4);
+        addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::FREEZE_INPUT), 5, 5);
+        addBottomParam(createParamCentered<LEDButton>(Vec(0.f, y), module, Spectrum::FREEZE_PARAM), 6, 6);
+        addBottomChild(createLightCentered<MediumLight<YellowLight>>(Vec(0.f, y), module, Spectrum::FREEZE_LIGHT), 6,
+                       6);
+        addBottomParam(createParamCentered<VCVButton>(Vec(0.f, y), module, Spectrum::CLEAR_PARAM), 7, 7);
 
         leftHandle = new SpectrumResizeHandle;
         leftHandle->module = module;
@@ -2653,19 +2656,19 @@ struct SpectrumWidget : ModuleWidget {
         ModuleWidget::onContextDestroy(event);
     }
 
-    void addBottomChild(Widget* widget, int slot) {
+    void addBottomChild(Widget* widget, int slot, int displayOnlySlot = -1) {
         addChild(widget);
-        bottomItems.push_back({widget, slot, false});
+        bottomItems.push_back({widget, slot, displayOnlySlot});
     }
 
-    void addBottomInput(PortWidget* widget, int slot) {
+    void addBottomInput(PortWidget* widget, int slot, int displayOnlySlot = -1) {
         addInput(widget);
-        bottomItems.push_back({widget, slot, true});
+        bottomItems.push_back({widget, slot, displayOnlySlot});
     }
 
-    void addBottomParam(ParamWidget* widget, int slot) {
+    void addBottomParam(ParamWidget* widget, int slot, int displayOnlySlot = -1) {
         addParam(widget);
-        bottomItems.push_back({widget, slot, false});
+        bottomItems.push_back({widget, slot, displayOnlySlot});
     }
 
     void layout() {
@@ -2679,24 +2682,25 @@ struct SpectrumWidget : ModuleWidget {
             if (spectrumView->parent == this) {
                 if (spectrumView->bezel) spectrumView->bezel->setVisible(!displayOnly);
                 if (displayOnly) {
-                    spectrumView->setBox(math::Rect(Vec(DISPLAY_ONLY_PORT_RAIL_WIDTH, DISPLAY_ONLY_VERTICAL_INSET),
-                                                    Vec(std::max(1.f, box.size.x - DISPLAY_ONLY_PORT_RAIL_WIDTH),
+                    spectrumView->setBox(math::Rect(Vec(DISPLAY_ONLY_CONTROL_RAIL_WIDTH, DISPLAY_ONLY_VERTICAL_INSET),
+                                                    Vec(std::max(1.f, box.size.x - DISPLAY_ONLY_CONTROL_RAIL_WIDTH),
                                                         RACK_GRID_HEIGHT - 2.f * DISPLAY_ONLY_VERTICAL_INSET)));
                 } else {
                     spectrumView->setBox(math::Rect(Vec(DISPLAY_X, DISPLAY_Y), Vec(box.size.x, DISPLAY_HEIGHT)));
                 }
             }
         }
-        int portIndex = 0;
         for (const BottomItem& item : bottomItems) {
             if (!item.widget) continue;
-            item.widget->setVisible(!displayOnly || item.port);
+            item.widget->setVisible(!displayOnly || item.displayOnlySlot >= 0);
             float centerX = 22.5f + 45.f * item.slot;
             float centerY = 329.5f;
-            if (displayOnly && item.port) {
-                centerX = DISPLAY_ONLY_PORT_RAIL_WIDTH * 0.5f;
-                centerY = 67.f + 82.f * portIndex;
-                ++portIndex;
+            if (displayOnly && item.displayOnlySlot >= 0) {
+                centerX = DISPLAY_ONLY_CONTROL_RAIL_WIDTH * 0.5f;
+                const float position = static_cast<float>(item.displayOnlySlot) /
+                                       static_cast<float>(DISPLAY_ONLY_CONTROL_COUNT - 1);
+                centerY = DISPLAY_ONLY_CONTROL_TOP +
+                          position * (RACK_GRID_HEIGHT - 2.f * DISPLAY_ONLY_CONTROL_TOP);
             }
             item.widget->box.pos.x = centerX - item.widget->box.size.x * 0.5f;
             item.widget->box.pos.y = centerY - item.widget->box.size.y * 0.5f;
