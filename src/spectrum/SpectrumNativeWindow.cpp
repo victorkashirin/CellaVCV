@@ -108,13 +108,6 @@ struct SpectrumNativeWindow::Impl {
         native->events.handleScroll(native->cursor, delta);
     }
 
-    static void characterCallback(GLFWwindow* window,
-                                  unsigned int codepoint) {
-        Impl* native = from(window);
-        if (native)
-            native->events.handleText(native->cursor, codepoint);
-    }
-
     static void keyCallback(GLFWwindow* window, int key, int scancode,
                             int action, int mods) {
         Impl* native = from(window);
@@ -177,7 +170,6 @@ struct SpectrumNativeWindow::Impl {
         glfwSetCursorPosCallback(window, cursorPositionCallback);
         glfwSetCursorEnterCallback(window, cursorEnterCallback);
         glfwSetScrollCallback(window, scrollCallback);
-        glfwSetCharCallback(window, characterCallback);
         glfwSetKeyCallback(window, keyCallback);
 
         {
