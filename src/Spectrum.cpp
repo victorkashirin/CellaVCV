@@ -2739,6 +2739,14 @@ struct SpectrumWidget : ModuleWidget {
         spectrum->nativeWindowPositionValidSetting.store(geometry.positionValid);
     }
 
+    void closeNativeWindow() {
+        Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
+        nativeWindowRequested = false;
+        saveNativeWindowGeometry();
+        nativeWindow.reset();
+        if (spectrum) spectrum->nativeWindowOpenSetting.store(false);
+    }
+
     void openNativeWindow() {
         Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
         if (!spectrum || !spectrumView || nativeWindow || !APP || !APP->scene || !spectrumView->parent) return;
@@ -2763,7 +2771,15 @@ struct SpectrumWidget : ModuleWidget {
         Spectrum* spectrum = dynamic_cast<Spectrum*>(module);
         if (!spectrum) return;
         menu->addChild(new MenuSeparator);
-        menu->addChild(createMenuItem("Open display window", "", [this]() { nativeWindowRequested = true; }));
+        const bool displayWindowOpen =
+            nativeWindow || nativeWindowRequested || spectrum->nativeWindowOpenSetting.load();
+        menu->addChild(createMenuItem(displayWindowOpen ? "Close display window" : "Open display window", "",
+                                      [this, displayWindowOpen]() {
+                                          if (displayWindowOpen)
+                                              closeNativeWindow();
+                                          else
+                                              nativeWindowRequested = true;
+                                      }));
         menu->addChild(createNonClosingBoolMenuItem(
             "Display only", [=]() { return spectrum->displayOnlyModeSetting.load(); },
             [=](bool value) { spectrum->displayOnlyModeSetting.store(value); }));
