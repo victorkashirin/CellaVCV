@@ -3,7 +3,7 @@
 ### 2.11.1 (2026-07-26)
 
 Updates:
-* Spectrum - make the analyser resizable, add display only mode and add floating window support; add piano roll scale.
+* Spectrum - make the analyser resizable, add compact mode and floating window support; add piano roll scale.
 
 ### 2.11.0 (2026-07-25)
 

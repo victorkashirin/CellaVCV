@@ -2785,7 +2785,7 @@ struct SpectrumWidget : ModuleWidget {
                                               nativeWindowRequested = true;
                                       }));
         menu->addChild(createNonClosingBoolMenuItem(
-            "Display only", [=]() { return spectrum->displayOnlyModeSetting.load(); },
+            "Compact mode", [=]() { return spectrum->displayOnlyModeSetting.load(); },
             [=](bool value) { spectrum->displayOnlyModeSetting.store(value); }));
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("Analysis"));
