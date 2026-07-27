@@ -2599,14 +2599,16 @@ struct SpectrumWidget : ModuleWidget {
         Widget* widget = NULL;
         int slot = 0;
         int displayOnlySlot = -1;
+        bool compactOnly = false;
 
-        BottomItem(Widget* widget, int slot, int displayOnlySlot)
-            : widget(widget), slot(slot), displayOnlySlot(displayOnlySlot) {}
+        BottomItem(Widget* widget, int slot, int displayOnlySlot, bool compactOnly)
+            : widget(widget), slot(slot), displayOnlySlot(displayOnlySlot), compactOnly(compactOnly) {}
     };
 
     SpectrumPanel* spectrumPanel = NULL;
     SpectrumView* spectrumView = NULL;
-    Trimpot* historySpeedKnob = NULL;
+    RoundBlackKnob* historySpeedKnob = NULL;
+    Trimpot* compactHistorySpeedKnob = NULL;
     SpectrumResizeHandle* leftHandle = NULL;
     SpectrumResizeHandle* rightHandle = NULL;
     std::vector<BottomItem> bottomItems;
@@ -2627,9 +2629,12 @@ struct SpectrumWidget : ModuleWidget {
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::LEFT_INPUT), 0, 0);
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::RIGHT_INPUT), 1, 1);
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::MARK_INPUT), 2, 2);
-        addBottomParam(createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3, 3);
-        historySpeedKnob = createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
-        addBottomParam(historySpeedKnob, 4, 4);
+        addBottomParam(createParamCentered<RoundBlackKnob>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3);
+        addBottomParam(createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::RANGE_PARAM), 3, 3, true);
+        historySpeedKnob = createParamCentered<RoundBlackKnob>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
+        addBottomParam(historySpeedKnob, 4);
+        compactHistorySpeedKnob = createParamCentered<Trimpot>(Vec(0.f, y), module, Spectrum::SPEED_PARAM);
+        addBottomParam(compactHistorySpeedKnob, 4, 4, true);
         addBottomInput(createInputCentered<ThemedPJ301MPort>(Vec(0.f, y), module, Spectrum::FREEZE_INPUT), 5, 5);
         addBottomParam(createParamCentered<LEDButton>(Vec(0.f, y), module, Spectrum::FREEZE_PARAM), 6, 6);
         addBottomChild(createLightCentered<MediumLight<YellowLight>>(Vec(0.f, y), module, Spectrum::FREEZE_LIGHT), 6,
@@ -2661,17 +2666,17 @@ struct SpectrumWidget : ModuleWidget {
 
     void addBottomChild(Widget* widget, int slot, int displayOnlySlot = -1) {
         addChild(widget);
-        bottomItems.push_back({widget, slot, displayOnlySlot});
+        bottomItems.push_back({widget, slot, displayOnlySlot, false});
     }
 
     void addBottomInput(PortWidget* widget, int slot, int displayOnlySlot = -1) {
         addInput(widget);
-        bottomItems.push_back({widget, slot, displayOnlySlot});
+        bottomItems.push_back({widget, slot, displayOnlySlot, false});
     }
 
-    void addBottomParam(ParamWidget* widget, int slot, int displayOnlySlot = -1) {
+    void addBottomParam(ParamWidget* widget, int slot, int displayOnlySlot = -1, bool compactOnly = false) {
         addParam(widget);
-        bottomItems.push_back({widget, slot, displayOnlySlot});
+        bottomItems.push_back({widget, slot, displayOnlySlot, compactOnly});
     }
 
     void layout() {
@@ -2695,7 +2700,7 @@ struct SpectrumWidget : ModuleWidget {
         }
         for (const BottomItem& item : bottomItems) {
             if (!item.widget) continue;
-            item.widget->setVisible(!displayOnly || item.displayOnlySlot >= 0);
+            item.widget->setVisible(item.compactOnly ? displayOnly : (!displayOnly || item.displayOnlySlot >= 0));
             float centerX = 22.5f + 45.f * item.slot;
             float centerY = 329.5f;
             if (displayOnly && item.displayOnlySlot >= 0) {
@@ -2936,6 +2941,7 @@ struct SpectrumWidget : ModuleWidget {
                 if (historySpeedKnob) {
                     ChangeEvent event;
                     historySpeedKnob->onChange(event);
+                    if (compactHistorySpeedKnob) compactHistorySpeedKnob->onChange(event);
                 }
             }));
     }
