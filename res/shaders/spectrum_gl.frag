@@ -247,9 +247,15 @@ void main() {
     float frequency = mix(uView.x, uView.y, logical.x);
     float valid = 0.0;
     float encoded = 0.0;
-    if (uPrefilterMix < 1.0)
+    if (uPrefilterMix < 1.0) {
+        // Hold the newest available row while the live presentation cursor
+        // waits for the next analyzer row. Without this clamp, the small
+        // negative-age interval appears as a changing gap at the incoming
+        // edge.
+        float directAge = max(logical.y - uLivePhase, 0.0);
         encoded = smoothHistory(
-            frequency, logical.y - uLivePhase, valid);
+            frequency, directAge, valid);
+    }
     if (uPrefilterMix > 0.0) {
         float prefilteredValid;
         float prefiltered = prefilteredHistory(
