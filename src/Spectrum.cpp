@@ -645,7 +645,10 @@ struct SpectrumRenderer {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                // Time rows are wrapped explicitly in the shader. Clamping
+                // here avoids driver-dependent sampling at the NPOT texture
+                // seam, particularly in legacy Windows OpenGL contexts.
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             } catch (const std::exception& exception) {
                 WARN("Spectrum shader resources could not be loaded: %s", exception.what());
                 return false;

@@ -54,6 +54,13 @@ float traceAge(float db) {
     return TRACE_EDGE_INSET + level * (TRACE_DEPTH - 2.0 * TRACE_EDGE_INSET);
 }
 
+float wrapRow(float row, float rows) {
+    // All callers provide a value in [0, 2 * rows), so one subtraction
+    // performs an exact circular wrap without relying on driver-specific
+    // floating-point mod() behavior at the texture seam.
+    return row >= rows ? row - rows : row;
+}
+
 vec2 logicalCoordinates(vec2 uv) {
     if (uFlow == 0) return vec2(uv.x, uv.y);
     if (uFlow == 1) return vec2(uv.x, 1.0 - uv.y);
@@ -104,8 +111,8 @@ float historyCell(float frequency, float lookupAge, out float valid) {
     valid = 1.0;
     float ordered = clamp(lookup.r, 0.0, uRows - 1.0);
     float physical =
-        mod(uOldestPhysical + floor(ordered), uRows);
-    float nextPhysical = mod(physical + 1.0, uRows);
+        wrapRow(uOldestPhysical + floor(ordered), uRows);
+    float nextPhysical = wrapRow(physical + 1.0, uRows);
     float timeFraction = fract(ordered);
     float cell = clamp(floor(frequency * CELLS), 0.0, CELLS - 1.0);
     float older = packedHistoryCell(cell, physical);
@@ -210,11 +217,11 @@ float prefilteredHistory(float frequency, float age,
         min(lowerRow + 1.0, uPrefilterRows - 1.0);
     float fraction = logicalRow - lowerRow;
     float lowerPhysical =
-        mod(uPrefilterTimeOrigin + lowerRow,
-            uPrefilterRows);
+        wrapRow(uPrefilterTimeOrigin + lowerRow,
+                uPrefilterRows);
     float upperPhysical =
-        mod(uPrefilterTimeOrigin + upperRow,
-            uPrefilterRows);
+        wrapRow(uPrefilterTimeOrigin + upperRow,
+                uPrefilterRows);
     vec2 lowerSample =
         texture2D(uPrefilter,
                   vec2(clamp(frequency, 0.0, 1.0),
@@ -240,16 +247,9 @@ void main() {
     float frequency = mix(uView.x, uView.y, logical.x);
     float valid = 0.0;
     float encoded = 0.0;
-    if (uPrefilterMix < 1.0) {
-        // Between analyzer rows the presentation cursor can legitimately
-        // reach the next-row boundary before that row is visible to the UI.
-        // Hold the newest available row there instead of exposing an invalid
-        // negative-age strip. The cached reconstruction already has the same
-        // edge-clamping behavior.
-        float directAge = max(logical.y - uLivePhase, 0.0);
+    if (uPrefilterMix < 1.0)
         encoded = smoothHistory(
-            frequency, directAge, valid);
-    }
+            frequency, logical.y - uLivePhase, valid);
     if (uPrefilterMix > 0.0) {
         float prefilteredValid;
         float prefiltered = prefilteredHistory(
